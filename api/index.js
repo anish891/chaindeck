@@ -1,19 +1,19 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env.local') });
 const express = require('express');
+const { securityHeaders, rateLimit } = require('./security');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Serve static frontend files
+app.disable('x-powered-by'); // don't advertise the framework
+app.use(securityHeaders);
+
+// Serve static frontend files (same origin as the API, so no CORS is needed or allowed)
 app.use(express.static(path.join(__dirname, '../public')));
 
-// CORS headers for frontend
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
-  next();
-});
+// Per-IP ceiling for all API calls: generous for a dashboard polling every few seconds, tight for abuse.
+app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 240, name: 'api' }));
 
 // Mount API routes
 const apiRoutes = require('./routes');

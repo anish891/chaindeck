@@ -2,6 +2,7 @@ import { initAlerts, processAlerts, toggleAlertsDrawer, alertsEnabled } from './
 import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData } from './api-client.js';
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
+import { escapeHtml } from './ui-utils.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart } from './charts.js';
 
 let currentData = null;
@@ -277,7 +278,7 @@ export function renderAll() {
   const sel = document.getElementById('expirySelect');
   if (sel && (sel.options.length <= 1 || sel.options[0].value === '')) {
     sel.innerHTML = d.allExpiries.map(e =>
-      `<option value="${e}" ${e === d.expiry ? 'selected' : ''}>${e}</option>`
+      `<option value="${escapeHtml(e)}" ${e === d.expiry ? 'selected' : ''}>${escapeHtml(e)}</option>`
     ).join('');
   }
   const expLabel = document.getElementById('expiryLabel');
@@ -745,7 +746,7 @@ function renderFlowFeed(d) {
       const glyph = s.type === 'PUT_UNWINDING' ? 'alert-triangle' : s.type === 'CALL_COVERING' ? 'rocket' : 'zap';
       combinedAlerts.push(`
         <span class="flow-chip" style="background: ${bg}; color: ${color}; border: 1px solid ${border}; border-radius: 4px; padding: 2px 8px; white-space: nowrap; font-weight: 600;">
-          ${icon(glyph)}${s.summary}
+          ${icon(glyph)}${escapeHtml(s.summary)}
         </span>
       `);
     });
@@ -754,7 +755,7 @@ function renderFlowFeed(d) {
       d.unusualActivity.forEach(a => {
         combinedAlerts.push(`
           <span class="flow-chip" style="background: rgba(245,158,11,0.15); color: var(--warn); border: 1px solid rgba(245,158,11,0.3); border-radius: 4px; padding: 2px 8px; white-space: nowrap; font-weight: 600;">
-            ${icon(a.intensity === 'CRITICAL' ? 'zap' : 'flame')}${a.summary}
+            ${icon(a.intensity === 'CRITICAL' ? 'zap' : 'flame')}${escapeHtml(a.summary)}
           </span>
         `);
       });
@@ -775,18 +776,18 @@ export async function fetchSimilarSessions() {
     const container = document.getElementById('similarSessionsList');
     if (!container) return;
     if (!topMatches || topMatches.length === 0) {
-      container.innerHTML = `<div style="color:var(--muted); text-align:center; padding:10px;">${reason || 'No matching sessions'}</div>`;
+      container.innerHTML = `<div style="color:var(--muted); text-align:center; padding:10px;">${escapeHtml(reason || 'No matching sessions')}</div>`;
       return;
     }
 
     container.innerHTML = topMatches.map(m => `
       <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); padding:4px 8px; border-radius:4px;">
         <div>
-          <span style="font-weight:600;">${m.date}</span>
-          <span style="color:var(--muted); font-size:9px; margin-left:4px;">(PCR ${m.closingPcr.toFixed(2)})</span>
+          <span style="font-weight:600;">${escapeHtml(m.date)}</span>
+          <span style="color:var(--muted); font-size:9px; margin-left:4px;">(PCR ${Number(m.closingPcr).toFixed(2)})</span>
         </div>
         <div style="font-weight:600;" class="${m.similarityPct > 90 ? 'bull' : m.similarityPct > 75 ? 'acc' : 'warn'}">
-          ${m.similarityPct}% match
+          ${Number(m.similarityPct)}% match
         </div>
       </div>
     `).join('');
@@ -854,21 +855,21 @@ export function renderTable() {
 
     const flashCls = prevData ? (cChg > (prevCE.changeinOpenInterest || 0) ? 'flash-bull' : '') : '';
 
-    const cAnomalyHtml = ce.anomaly && ce.anomaly.isAnomaly ? `<span class="anomaly-badge" title="Z-Score: ${ce.anomaly.zScore}">${icon('flame')}z=${ce.anomaly.zScore}</span>` : '';
-    const pAnomalyHtml = pe.anomaly && pe.anomaly.isAnomaly ? `<span class="anomaly-badge" title="Z-Score: ${pe.anomaly.zScore}">${icon('flame')}z=${pe.anomaly.zScore}</span>` : '';
+    const cAnomalyHtml = ce.anomaly && ce.anomaly.isAnomaly ? `<span class="anomaly-badge" title="Z-Score: ${escapeHtml(ce.anomaly.zScore)}">${icon('flame')}z=${escapeHtml(ce.anomaly.zScore)}</span>` : '';
+    const pAnomalyHtml = pe.anomaly && pe.anomaly.isAnomaly ? `<span class="anomaly-badge" title="Z-Score: ${escapeHtml(pe.anomaly.zScore)}">${icon('flame')}z=${escapeHtml(pe.anomaly.zScore)}</span>` : '';
 
-    const cFlowHtml = ce.unusualFlow ? `<span class="anomaly-badge" style="background:rgba(239,68,68,0.2); color:#f87171; border-color:rgba(239,68,68,0.4);" title="${ce.unusualFlow.summary}">${icon('zap')}${ce.unusualFlow.volRatio}x Vol</span>` : '';
-    const pFlowHtml = pe.unusualFlow ? `<span class="anomaly-badge" style="background:rgba(16,185,129,0.2); color:#34d399; border-color:rgba(16,185,129,0.4);" title="${pe.unusualFlow.summary}">${icon('zap')}${pe.unusualFlow.volRatio}x Vol</span>` : '';
+    const cFlowHtml = ce.unusualFlow ? `<span class="anomaly-badge" style="background:rgba(239,68,68,0.2); color:#f87171; border-color:rgba(239,68,68,0.4);" title="${escapeHtml(ce.unusualFlow.summary)}">${icon('zap')}${escapeHtml(ce.unusualFlow.volRatio)}x Vol</span>` : '';
+    const pFlowHtml = pe.unusualFlow ? `<span class="anomaly-badge" style="background:rgba(16,185,129,0.2); color:#34d399; border-color:rgba(16,185,129,0.4);" title="${escapeHtml(pe.unusualFlow.summary)}">${icon('zap')}${escapeHtml(pe.unusualFlow.volRatio)}x Vol</span>` : '';
 
     const cGreeks = ce.greeks || {};
     const pGreeks = pe.greeks || {};
 
     const cGreeksTitle = cGreeks.delta !== undefined
-      ? `Call Greeks:\nDelta (Δ): ${cGreeks.delta}\nGamma (Γ): ${cGreeks.gamma}\nVega (V): ₹${cGreeks.vega} / 1% IV\nTheta (Θ): ₹${cGreeks.theta} / day`
+      ? escapeHtml(`Call Greeks:\nDelta (Δ): ${cGreeks.delta}\nGamma (Γ): ${cGreeks.gamma}\nVega (V): ₹${cGreeks.vega} / 1% IV\nTheta (Θ): ₹${cGreeks.theta} / day`)
       : '';
 
     const pGreeksTitle = pGreeks.delta !== undefined
-      ? `Put Greeks:\nDelta (Δ): ${pGreeks.delta}\nGamma (Γ): ${pGreeks.gamma}\nVega (V): ₹${pGreeks.vega} / 1% IV\nTheta (Θ): ₹${pGreeks.theta} / day`
+      ? escapeHtml(`Put Greeks:\nDelta (Δ): ${pGreeks.delta}\nGamma (Γ): ${pGreeks.gamma}\nVega (V): ₹${pGreeks.vega} / 1% IV\nTheta (Θ): ₹${pGreeks.theta} / day`)
       : '';
 
     const cGreeksClass = window.showGreeks ? '' : 'hidden-greeks';
@@ -1124,7 +1125,8 @@ export function exportCSV() {
       pe.openInterest || 0,
       pe.changeinOpenInterest || 0
     ];
-    csvRows.push(row.join(','));
+    // Numbers only: a spreadsheet would execute a text cell starting with = + - or @ as a formula.
+    csvRows.push(row.map(v => (Number.isFinite(Number(v)) ? Number(v) : 0)).join(','));
   });
 
   const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -1136,6 +1138,18 @@ export function exportCSV() {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+/** Load a same-origin script once; rejects (instead of throwing inside a callback) so callers can catch it. */
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing && existing.dataset.loaded) { resolve(); return; }
+    const script = existing || document.createElement('script');
+    script.onload = () => { script.dataset.loaded = '1'; resolve(); };
+    script.onerror = () => reject(new Error(`Failed to load ${src}`));
+    if (!existing) { script.src = src; document.head.appendChild(script); }
+  });
 }
 
 export async function takeSnapshot() {
@@ -1160,26 +1174,13 @@ export async function takeSnapshot() {
   };
 
   try {
-    if (typeof window.html2canvas === 'undefined') {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-      script.onload = async () => {
-        await captureWindow();
-        if (btn) btn.innerHTML = originalHtml;
-      };
-      script.onerror = () => {
-        alert('Failed to load screenshot library.');
-        if (btn) btn.innerHTML = originalHtml;
-      };
-      document.head.appendChild(script);
-    } else {
-      await captureWindow();
-      if (btn) btn.innerHTML = originalHtml;
-    }
+    if (typeof window.html2canvas === 'undefined') await loadScript('/vendor/html2canvas.min.js');
+    await captureWindow();
   } catch (err) {
     console.error('Snapshot failed:', err);
     alert('Failed to capture snapshot.');
-    if (btn) btn.innerHTML = originalHtml;
+  } finally {
+    if (btn) btn.innerHTML = originalHtml; // always reset the button, whatever happened
   }
 }
 
@@ -1220,31 +1221,12 @@ export async function exportPDF() {
   };
 
   try {
-    if (typeof window.html2pdf === 'undefined') {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.onload = async () => {
-        try {
-          await generatePDF();
-        } catch (e) {
-          console.error('PDF generation error:', e);
-          alert('Failed to generate PDF document.');
-        } finally {
-          if (btn) btn.innerHTML = originalHtml;
-        }
-      };
-      script.onerror = () => {
-        alert('Failed to load PDF export library.');
-        if (btn) btn.innerHTML = originalHtml;
-      };
-      document.head.appendChild(script);
-    } else {
-      await generatePDF();
-      if (btn) btn.innerHTML = originalHtml;
-    }
+    if (typeof window.html2pdf === 'undefined') await loadScript('/vendor/html2pdf.bundle.min.js');
+    await generatePDF();
   } catch (err) {
     console.error('PDF export failed:', err);
     alert('Failed to export PDF.');
+  } finally {
     if (btn) btn.innerHTML = originalHtml;
   }
 }
@@ -1278,7 +1260,7 @@ function buildPdfReportElement(d) {
           Nifty <span style="color: #2563eb;">OI</span> Analytics Report
         </h1>
         <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
-          Generated: <strong>${dateStr} IST</strong> | Expiry: <strong>${d.expiry || 'n/a'}</strong>
+          Generated: <strong>${dateStr} IST</strong> | Expiry: <strong>${escapeHtml(d.expiry || 'n/a')}</strong>
         </div>
       </div>
       <div style="text-align: right;">
@@ -1291,8 +1273,8 @@ function buildPdfReportElement(d) {
     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
       <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px;">
         <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Market Regime</div>
-        <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 2px;">${cr.regimeLabel || 'n/a'}</div>
-        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Bias: <strong style="color: #2563eb;">${(cr.tacticalBias || 'n/a').replace('_', ' ')}</strong></div>
+        <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 2px;">${escapeHtml(cr.regimeLabel || 'n/a')}</div>
+        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Bias: <strong style="color: #2563eb;">${escapeHtml((cr.tacticalBias || 'n/a').replace('_', ' '))}</strong></div>
       </div>
 
       <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px;">
@@ -1324,7 +1306,7 @@ function buildPdfReportElement(d) {
         <div style="font-size: 11px; font-weight: 700; color: #2563eb; margin-bottom: 6px; text-transform: uppercase;">Central Pivot Range (CPR)</div>
         <div style="font-size: 11px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
           <div>Pivot (P): <strong>${d.cpr ? fmt(d.cpr.pivot) : 'n/a'}</strong></div>
-          <div>CPR Type: <strong>${d.cpr ? d.cpr.type : 'n/a'}</strong></div>
+          <div>CPR Type: <strong>${d.cpr ? escapeHtml(d.cpr.type) : 'n/a'}</strong></div>
           <div>TC: <strong>${d.cpr ? fmt(d.cpr.tc) : 'n/a'}</strong></div>
           <div>BC: <strong>${d.cpr ? fmt(d.cpr.bc) : 'n/a'}</strong></div>
           <div>R1: <strong style="color:#dc2626;">${d.cpr ? fmt(d.cpr.r1) : 'n/a'}</strong></div>
@@ -1336,7 +1318,7 @@ function buildPdfReportElement(d) {
         <div style="font-size: 11px; font-weight: 700; color: #2563eb; margin-bottom: 6px; text-transform: uppercase;">Gamma Exposure (GEX)</div>
         <div style="font-size: 11px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
           <div>Net GEX: <strong>${gex.netGexCr !== undefined ? gex.netGexCr + ' Cr' : 'n/a'}</strong></div>
-          <div>Regime: <strong>${gex.gexRegime || 'n/a'}</strong></div>
+          <div>Regime: <strong>${escapeHtml(gex.gexRegime || 'n/a')}</strong></div>
           <div>Zero-Gamma: <strong style="color:#d97706;">${gex.zeroGammaLevel ? fmt(gex.zeroGammaLevel) : 'n/a'}</strong></div>
           <div>Flip Dist: <strong>${gex.distToZeroGamma !== undefined ? gex.distToZeroGamma + ' pts' : 'n/a'}</strong></div>
           <div>Call GEX: <strong style="color:#dc2626;">${gex.callGexCr !== undefined ? gex.callGexCr + ' Cr' : 'n/a'}</strong></div>
@@ -1545,21 +1527,41 @@ function openStrike(strike) {
   openStrikePanel({ expiry: d.expiry, strike, live: d.strikes.find(s => s.strike === strike), spot: d.spot });
 }
 
-// Global window exposure for inline event handlers
-window.fetchNow = fetchNow;
-window.onIntervalChange = onIntervalChange;
-window.onExpiryChange = onExpiryChange;
-window.onTimelineMetricChange = onTimelineMetricChange;
-window.onOiChartModeChange = onOiChartModeChange;
-window.toggleAlertsDrawer = toggleAlertsDrawer;
-window.onThemeSelectChange = onThemeSelectChange;
-window.sortTable = sortTable;
-window.toggleGreeksView = toggleGreeksView;
-window.exportCSV = exportCSV;
-window.exportPDF = exportPDF;
-window.takeSnapshot = takeSnapshot;
-window.toggleExportMenu = toggleExportMenu;
-window.closeExportMenu = closeExportMenu;
+// Page actions wired through data-click / data-change attributes (no inline handlers, so the CSP can
+// forbid inline script). A value is a space-separated list of actions; "name:arg" passes an argument.
+const ACTIONS = {
+  fetchNow: () => fetchNow(),
+  toggleAlertsDrawer: () => toggleAlertsDrawer(),
+  toggleExportMenu,
+  closeExportMenu,
+  exportCSV,
+  exportPDF,
+  takeSnapshot,
+  sortTable,
+  onThemeSelectChange,
+  onExpiryChange,
+  onIntervalChange,
+  onOiChartModeChange,
+  onTimelineMetricChange,
+  toggleGreeksView
+};
+
+function runActions(spec, event) {
+  spec.split(/\s+/).filter(Boolean).forEach(item => {
+    const [name, arg] = item.split(':');
+    const fn = Object.prototype.hasOwnProperty.call(ACTIONS, name) ? ACTIONS[name] : null;
+    if (fn) fn(arg !== undefined ? arg : event);
+  });
+}
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-click]');
+  if (el) runActions(el.dataset.click, e);
+});
+document.addEventListener('change', e => {
+  const el = e.target.closest('[data-change]');
+  if (el) runActions(el.dataset.change, e);
+});
 
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {

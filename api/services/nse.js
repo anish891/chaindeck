@@ -117,7 +117,9 @@ async function loadFromNSE(symbol, expiryDate) {
     throw new Error('Unexpected NSE response structure');
   }
 
-  const allExpiries = raw.records.expiryDates;
+  // Only well-formed expiry strings are ever passed on (they end up in URLs, cache keys and the page).
+  const allExpiries = raw.records.expiryDates.filter(e => typeof e === 'string' && /^\d{2}-[A-Za-z]{3}-\d{4}$/.test(e));
+  if (!allExpiries.length) throw new Error('Unexpected NSE response structure');
   expiryCache = { list: allExpiries, ts: Date.now() };
   const targetExpiry = expiryDate || allExpiries[0];
 
@@ -151,6 +153,7 @@ async function fetchRawNSEOptionChain(symbol = 'NIFTY', expiryDate = null) {
   const p = loadFromNSE(symbol, expiryDate)
     .then(value => {
       rawCache.set(key, { value, ts: Date.now() });
+      while (rawCache.size > 20) rawCache.delete(rawCache.keys().next().value); // bounded: keys come from callers
       return value;
     })
     .catch(err => {

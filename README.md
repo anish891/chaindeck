@@ -86,15 +86,38 @@ Without those variables the app still works; history just lives in memory and di
 Check status any time at `/api/storage-status`.
 
 **Recording while nobody has the page open.** Snapshots are recorded whenever someone's browser polls, and also by
-`GET /api/cron/snapshot` — hit it every minute during market hours (09:15–15:30 IST, Mon–Fri) from an external pinger
-(e.g. cron-job.org) or Vercel Cron on a plan that allows per-minute crons (Hobby only allows daily). Set `CRON_SECRET`
-to require `Authorization: Bearer <secret>` (or `?key=<secret>`).
-
-### Strike detail
-
-Click a strike in the option chain, or a bar in the OI chart, to see that strike's call/put OI, premium and IV across the stored session (needs the Upstash history above).
+`GET /api/cron/snapshot`. Hit it every minute during market hours (09:15-15:30 IST, Mon-Fri) from an external pinger
+(e.g. cron-job.org) or Vercel Cron on a plan that allows per-minute crons (Hobby only allows daily).
+The endpoint **requires** `Authorization: Bearer <CRON_SECRET>`. In production it refuses every request (503)
+until `CRON_SECRET` is set, and the secret is never accepted in the URL.
 
 Optional env: `NIFTY_LOT_SIZE` (GEX scaling, default 65), `RISK_FREE_RATE` (default 0.065).
+
+---
+
+## Security and privacy
+
+There are no user accounts and no personal data is collected: no cookies, no analytics, no tracking.
+What is in place:
+
+- **Nothing third-party loads in the browser.** Fonts (Inter, JetBrains Mono), Chart.js and the PDF/snapshot libraries
+  are served from this site (`public/fonts`, `public/vendor`), so visitors' IP addresses are never sent to Google or a CDN.
+  Vendored libraries are pinned by hash in `api/verify-security.js`; update them from the official source and re-pin.
+- **Strict Content-Security-Policy and friends** (scripts from `'self'` only, no inline scripts, no framing,
+  `Referrer-Policy: no-referrer`, `nosniff`, `Permissions-Policy`). The headers live in `api/security.js`;
+  `vercel.json` mirrors them for static files and a test fails if the two drift apart.
+- **No cross-origin reads.** There is no CORS header; the page and API share one origin.
+- **Operational endpoints are authenticated.** `/api/cron/snapshot` and `/api/session-summary` need
+  `Authorization: Bearer <CRON_SECRET>`, compared in constant time and failing closed in production.
+- **Inputs are validated** (expiry, date, strike) before anything reaches NSE or Redis, and error responses are generic:
+  details go to the server log only.
+- **Rate limiting** (per IP, in memory per serverless instance) is a speed bump. For a hard limit add a rate-limit
+  rule in the Vercel Firewall.
+- **Dependencies:** `npm audit` is clean; the app uses `express`, `node-fetch` and `dotenv` only.
+- Run `npm test` (includes `verify-security.js`) after any change. If you find a vulnerability, please open a
+  private security advisory on GitHub rather than a public issue.
+
+Rotate `CRON_SECRET` (Vercel env var + the pinger's header) if it is ever exposed.
 
 ---
 

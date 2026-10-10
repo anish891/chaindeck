@@ -6,11 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nifty OI Tracker: Live Change in OI</title>
   <link rel="stylesheet" href="/css/styles.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap"
-    rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="/vendor/chart.umd.js"></script>
 </head>
 
 <body>
@@ -27,23 +23,23 @@
     <div class="status-text" id="statusText">Connecting…</div>
 
     <div class="topbar-right">
-      <button class="bell-btn" id="alertBell" onclick="toggleAlertsDrawer()" title="Alerts" aria-label="Open alerts">
+      <button class="bell-btn" id="alertBell" data-click="toggleAlertsDrawer" title="Alerts" aria-label="Open alerts">
         <svg class="ico" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
         <span class="bell-badge" id="alertBadge" hidden>0</span>
       </button>
       <div class="dropdown" id="exportDropdown">
-        <button class="dropdown-toggle" onclick="toggleExportMenu(event)" title="Export Data & Analytics">
+        <button class="dropdown-toggle" data-click="toggleExportMenu" title="Export Data & Analytics">
           <svg class="ico" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg> Export <span class="dropdown-caret">▾</span>
         </button>
         <div class="dropdown-menu" id="exportMenu">
-          <button class="dropdown-item" onclick="exportCSV(); closeExportMenu();" title="Export Option Chain to CSV">
+          <button class="dropdown-item" data-click="exportCSV closeExportMenu" title="Export Option Chain to CSV">
             <svg class="ico item-icon" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg> Option Chain (CSV)
           </button>
-          <button class="dropdown-item" id="btnPDF" onclick="exportPDF(); closeExportMenu();"
+          <button class="dropdown-item" id="btnPDF" data-click="exportPDF closeExportMenu"
             title="Export Option Chain & Report to PDF">
             <svg class="ico item-icon" viewBox="0 0 24 24"><path d="M14 3H6v18h12V7zM14 3v4h4"/></svg> Analytics Summary (PDF)
           </button>
-          <button class="dropdown-item" id="btnSnapshot" onclick="takeSnapshot(); closeExportMenu();"
+          <button class="dropdown-item" id="btnSnapshot" data-click="takeSnapshot closeExportMenu"
             title="Save Screenshot of Dashboard">
             <svg class="ico item-icon" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v12H4z"/><circle cx="12" cy="13" r="4"/></svg> Dashboard (Snapshot)
           </button>
@@ -51,23 +47,23 @@
       </div>
       <label class="interval-label" for="themeSelect">Theme</label>
       <span class="theme-ico" id="themeIcon" aria-hidden="true"></span>
-      <select id="themeSelect" onchange="onThemeSelectChange()" title="Select Theme">
+      <select id="themeSelect" data-change="onThemeSelectChange" title="Select Theme">
         <option value="system">System</option>
         <option value="dark" selected>Dark</option>
         <option value="light">Light</option>
       </select>
       <label class="interval-label">Expiry</label>
-      <select id="expirySelect" onchange="onExpiryChange()">
+      <select id="expirySelect" data-change="onExpiryChange">
         <option value="">Loading…</option>
       </select>
       <label class="interval-label">Refresh</label>
-      <select id="intervalSelect" onchange="onIntervalChange()">
+      <select id="intervalSelect" data-change="onIntervalChange">
         <option value="3000" selected>3s</option>
         <option value="5000">5s</option>
         <option value="10000">10s</option>
         <option value="30000">30s</option>
       </select>
-      <button class="refresh-btn" onclick="fetchNow()">
+      <button class="refresh-btn" data-click="fetchNow">
         <svg class="ico" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg> Refresh now
       </button>
     </div>
@@ -548,7 +544,7 @@
         </div>
         <label class="panel-note" style="display:flex; align-items:center; gap:6px;">
           View
-          <select id="oiChartMode" onchange="onOiChartModeChange()">
+          <select id="oiChartMode" data-change="onOiChartModeChange">
             <option value="oi" selected>Open interest</option>
             <option value="chg">Change in OI (vs prev close)</option>
             <option value="m5">OI change · last 5 min</option>
@@ -577,7 +573,7 @@
         </div>
         <label class="panel-note" style="display:flex; align-items:center; gap:6px;">
           Overlay
-          <select id="timelineMetric" onchange="onTimelineMetricChange()">
+          <select id="timelineMetric" data-change="onTimelineMetricChange">
             <option value="pcr" selected>PCR</option>
             <option value="volPcr">Volume PCR</option>
             <option value="straddle">ATM Straddle</option>
@@ -624,7 +620,7 @@
     <div style="display: flex; align-items: center; gap: 8px; font-size: 11px;">
       <label
         style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); padding: 4px 10px; border-radius: 6px;">
-        <input type="checkbox" id="toggleGreeksBtn" onchange="window.toggleGreeksView && window.toggleGreeksView()"
+        <input type="checkbox" id="toggleGreeksBtn" data-change="toggleGreeksView"
           style="accent-color: var(--accent);">
         <span>Show Real-Time Greeks (Delta Δ / Theta Θ)</span>
       </label>
@@ -640,21 +636,21 @@
           <th colspan="5" id="putHeaderColspan" class="put-head">PUTS</th>
         </tr>
         <tr class="thead-cols">
-          <th class="right greeks-col hidden-greeks" onclick="sortTable('callDelta')">Delta (Δ)</th>
-          <th class="right greeks-col hidden-greeks" onclick="sortTable('callTheta')">Theta (Θ)</th>
-          <th class="right" onclick="sortTable('callChgOI')">Chg OI</th>
-          <th class="right" onclick="sortTable('callOI')">OI</th>
-          <th class="right" onclick="sortTable('callIV')">IV%</th>
-          <th class="right" onclick="sortTable('callLTP')">LTP</th>
-          <th class="right" onclick="sortTable('callBid')">Bid/Ask</th>
+          <th class="right greeks-col hidden-greeks" data-click="sortTable:callDelta">Delta (Δ)</th>
+          <th class="right greeks-col hidden-greeks" data-click="sortTable:callTheta">Theta (Θ)</th>
+          <th class="right" data-click="sortTable:callChgOI">Chg OI</th>
+          <th class="right" data-click="sortTable:callOI">OI</th>
+          <th class="right" data-click="sortTable:callIV">IV%</th>
+          <th class="right" data-click="sortTable:callLTP">LTP</th>
+          <th class="right" data-click="sortTable:callBid">Bid/Ask</th>
           <th class="center">Strike</th>
-          <th class="right" onclick="sortTable('putBid')">Bid/Ask</th>
-          <th class="right" onclick="sortTable('putLTP')">LTP</th>
-          <th class="right" onclick="sortTable('putIV')">IV%</th>
-          <th class="right" onclick="sortTable('putOI')">OI</th>
-          <th class="right" onclick="sortTable('putChgOI')">Chg OI</th>
-          <th class="right greeks-col hidden-greeks" onclick="sortTable('putDelta')">Delta (Δ)</th>
-          <th class="right greeks-col hidden-greeks" onclick="sortTable('putTheta')">Theta (Θ)</th>
+          <th class="right" data-click="sortTable:putBid">Bid/Ask</th>
+          <th class="right" data-click="sortTable:putLTP">LTP</th>
+          <th class="right" data-click="sortTable:putIV">IV%</th>
+          <th class="right" data-click="sortTable:putOI">OI</th>
+          <th class="right" data-click="sortTable:putChgOI">Chg OI</th>
+          <th class="right greeks-col hidden-greeks" data-click="sortTable:putDelta">Delta (Δ)</th>
+          <th class="right greeks-col hidden-greeks" data-click="sortTable:putTheta">Theta (Θ)</th>
         </tr>
       </thead>
       <tbody id="chainBody">

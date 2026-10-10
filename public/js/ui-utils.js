@@ -1,5 +1,10 @@
 // Small shared UI helpers for side panels.
 
+/** Escape text for safe use inside HTML text or a quoted attribute. Use for any value that came over the network. */
+export function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"'`]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c]));
+}
+
 export const hmIst = t =>
   new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
 

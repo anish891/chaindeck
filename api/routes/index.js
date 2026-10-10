@@ -3,6 +3,7 @@ const router = express.Router();
 const history = require('../services/history');
 const { istNow } = require('../services/market');
 const { fetchRawNSEOptionChain } = require('../services/nse');
+const { rateLimit, requireSecret, isValidExpiry, isValidDate, sendError } = require('../security');
 const {
   processOptionChainData,
   extractFeatureVector,
@@ -10,94 +11,90 @@ const {
   getCacheData
 } = require('../services/analytics');
 
+const READ_CACHE = 'public, s-maxage=3, stale-while-revalidate=10';
+const HISTORY_CACHE = 'public, s-maxage=10, stale-while-revalidate=20';
+const strictLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'sensitive' });
+
 router.get('/option-chain', async (req, res) => {
+  const { expiry } = req.query;
+  if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    const { expiry } = req.query;
     const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
+    res.set('Cache-Control', READ_CACHE);
     res.json({ ok: true, data });
   } catch (err) {
-    if (err.code !== 'BAD_EXPIRY') console.error('Error fetching option chain:', err.message);
-    res.status(err.code === 'BAD_EXPIRY' ? 400 : 502).json({ ok: false, error: err.message });
+    if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
+    return sendError(res, 502, 'Error fetching option chain', err);
   }
 });
 
 // Intraday series + baseline strike snapshots (5m / 15m / 30m earlier, and the open)
 router.get('/intraday', async (req, res) => {
+  const { expiry, date } = req.query;
+  if (!isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry (DD-Mon-YYYY) is required.' });
+  if (date !== undefined && !isValidDate(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD.' });
   try {
-    const { expiry, date } = req.query;
-    if (!expiry) return res.status(400).json({ ok: false, error: 'expiry is required' });
-    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
     const data = await history.getIntraday(expiry, date || null);
-    res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, backend: history.backend, persistent: history.configured, ...data });
+    res.set('Cache-Control', HISTORY_CACHE);
+    res.json({ ok: true, persistent: history.configured, ...data });
   } catch (err) {
-    console.error('Error reading intraday history:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return sendError(res, 500, 'Error reading intraday history', err);
   }
 });
-
-const EXPIRY_RE = /^\d{2}-[A-Za-z]{3}-\d{4}$/;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // One strike across the day (sampled)
 router.get('/strike-history', async (req, res) => {
   const { expiry, date } = req.query;
   const strike = Number(req.query.strike);
-  if (!EXPIRY_RE.test(expiry || '') || !Number.isInteger(strike) || strike <= 0) {
-    return res.status(400).json({ ok: false, error: 'expiry (DD-Mon-YYYY) and integer strike are required' });
+  if (!isValidExpiry(expiry) || !Number.isInteger(strike) || strike <= 0 || strike > 1000000) {
+    return res.status(400).json({ ok: false, error: 'expiry (DD-Mon-YYYY) and an integer strike are required.' });
   }
-  if (date && !DATE_RE.test(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD' });
+  if (date !== undefined && !isValidDate(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD.' });
   try {
     const data = await history.getStrikeHistory(expiry, strike, date || null);
     res.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=60');
     res.json({ ok: true, ...data });
   } catch (err) {
-    console.error('Error reading strike history:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return sendError(res, 500, 'Error reading strike history', err);
   }
 });
 
+// Deliberately minimal: no backend names, hostnames or environment variable names.
 router.get('/storage-status', (req, res) => {
-  res.json({
-    ok: true,
-    backend: history.backend,
-    persistent: history.configured,
-    message: history.configured
-      ? 'Upstash Redis connected via REST.'
-      : 'No UPSTASH_REDIS_REST_URL / TOKEN set. History is in memory and is lost on restart or cold start.'
-  });
+  res.json({ ok: true, persistent: history.configured });
 });
 
-// Records a snapshot even when nobody has the page open. Point an external pinger or
-// Vercel Cron at it during market hours. Protected by CRON_SECRET when that is set.
-router.all('/cron/snapshot', async (req, res) => {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const given = (req.headers.authorization || '').replace(/^Bearer /, '') || req.query.key;
-    if (given !== secret) return res.status(401).json({ ok: false, error: 'unauthorized' });
-  }
+// Records a snapshot even when nobody has the page open. Point an external pinger at it during market hours
+// with `Authorization: Bearer <CRON_SECRET>` (the secret is never accepted in the URL).
+async function cronSnapshot(req, res) {
+  const { expiry } = req.query;
+  if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY', req.query.expiry || null);
+    const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
-    res.json({ ok: true, expiry: data.expiry, dataAsOf: data.dataAsOf, backend: history.backend, persistent: history.configured });
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, expiry: data.expiry, dataAsOf: data.dataAsOf, persistent: history.configured });
   } catch (err) {
-    console.error('Cron snapshot failed:', err.message);
-    res.status(502).json({ ok: false, error: err.message });
+    if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
+    return sendError(res, 502, 'Cron snapshot failed', err);
   }
-});
+}
+router.get('/cron/snapshot', strictLimit, requireSecret, cronSnapshot);
+router.post('/cron/snapshot', strictLimit, requireSecret, cronSnapshot);
 
-router.post('/session-summary', async (req, res) => {
+// Writes to storage, so it needs the same secret as the cron endpoint (it used to be open to anyone).
+router.post('/session-summary', strictLimit, requireSecret, async (req, res) => {
   try {
     const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY');
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
     const vector = extractFeatureVector(data);
     const date = istNow(new Date(data.dataAsOf || Date.now())).ymd;
     await history.saveSession(history.buildSessionRecord(data, vector, date));
-    res.json({ ok: true, message: 'Session summary saved successfully', date, vector, persistent: history.configured });
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, message: 'Session summary saved successfully', date, persistent: history.configured });
   } catch (err) {
-    console.error('Error saving session summary:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return sendError(res, 500, 'Error saving session summary', err);
   }
 });
 
@@ -140,14 +137,14 @@ router.get('/similar-sessions', async (req, res) => {
 
     scored.sort((a, b) => b.similarityPct - a.similarityPct);
 
+    res.set('Cache-Control', HISTORY_CACHE);
     res.json({
       ok: true,
       currentVector,
       topMatches: scored.slice(0, 3)
     });
   } catch (err) {
-    console.error('Error matching similar sessions:', err.message);
-    res.status(500).json({ ok: false, error: err.message });
+    return sendError(res, 500, 'Error matching similar sessions', err);
   }
 });
 
