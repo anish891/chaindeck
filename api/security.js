@@ -87,7 +87,9 @@ const sha256 = s => crypto.createHash('sha256').update(String(s)).digest();
  *  - The secret is never accepted in the URL (query strings end up in logs and browser history).
  */
 function requireSecret(req, res, next) {
-  const secret = process.env.CRON_SECRET;
+  // Env vars pasted into dashboards often pick up a trailing newline or space (e.g. from `openssl ... | pbcopy`),
+  // which would make every request fail. Surrounding whitespace is never part of a real secret, so ignore it.
+  const secret = (process.env.CRON_SECRET || '').trim();
   if (!secret) {
     if (isProduction()) {
       return res.status(503).json({ ok: false, error: 'This endpoint is disabled until CRON_SECRET is configured.' });
@@ -95,7 +97,7 @@ function requireSecret(req, res, next) {
     return next();
   }
   const match = /^Bearer (.+)$/.exec(req.headers.authorization || '');
-  const given = match ? match[1] : '';
+  const given = match ? match[1].trim() : '';
   // Hash both sides so the comparison is constant-time and length-independent.
   if (!crypto.timingSafeEqual(sha256(given), sha256(secret))) {
     return res.status(401).json({ ok: false, error: 'unauthorized' });

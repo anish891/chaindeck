@@ -117,6 +117,14 @@ const url = (s, p) => `http://127.0.0.1:${s.address().port}${p}`;
     const ok = await get('/api/cron/snapshot?expiry=bad', { headers: { Authorization: 'Bearer s3cret-value-for-tests' } });
     assert.strictEqual(ok.status, 400, 'correct secret reaches the handler');
 
+    // a secret stored with stray whitespace (trailing newline from a paste) still works with the clean header
+    process.env.CRON_SECRET = 's3cret-value-for-tests\n';
+    assert.strictEqual((await get('/api/cron/snapshot?expiry=bad', { headers: { Authorization: 'Bearer s3cret-value-for-tests' } })).status, 400, 'trailing newline in the env var must not lock the owner out');
+    assert.strictEqual((await get('/api/cron/snapshot', { headers: { Authorization: 'Bearer wrong' } })).status, 401, 'whitespace tolerance must not weaken matching');
+    process.env.CRON_SECRET = '   \n';
+    assert.strictEqual((await get('/api/cron/snapshot')).status, 503, 'a whitespace-only secret counts as unset (fail closed)');
+    process.env.CRON_SECRET = 's3cret-value-for-tests';
+
     // local development without a secret stays convenient
     process.env.VERCEL = '0';
     delete process.env.CRON_SECRET;
