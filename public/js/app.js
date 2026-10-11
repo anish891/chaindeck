@@ -3,7 +3,7 @@ import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData } fro
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
 import { escapeHtml } from './ui-utils.js';
-import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart } from './charts.js';
+import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart } from './charts.js';
 
 let currentData = null;
 let prevData = null;
@@ -44,6 +44,7 @@ async function refreshIntraday(force = false) {
   }
   if (currentData) {
     renderTimeline();
+    renderVolPanels();
     renderOiChart_();
     renderFlowFeed(currentData);
   }
@@ -197,6 +198,72 @@ function renderTimeline() {
     empty.textContent = '';
   }
   renderTimelineChart('timelineChart', points, timelineMetric, METRIC_LABELS[timelineMetric] || timelineMetric);
+}
+
+// Summary row under a chart: [label, value, className?] items, written as text nodes.
+function fillSummary(id, items) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = '';
+  items.forEach(([label, value, cls]) => {
+    const span = document.createElement('span');
+    const strong = document.createElement('strong');
+    if (cls) strong.className = cls;
+    strong.textContent = value;
+    span.append(document.createTextNode(`${label}: `), strong);
+    el.append(span);
+  });
+}
+
+const signedPct = v => (v === null || !Number.isFinite(v) ? 'n/a' : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
+const volPct = v => (v === null || v === undefined || !Number.isFinite(v) ? 'n/a' : `${v.toFixed(1)}%`);
+
+function renderVolPanels() {
+  const d = currentData;
+  const points = intraday && d && intraday.expiry === d.expiry ? intraday.points || [] : [];
+  const emptyText = intraday
+    ? 'Collecting snapshots. One is stored each time NSE updates (about once a minute).'
+    : 'Intraday history is unavailable right now.';
+  const last = points[points.length - 1] || null;
+
+  // Rolling ATM straddle
+  const sEmpty = document.getElementById('straddleChartEmpty');
+  const straddles = points.map(p => p.straddle).filter(v => v > 0);
+  if (sEmpty) sEmpty.textContent = straddles.length >= 2 ? '' : emptyText;
+  renderStraddleChart('straddleChart', points);
+  const now = d && d.straddlePrice > 0 ? d.straddlePrice : (straddles.length ? straddles[straddles.length - 1] : null);
+  const open = straddles.length ? straddles[0] : null;
+  const avg = straddles.length ? straddles.reduce((a, v) => a + v, 0) / straddles.length : null;
+  const chgVs = base => (now && base ? ((now - base) / base) * 100 : null);
+  fillSummary('straddleSummary', [
+    ['Now', now ? fmt(Math.round(now)) : 'n/a'],
+    ['ATM', d && d.atm ? fmt(d.atm) : 'n/a'],
+    ['vs open', signedPct(chgVs(open))],
+    ['vs day avg', signedPct(chgVs(avg))],
+    ['Day range', straddles.length ? `${fmt(Math.round(Math.min(...straddles)))} to ${fmt(Math.round(Math.max(...straddles)))}` : 'n/a']
+  ]);
+
+  // IV vs realised vol
+  const vEmpty = document.getElementById('ivRvChartEmpty');
+  const hasRv = points.some(p => p.rv15 !== null && p.rv15 !== undefined);
+  if (vEmpty) {
+    vEmpty.textContent = points.length < 2 ? emptyText
+      : hasRv ? '' : 'Realised vol needs about 15 minutes of snapshots.';
+  }
+  renderIvRvChart('ivRvChart', points);
+  const ivT = d && d.atmIvTrading ? d.atmIvTrading : (last ? last.ivT : null);
+  const rv30 = last ? last.rv30 : null;
+  const spread = ivT && rv30 ? ivT - rv30 : null;
+  const pctl = d && d.atmIvPercentile;
+  fillSummary('ivRvSummary', [
+    ['ATM IV', volPct(ivT)],
+    ['NSE IV (calendar)', volPct(d ? d.atmIv : null)],
+    ['RV 15m', volPct(last ? last.rv15 : null)],
+    ['RV 30m', volPct(rv30)],
+    ['RV 60m', volPct(last ? last.rv60 : null)],
+    ['IV minus RV 30m', spread === null ? 'n/a' : `${spread >= 0 ? '+' : ''}${spread.toFixed(1)} pts`],
+    ['IV percentile', pctl && pctl.pct !== null ? `${pctl.pct} (${pctl.samples} sessions)` : `n/a (${pctl ? pctl.samples : 0} of 5 sessions)`]
+  ]);
 }
 
 // Baseline snapshot (5m / 15m earlier) from server history, shaped like a local snapshot.
@@ -582,6 +649,7 @@ export function renderAll() {
   recordSnapshot(d);
   renderFlowFeed(d);
   renderTimeline();
+  renderVolPanels();
   renderOiChart_();
   processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot });
   fetchSimilarSessions();
@@ -1072,6 +1140,12 @@ export function applyTheme(theme) {
   const sel = document.getElementById('themeSelect');
   if (sel) sel.value = theme;
   setIconText(document.getElementById('themeIcon'), themeIcon(theme), '');
+  // Charts read colours from CSS variables when they draw, so redraw them now rather than on the next tick.
+  if (currentData) {
+    renderTimeline();
+    renderVolPanels();
+    renderOiChart_();
+  }
 }
 
 export function initTheme() {

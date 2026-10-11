@@ -562,6 +562,38 @@
     </div>
   </div>
 
+  <!-- ROLLING ATM STRADDLE + IV VS REALISED VOL (from persisted snapshots) -->
+  <div id="volPanelsSection" class="section vol-grid">
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
+          Rolling ATM Straddle
+        </div>
+        <span class="panel-note">CE + PE at each snapshot's ATM strike</span>
+      </div>
+      <div class="vol-chart-wrap">
+        <canvas id="straddleChart"></canvas>
+        <div id="straddleChartEmpty" class="timeline-empty">Collecting snapshots…</div>
+      </div>
+      <div id="straddleSummary" class="oi-summary"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M2 12c2-6 4-6 6 0s4 6 6 0 4-6 6 0"/><path d="M2 20h20"/></svg>
+          IV vs Realised Volatility
+        </div>
+        <span class="panel-note" title="NSE ATM IV is quoted on a 365-day calendar. It is converted to trading time (09:15 to 15:30, 252 days) so it compares like with like against intraday realised vol, which leaves out overnight gaps. Exchange holidays are not modelled.">Trading-time basis, annualised</span>
+      </div>
+      <div class="vol-chart-wrap">
+        <canvas id="ivRvChart"></canvas>
+        <div id="ivRvChartEmpty" class="timeline-empty">Collecting snapshots…</div>
+      </div>
+      <div id="ivRvSummary" class="oi-summary"></div>
+    </div>
+  </div>
+
   <!-- INTRADAY TIMELINE (persisted snapshots) -->
   <div id="timelineSection" class="section">
     <div class="panel">

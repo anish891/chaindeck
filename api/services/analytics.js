@@ -1,5 +1,6 @@
 const { getIndexSnapshot, getPivotBasis } = require('./market');
 const history = require('./history');
+const { toTradingTimeIv, expiryCloseMs, ivPercentile } = require('./volatility');
 
 // ── Tunables (override via env) ──────────────────────────────────────────
 const RISK_FREE_RATE = parseFloat(process.env.RISK_FREE_RATE) || 0.065;
@@ -399,7 +400,7 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   const [indices, pivotBasis, sessions] = await Promise.all([
     withTimeout(getIndexSnapshot(), 2500),
     withTimeout(getPivotBasis(), 2500),
-    withTimeout(history.getSessions(20).catch(() => []), 2000)
+    withTimeout(history.getSessions(252).catch(() => []), 2000)
   ]);
 
   const spot = raw.records.underlyingValue || raw.records.data?.[0]?.CE?.underlyingValue || raw.records.data?.[0]?.PE?.underlyingValue || 0;
@@ -630,11 +631,10 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   const cprTypeVal = classifyCPR(cprCalc.widthPct);
   const gexRegimeVal = totalGexCr >= 0 ? 'POSITIVE_GAMMA' : 'NEGATIVE_GAMMA';
 
-  const volatilityRegime = await computeVolatilityRegime(
-    atmIv,
-    (sessions || []).map(x => parseFloat(x.atm_iv)).filter(v => v > 0),
-    indices?.vix || null
-  );
+  const pastSessionIvs = (sessions || []).map(x => parseFloat(x.atm_iv)).filter(v => v > 0);
+  const volatilityRegime = await computeVolatilityRegime(atmIv, pastSessionIvs.slice(0, 20), indices?.vix || null);
+  const atmIvTrading = toTradingTimeIv(atmIv, snapMs, expiryCloseMs(targetExpiry));
+  const atmIvPercentile = ivPercentile(atmIv, pastSessionIvs);
   const compositeRegime = computeCompositeRegime(gexRegimeVal, pcr, cprTypeVal, ivSkew, spot, maxPain);
   const impliedProbability = computeImpliedProbabilityDistribution(allExpiryStrikes, spot, T);
   const mlPredictions = computeIntradayMLPredictions(
@@ -679,6 +679,8 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
     ivSkewMethod,
     ivSkewDetail: rr ? { putStrike: rr.putStrike, callStrike: rr.callStrike, putIv: Number(rr.putIv.toFixed(1)), callIv: Number(rr.callIv.toFixed(1)) } : null,
     atmIv: Number(atmIv.toFixed(2)),
+    atmIvTrading: atmIvTrading ? Number(atmIvTrading.toFixed(2)) : null,
+    atmIvPercentile,
     vix: indices?.vix ? { last: indices.vix.last, previousClose: indices.vix.previousClose, percentChange: indices.vix.percentChange } : null,
     day: day ? { open: day.open, high: day.high, low: day.low, previousClose: day.previousClose, percentChange: day.percentChange } : null,
     volatilityRegime,

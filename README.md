@@ -11,6 +11,8 @@ A live, auto-refreshing Nifty 50 option chain dashboard showing Change in OI for
 - **Expiry selector** — switch between weekly / monthly expiries
 - **All key metrics** — Spot, ATM, PCR, Max Call OI strike (resistance), Max Put OI strike (support)
 - **Sortable columns** — click any column header to sort
+- **Rolling ATM straddle** — CE + PE premium at each snapshot's ATM strike, against the first value and the running average
+- **IV vs realised vol** — ATM IV converted to trading time next to 15 / 30 / 60 minute realised vol from the stored spot series, plus IV percentile against saved session closes (needs 5+ sessions)
 
 ---
 

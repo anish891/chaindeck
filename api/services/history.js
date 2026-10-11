@@ -1,5 +1,6 @@
 const store = require('./storage');
 const { istNow } = require('./market');
+const { addVolSeries } = require('./volatility');
 
 // Intraday buffer + session summaries.
 //
@@ -154,7 +155,7 @@ async function getIntraday(expiry, date = null) {
     };
   });
 
-  return { date: day, expiry, points, baselines };
+  return { date: day, expiry, points: addVolSeries(points, expiry), baselines };
 }
 
 const COLS = ['strike', 'ceOI', 'peOI', 'ceChg', 'peChg', 'ceLtp', 'peLtp', 'ceIv', 'peIv'];

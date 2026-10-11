@@ -207,6 +207,82 @@ export function renderTimelineChart(canvasId, points, metricKey, metricLabel) {
   chart.update('none');
 }
 
+// Single-axis line charts keyed by canvas id, updated in place like the timeline.
+const lineCharts = {};
+
+function renderLineChart(canvasId, labels, datasets, formatY) {
+  if (!window.Chart) return;
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const muted = cssVar('--muted') || '#6b7280';
+  const grid = cssVar('--border') || 'rgba(255,255,255,0.07)';
+
+  if (!lineCharts[canvasId]) {
+    lineCharts[canvasId] = new window.Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels, datasets: [] },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        elements: { point: { radius: 0, hoverRadius: 4 }, line: { borderWidth: 2, tension: 0.2 } },
+        plugins: {
+          legend: { labels: { color: muted, boxWidth: 10, font: { size: 11 } } },
+          tooltip: { callbacks: { label: item => `${item.dataset.label}: ${item.parsed.y === null ? 'n/a' : formatY(item.parsed.y)}` } }
+        },
+        scales: {
+          x: { ticks: { color: muted, maxTicksLimit: 8, font: { size: 10 } }, grid: { color: grid } },
+          y: { ticks: { color: muted, font: { size: 10 }, callback: v => formatY(v) }, grid: { color: grid } }
+        }
+      }
+    });
+  }
+
+  const chart = lineCharts[canvasId];
+  chart.data.labels = labels;
+  chart.data.datasets = datasets;
+  chart.options.plugins.legend.labels.color = muted;
+  chart.options.scales.x.ticks.color = muted;
+  chart.options.scales.x.grid.color = grid;
+  chart.options.scales.y.ticks.color = muted;
+  chart.options.scales.y.grid.color = grid;
+  chart.update('none');
+}
+
+/** ATM straddle premium through the day, against its first value and its running average. */
+export function renderStraddleChart(canvasId, points) {
+  const accent = cssVar('--accent') || '#3b82f6';
+  const muted = cssVar('--muted') || '#6b7280';
+  const warn = cssVar('--warn') || '#f59e0b';
+  const straddle = points.map(p => (p.straddle > 0 ? p.straddle : null));
+  const open = straddle.find(v => v !== null) ?? null;
+  let sum = 0, n = 0;
+  const avg = straddle.map(v => {
+    if (v !== null) { sum += v; n++; }
+    return n ? sum / n : null;
+  });
+  renderLineChart(canvasId, points.map(p => istHm(p.t)), [
+    { label: 'Straddle', data: straddle, borderColor: accent, spanGaps: true },
+    { label: 'Running avg', data: avg, borderColor: warn, borderWidth: 1.5, borderDash: [5, 4] },
+    { label: 'Open', data: straddle.map(() => open), borderColor: muted, borderWidth: 1, borderDash: [2, 3] }
+  ], v => fmt(Math.round(v)));
+}
+
+/** Trading-time ATM IV against 15 / 30 / 60 minute realised vol. */
+export function renderIvRvChart(canvasId, points) {
+  const accent = cssVar('--accent') || '#3b82f6';
+  const warn = cssVar('--warn') || '#f59e0b';
+  const muted = cssVar('--muted') || '#6b7280';
+  const text = cssVar('--text') || '#e8eaf0';
+  renderLineChart(canvasId, points.map(p => istHm(p.t)), [
+    { label: 'ATM IV', data: points.map(p => p.ivT ?? null), borderColor: accent, spanGaps: true },
+    { label: 'RV 15m', data: points.map(p => p.rv15 ?? null), borderColor: muted, borderWidth: 1.5 },
+    { label: 'RV 30m', data: points.map(p => p.rv30 ?? null), borderColor: warn, borderWidth: 1.5 },
+    { label: 'RV 60m', data: points.map(p => p.rv60 ?? null), borderColor: text, borderWidth: 1.5, borderDash: [4, 3] }
+  ], v => `${v.toFixed(1)}%`);
+}
+
 let oiChart = null;
 
 // Vertical reference lines (spot, max pain, ...) drawn at a fractional position between strike bars.

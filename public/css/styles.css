@@ -1449,6 +1449,28 @@ body.exporting-pdf .keystrip {
   }
 }
 
+/* Rolling straddle + IV vs RV side by side on wide screens */
+.vol-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.vol-grid > .panel {
+  min-width: 0;
+}
+
+@media (min-width: 1100px) {
+  .vol-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.vol-chart-wrap {
+  position: relative;
+  height: 240px;
+}
+
 /* ═════════ Alerts ═════════ */
 .bell-btn {
   position: relative;
