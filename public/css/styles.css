@@ -1449,19 +1449,19 @@ body.exporting-pdf .keystrip {
   }
 }
 
-/* Rolling straddle + IV vs RV side by side on wide screens */
-.vol-grid {
+/* Two panels side by side on wide screens (vol panels, market context) */
+.pair-grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 14px;
 }
 
-.vol-grid > .panel {
+.pair-grid > .panel {
   min-width: 0;
 }
 
 @media (min-width: 1100px) {
-  .vol-grid {
+  .pair-grid {
     grid-template-columns: 1fr 1fr;
   }
 }
@@ -2057,4 +2057,208 @@ body.exporting-pdf #alertToasts {
   [data-theme="system"] {
     --overlay-bg: rgba(244, 246, 249, 0.82);
   }
+}
+
+/* ═════════ Market context: sectors + participant OI ═════════ */
+.sector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 6px;
+}
+
+.sector-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  min-width: 0;
+}
+
+.sector-name {
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sector-pct {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text);
+}
+
+.sector-breadth {
+  font-size: 10px;
+  color: var(--text);
+  opacity: 0.75;
+}
+
+.ctx-empty {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+  padding: 16px;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.ctx-table {
+  width: 100%;
+  min-width: 0; /* the global table rule sets 860px for the option chain */
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ctx-table th {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.ctx-table td {
+  font-family: var(--mono);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.ctx-table .right {
+  text-align: right;
+}
+
+.ctx-table .ctx-who {
+  font-family: var(--font);
+  font-weight: 600;
+}
+
+.ctx-table .bull {
+  color: var(--bull);
+}
+
+.ctx-table .bear {
+  color: var(--bear);
+}
+
+.ctx-chart-wrap {
+  position: relative;
+  height: 190px;
+  margin: 10px 0 6px;
+}
+
+/* ═════════ "What does this mean?" help buttons + popover ═════════ */
+.explain-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.explain-btn .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.explain-btn:hover,
+.explain-btn[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+.explain-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.explain-pop {
+  position: absolute;
+  z-index: 1000;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  padding: 12px 14px;
+  font-family: var(--font);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.explain-pop[hidden] {
+  display: none;
+}
+
+.explain-pop-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.explain-pop-title {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.explain-lang {
+  display: inline-flex;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.explain-lang button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.explain-lang button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.explain-close {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 2px;
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.explain-close .ico {
+  width: 14px;
+  height: 14px;
+}
+
+.explain-pop-body {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
 }

@@ -682,6 +682,8 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
     atmIvTrading: atmIvTrading ? Number(atmIvTrading.toFixed(2)) : null,
     atmIvPercentile,
     vix: indices?.vix ? { last: indices.vix.last, previousClose: indices.vix.previousClose, percentChange: indices.vix.percentChange } : null,
+    sectors: indices?.sectors || [],
+    breadth: indices?.breadth || null,
     day: day ? { open: day.open, high: day.high, low: day.low, previousClose: day.previousClose, percentChange: day.percentChange } : null,
     volatilityRegime,
     compositeRegime,

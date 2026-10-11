@@ -15,6 +15,9 @@ A live, auto-refreshing Nifty 50 option chain dashboard showing Change in OI for
 - **Sortable columns** — click any column header to sort
 - **Rolling ATM straddle** — CE + PE premium at each snapshot's ATM strike, against the first value and the running average
 - **IV vs realised vol** — ATM IV converted to trading time next to 15 / 30 / 60 minute realised vol from the stored spot series, plus IV percentile against saved session closes (needs 5+ sessions)
+- **Sector heatmap** — today's move for 16 NSE sector indices with up/down counts, plus NIFTY 50 breadth
+- **FII / DII positions** — NSE's end-of-day participant-wise OI (FII, DII, Pro, Client) for index futures and options, last 10 trading days, cached in storage once fetched
+- **"What does this mean?"** — a help button on every panel and key metric with a plain-language explanation in English or Hindi
 
 ---
 

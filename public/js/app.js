@@ -1,9 +1,10 @@
 import { initAlerts, processAlerts, toggleAlertsDrawer, alertsEnabled } from './alerts.js';
-import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData } from './api-client.js';
+import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData, fetchParticipantData } from './api-client.js';
+import { initExplain } from './explain.js';
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
 import { escapeHtml } from './ui-utils.js';
-import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart } from './charts.js';
+import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderParticipantChart } from './charts.js';
 
 let currentData = null;
 let prevData = null;
@@ -24,6 +25,13 @@ let timelineMetric = 'pcr';
 let oiChartMode = 'oi';
 try { oiChartMode = localStorage.getItem('oiChartMode') || 'oi'; } catch (e) { /* storage unavailable */ }
 const INTRADAY_REFRESH_MS = 30000;
+
+// NSE participant-wise OI (end of day): fetched on load and every 15 minutes
+let participantDays = null;
+let participantsFetchedAt = 0;
+let participantMode = 'fut';
+try { participantMode = localStorage.getItem('participantMode') === 'opt' ? 'opt' : 'fut'; } catch (e) { /* storage unavailable */ }
+const PARTICIPANT_REFRESH_MS = 15 * 60 * 1000;
 const METRIC_LABELS = {
   pcr: 'PCR', volPcr: 'Volume PCR', straddle: 'ATM Straddle', atmIv: 'ATM IV', ivSkew: 'IV Skew (25Δ RR)',
   vix: 'India VIX', gexCr: 'Net GEX (Cr)', callOI: 'Total Call OI', putOI: 'Total Put OI'
@@ -48,6 +56,128 @@ async function refreshIntraday(force = false) {
     renderOiChart_();
     renderFlowFeed(currentData);
   }
+}
+
+async function refreshParticipants() {
+  if (Date.now() - participantsFetchedAt < PARTICIPANT_REFRESH_MS) return;
+  participantsFetchedAt = Date.now();
+  try {
+    participantDays = await fetchParticipantData();
+  } catch (e) {
+    console.error('Participant OI fetch failed:', e);
+    if (!participantDays) participantDays = [];
+  }
+  renderParticipants();
+}
+
+export function onParticipantModeChange() {
+  const sel = document.getElementById('participantMode');
+  participantMode = sel && sel.value === 'opt' ? 'opt' : 'fut';
+  try { localStorage.setItem('participantMode', participantMode); } catch (e) { /* ignore */ }
+  renderParticipants();
+}
+
+const signedK = v => (v === null || v === undefined ? 'n/a' : `${v > 0 ? '+' : ''}${fmtK(v)}`);
+const signClass = v => (v > 0 ? 'bull' : v < 0 ? 'bear' : '');
+
+function cell(tag, text, cls) {
+  const el = document.createElement(tag);
+  el.textContent = text;
+  if (cls) el.className = cls;
+  return el;
+}
+
+function renderParticipants() {
+  const head = document.getElementById('participantHead');
+  const body = document.getElementById('participantBody');
+  const note = document.getElementById('participantNote');
+  const sel = document.getElementById('participantMode');
+  if (!head || !body) return;
+  if (sel) sel.value = participantMode;
+
+  const days = participantDays || [];
+  const latest = days[0];
+  const prev = days[1];
+  const cols = participantMode === 'opt'
+    ? ['Participant', 'Calls net', 'Puts net', 'Calls chg', 'Puts chg']
+    : ['Participant', 'Long', 'Short', 'Net', 'Long %', 'Net chg'];
+  head.replaceChildren(...cols.map((c, i) => cell('th', c, i ? 'right' : '')));
+
+  if (!latest) {
+    const td = cell('td', participantDays ? 'NSE participant data is unavailable right now.' : 'Loading NSE participant data…', 'ctx-empty');
+    td.colSpan = cols.length;
+    body.replaceChildren(document.createElement('tr'));
+    body.firstChild.append(td);
+    return;
+  }
+
+  const LABELS = { FII: 'FII', DII: 'DII', Pro: 'Pro', Client: 'Client' };
+  body.replaceChildren(...Object.keys(LABELS).map(who => {
+    const r = latest[who];
+    const p = prev ? prev[who] : null;
+    const tr = document.createElement('tr');
+    tr.append(cell('td', LABELS[who], 'ctx-who'));
+    if (participantMode === 'opt') {
+      const callChg = p ? r.optIdxCallNet - p.optIdxCallNet : null;
+      const putChg = p ? r.optIdxPutNet - p.optIdxPutNet : null;
+      tr.append(
+        cell('td', signedK(r.optIdxCallNet), `right ${signClass(r.optIdxCallNet)}`),
+        cell('td', signedK(r.optIdxPutNet), `right ${signClass(r.optIdxPutNet)}`),
+        cell('td', signedK(callChg), 'right'),
+        cell('td', signedK(putChg), 'right')
+      );
+    } else {
+      const netChg = p ? r.futIdxNet - p.futIdxNet : null;
+      tr.append(
+        cell('td', fmtK(r.futIdxLong), 'right'),
+        cell('td', fmtK(r.futIdxShort), 'right'),
+        cell('td', signedK(r.futIdxNet), `right ${signClass(r.futIdxNet)}`),
+        cell('td', r.futIdxLongPct === null ? 'n/a' : `${r.futIdxLongPct}%`, 'right'),
+        cell('td', signedK(netChg), 'right')
+      );
+    }
+    return tr;
+  }));
+
+  renderParticipantChart('participantChart', days, participantMode);
+  if (note) {
+    const asOf = new Date(latest.date + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    note.textContent = `As of ${asOf} (NSE end-of-day file, published each evening). Contracts; changes are vs the previous trading day.`;
+  }
+}
+
+// NSE's index list sometimes times out for one refresh; keep the last good sectors on screen meanwhile.
+let lastSectorData = null;
+
+function renderSectors(d) {
+  if (d.sectors && d.sectors.length) lastSectorData = { sectors: d.sectors, breadth: d.breadth };
+  else if (lastSectorData) d = lastSectorData;
+  const grid = document.getElementById('sectorGrid');
+  const breadthEl = document.getElementById('breadthNote');
+  if (breadthEl) {
+    const b = d.breadth;
+    breadthEl.textContent = b ? `NIFTY 50 breadth: ${b.advances} up, ${b.declines} down` : 'NIFTY 50 breadth: n/a';
+  }
+  if (!grid) return;
+  const sectors = (d.sectors || []).slice().sort((a, b) => b.percentChange - a.percentChange);
+  if (!sectors.length) {
+    grid.replaceChildren(cell('div', 'Sector data is unavailable right now.', 'ctx-empty'));
+    return;
+  }
+  grid.replaceChildren(...sectors.map(sct => {
+    const pctChg = Number(sct.percentChange) || 0;
+    const strength = Math.round(12 + Math.min(Math.abs(pctChg) / 2, 1) * 58); // 2% or more = full colour
+    const tile = document.createElement('div');
+    tile.className = 'sector-tile';
+    tile.style.background = pctChg === 0 ? 'var(--surface2)' : `color-mix(in srgb, var(${pctChg > 0 ? '--bull' : '--bear'}) ${strength}%, var(--surface))`;
+    tile.title = `${sct.index}: ${fmt(sct.last)}`;
+    tile.append(
+      cell('span', sct.name, 'sector-name'),
+      cell('strong', `${pctChg > 0 ? '+' : ''}${pctChg.toFixed(2)}%`, 'sector-pct'),
+      cell('span', `${sct.advances} up · ${sct.declines} down`, 'sector-breadth')
+    );
+    return tile;
+  }));
 }
 
 export function onTimelineMetricChange() {
@@ -292,6 +422,7 @@ export async function fetchNow() {
     hideOverlay();
     setLive(true);
     refreshIntraday();
+    refreshParticipants();
   } catch (e) {
     setLive(false);
     console.error('Fetch failed:', e);
@@ -647,6 +778,7 @@ export function renderAll() {
 
 
   recordSnapshot(d);
+  renderSectors(d);
   renderFlowFeed(d);
   renderTimeline();
   renderVolPanels();
@@ -1146,6 +1278,7 @@ export function applyTheme(theme) {
     renderVolPanels();
     renderOiChart_();
   }
+  if (participantDays) renderParticipants();
 }
 
 export function initTheme() {
@@ -1617,7 +1750,8 @@ const ACTIONS = {
   onIntervalChange,
   onOiChartModeChange,
   onTimelineMetricChange,
-  toggleGreeksView
+  toggleGreeksView,
+  onParticipantModeChange
 };
 
 function runActions(spec, event) {
@@ -1643,6 +1777,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   initAlerts();
   initStrikePanel();
+  initExplain();
   window.addEventListener('strike-click', e => openStrike(e.detail));
   document.getElementById('chainBody')?.addEventListener('click', e => {
     const cell = e.target.closest('.strike-cell');

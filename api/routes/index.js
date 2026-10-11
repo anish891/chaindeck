@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const history = require('../services/history');
+const { getParticipantHistory } = require('../services/participants');
 const { istNow } = require('../services/market');
 const { fetchRawNSEOptionChain } = require('../services/nse');
 const { rateLimit, requireSecret, isValidExpiry, isValidDate, sendError } = require('../security');
@@ -57,6 +58,17 @@ router.get('/strike-history', async (req, res) => {
     res.json({ ok: true, ...data });
   } catch (err) {
     return sendError(res, 500, 'Error reading strike history', err);
+  }
+});
+
+// FII / DII / Pro / Client index positions from NSE's end-of-day file (last 10 trading days, newest first).
+router.get('/participants', async (req, res) => {
+  try {
+    const days = await getParticipantHistory(10);
+    res.set('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
+    res.json({ ok: true, days });
+  } catch (err) {
+    return sendError(res, 502, 'Error reading participant OI', err);
   }
 });
 

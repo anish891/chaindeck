@@ -31,3 +31,10 @@ export async function fetchStrikeHistory(expiry, strike) {
   if (!json.ok) throw new Error(json.error);
   return json;
 }
+
+export async function fetchParticipantData() {
+  const r = await fetch('/api/participants');
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json.days || [];
+}

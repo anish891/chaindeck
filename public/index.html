@@ -87,7 +87,7 @@
     <div class="hero">
       <div>
         <div class="hero-eyebrow">
-          <span class="eyebrow">Composite Market Regime</span>
+          <span class="eyebrow" data-explain="regime">Composite Market Regime</span>
           <span id="regimeConfidence" class="pill pill-accent">Signal agreement: n/a</span>
         </div>
         <div id="regimeTitle" class="hero-title">Analyzing Market Regime...</div>
@@ -103,7 +103,7 @@
       <div class="panel-head">
         <div class="panel-title">
           <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
-          Live Trade Setup &amp; Tactical Action Plan
+          <span data-explain="tradeSetup">Live Trade Setup &amp; Tactical Action Plan</span>
           <span id="setupBiasBadge" class="pill pill-bull">Bias: n/a</span>
         </div>
         <span class="panel-note">Auto-synthesized from CPR, GEX Zero-Gamma, PCR RoC &amp; Straddle Bounds</span>
@@ -132,7 +132,7 @@
   <!-- UNUSUAL FLOW TICKER -->
   <div id="unusualFlowSection" class="section unusual-flow-container">
     <div class="panel flow-bar">
-      <span class="flow-title"><svg class="ico" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Smart Money Flow</span>
+      <span class="flow-title" data-explain="smartFlow"><svg class="ico" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Smart Money Flow</span>
       <div id="flowAlertsFeed" class="flow-feed">
         <span style="color: var(--muted);">Scanning for strike volume &amp; OI anomalies...</span>
       </div>
@@ -152,6 +152,7 @@
             style="font-size: 13px; font-weight: 700; color: var(--accent); display: flex; align-items: center; gap: 6px;">
             <span data-icon="target"></span>ATM Straddle Price & Intraday Expected Move Calculator
           </span>
+          <span data-explain="straddleCalc"></span>
           <span id="straddleAtmBadge"
             style="background: rgba(59,130,246,0.15); color: var(--accent); font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px;">ATM:
             n/a</span>
@@ -239,6 +240,7 @@
             style="font-size: 13px; font-weight: 700; color: var(--accent); display: flex; align-items: center; gap: 6px;">
             <span data-icon="bar-chart"></span>Market-Implied Expiry Probability (Breeden-Litzenberger PDF)
           </span>
+          <span data-explain="impliedProb"></span>
           <span
             style="background: rgba(139,92,246,0.15); color: #a78bfa; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;">
             QUANT MODEL
@@ -293,6 +295,7 @@
             style="font-size: 13px; font-weight: 700; color: var(--accent); display: flex; align-items: center; gap: 6px;">
             Intraday Trend &amp; Breakout Scoring
           </span>
+          <span data-explain="mlTrend"></span>
           <span id="mlSignalBadge"
             style="background: rgba(16,185,129,0.15); color: var(--bull); font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px;">
             Signal: Analyzing…
@@ -376,7 +379,7 @@
         </div>
         <div class="metric-row highlight-row">
           <div class="metric-item">
-            <span class="label">Expected Range</span>
+            <span class="label" data-explain="expectedRange">Expected Range</span>
             <span class="val acc" id="mExpectedRange" style="font-size:13px; font-weight:600;">n/a</span>
             <span class="sub">Straddle: <span id="mStraddlePrice">n/a</span></span>
           </div>
@@ -390,13 +393,13 @@
       <div class="card-body">
         <div class="metric-row">
           <div class="metric-item">
-            <span class="label">PCR (OI)</span>
+            <span class="label" data-explain="pcr">PCR (OI)</span>
             <span class="val" id="mPCR">n/a</span>
             <span class="sub" id="mPCRsub">n/a</span>
           </div>
           <div class="metric-item">
             <div style="display:flex; align-items:center; gap:6px;">
-              <span class="label" style="margin-bottom:0;">IV Skew (25Δ RR)</span>
+              <span class="label" style="margin-bottom:0;" data-explain="ivSkew">IV Skew (25Δ RR)</span>
               <span id="volRegimeBadge" class="vol-badge" title="Volatility Regime">n/a</span>
             </div>
             <span class="val" id="mIvSkew">n/a</span>
@@ -414,7 +417,7 @@
 
     <!-- CARD 3: OPEN INTEREST -->
     <div class="dashboard-card">
-      <div class="card-header">Open Interest & Velocity</div>
+      <div class="card-header" data-explain="oiVelocity">Open Interest & Velocity</div>
       <div class="card-body">
         <div class="metric-row">
           <div class="metric-item">
@@ -444,7 +447,7 @@
       <div class="card-body">
         <div class="metric-row">
           <div class="metric-item">
-            <span class="label">Max Pain</span>
+            <span class="label" data-explain="maxPain">Max Pain</span>
             <span class="val warn" id="mMaxPain">n/a</span>
             <span class="sub">Expiry target</span>
           </div>
@@ -455,7 +458,7 @@
         </div>
         <div class="metric-row compact-row">
           <div class="metric-item">
-            <span class="label">Max Call (Res)</span>
+            <span class="label" data-explain="walls">Max Call (Res)</span>
             <span class="val-small bear" id="mMaxCall">n/a</span>
             <span class="sub" style="font-size: 8px;">Strength: <span id="mResStrength">n/a</span>%</span>
           </div>
@@ -480,7 +483,7 @@
 
     <!-- CARD 5: CPR & PIVOTS -->
     <div class="dashboard-card">
-      <div class="card-header">Central Pivot Range (CPR) <span id="cprSource" style="text-transform:none; letter-spacing:0; font-weight:400; margin-left:6px;"></span></div>
+      <div class="card-header" data-explain="cpr">Central Pivot Range (CPR) <span id="cprSource" style="text-transform:none; letter-spacing:0; font-weight:400; margin-left:6px;"></span></div>
       <div class="card-body">
         <div class="metric-row">
           <div class="metric-item">
@@ -503,7 +506,7 @@
 
     <!-- CARD 6: GAMMA EXPOSURE (GEX) -->
     <div class="dashboard-card">
-      <div class="card-header">Gamma Exposure (GEX)</div>
+      <div class="card-header" data-explain="gex">Gamma Exposure (GEX)</div>
       <div class="card-body">
         <div class="metric-row">
           <div class="metric-item">
@@ -512,7 +515,7 @@
             <span class="sub" id="mGexRegime">n/a</span>
           </div>
           <div class="metric-item">
-            <span class="label">Zero-Gamma Level</span>
+            <span class="label" data-explain="zeroGamma">Zero-Gamma Level</span>
             <span class="val warn" id="mZeroGamma">n/a</span>
             <span class="sub" id="mGexDist">n/a</span>
           </div>
@@ -525,12 +528,53 @@
 
     <!-- CARD 7: HISTORICAL SESSION MATCHES -->
     <div class="dashboard-card">
-      <div class="card-header">Sessions That Looked Like Today</div>
+      <div class="card-header" data-explain="similarSessions">Sessions That Looked Like Today</div>
       <div class="card-body">
         <div id="similarSessionsList" style="display:flex; flex-direction:column; gap:6px; font-size:11px;">
           <div style="color:var(--muted); text-align:center; padding:10px;">Matching sessions...</div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- MARKET CONTEXT: sector heatmap + participant-wise OI (FII / DII / Pro / Client) -->
+  <div id="marketContextSection" class="section pair-grid">
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title" data-explain="sectors">
+          <svg class="ico" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
+          Sector Heatmap
+        </div>
+        <span class="panel-note" data-explain="breadth"><span id="breadthNote">NIFTY 50 breadth: n/a</span></span>
+      </div>
+      <div id="sectorGrid" class="sector-grid">
+        <div class="ctx-empty">Loading sectors…</div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title" data-explain="participants">
+          <svg class="ico" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2A5 5 0 0 1 21 19"/></svg>
+          FII / DII Positions
+        </div>
+        <label class="panel-note" style="display:flex; align-items:center; gap:6px;">
+          View
+          <select id="participantMode" data-change="onParticipantModeChange">
+            <option value="fut" selected>Index futures</option>
+            <option value="opt">Index options</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-scroll">
+        <table class="ctx-table" id="participantTable">
+          <thead><tr id="participantHead"></tr></thead>
+          <tbody id="participantBody"><tr><td class="ctx-empty">Loading NSE participant data…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="ctx-chart-wrap">
+        <canvas id="participantChart"></canvas>
+      </div>
+      <div class="panel-note" id="participantNote">Source: NSE end-of-day participant-wise OI, published each evening.</div>
     </div>
   </div>
 
@@ -541,6 +585,7 @@
         <div class="panel-title">
           <svg class="ico" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>
           OI Structure by Strike
+          <span data-explain="oiStructure"></span>
         </div>
         <label class="panel-note" style="display:flex; align-items:center; gap:6px;">
           View
@@ -563,12 +608,13 @@
   </div>
 
   <!-- ROLLING ATM STRADDLE + IV VS REALISED VOL (from persisted snapshots) -->
-  <div id="volPanelsSection" class="section vol-grid">
+  <div id="volPanelsSection" class="section pair-grid">
     <div class="panel">
       <div class="panel-head">
         <div class="panel-title">
           <svg class="ico" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
           Rolling ATM Straddle
+          <span data-explain="rollingStraddle"></span>
         </div>
         <span class="panel-note">CE + PE at each snapshot's ATM strike</span>
       </div>
@@ -583,6 +629,7 @@
         <div class="panel-title">
           <svg class="ico" viewBox="0 0 24 24"><path d="M2 12c2-6 4-6 6 0s4 6 6 0 4-6 6 0"/><path d="M2 20h20"/></svg>
           IV vs Realised Volatility
+          <span data-explain="ivRv"></span>
         </div>
         <span class="panel-note" title="NSE ATM IV is quoted on a 365-day calendar. It is converted to trading time (09:15 to 15:30, 252 days) so it compares like with like against intraday realised vol, which leaves out overnight gaps. Exchange holidays are not modelled.">Trading-time basis, annualised</span>
       </div>
@@ -601,6 +648,7 @@
         <div class="panel-title">
           <svg class="ico" viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 8-9M3 21h18"/></svg>
           Intraday Timeline
+          <span data-explain="timeline"></span>
           <span id="historyChip" class="pill pill-accent">History: n/a</span>
         </div>
         <label class="panel-note" style="display:flex; align-items:center; gap:6px;">
@@ -654,7 +702,7 @@
         style="cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--muted); background: var(--surface); border: 1px solid var(--border); padding: 4px 10px; border-radius: 6px;">
         <input type="checkbox" id="toggleGreeksBtn" data-change="toggleGreeksView"
           style="accent-color: var(--accent);">
-        <span>Show Real-Time Greeks (Delta Δ / Theta Θ)</span>
+        <span data-explain="greeks">Show Real-Time Greeks (Delta Δ / Theta Θ)</span>
       </label>
     </div>
   </div>
@@ -695,7 +743,7 @@
 
   <!-- Footer legend -->
   <div class="footer">
-    <div class="legend">
+    <div class="legend" data-explain="buildup">
       <span class="leg-item"><span class="leg-dot" style="background:rgba(16,185,129,0.7)"></span> Long buildup
         (bullish)</span>
       <span class="leg-item"><span class="leg-dot" style="background:rgba(239,68,68,0.7)"></span> Short buildup

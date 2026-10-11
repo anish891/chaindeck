@@ -283,6 +283,36 @@ export function renderIvRvChart(canvasId, points) {
   ], v => `${v.toFixed(1)}%`);
 }
 
+/**
+ * Participant trend over the saved trading days (oldest to newest).
+ * mode 'fut': long % of index futures; mode 'opt': net index options (calls net, puts net) for FII.
+ */
+export function renderParticipantChart(canvasId, days, mode) {
+  const accent = cssVar('--accent') || '#3b82f6';
+  const warn = cssVar('--warn') || '#f59e0b';
+  const muted = cssVar('--muted') || '#6b7280';
+  const text = cssVar('--text') || '#e8eaf0';
+  const bear = cssVar('--bear') || '#ef4444';
+  const bull = cssVar('--bull') || '#10b981';
+  const ordered = [...days].reverse();
+  const labels = ordered.map(d => new Date(d.date + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', timeZone: 'UTC' }));
+  if (mode === 'opt') {
+    renderLineChart(canvasId, labels, [
+      { label: 'FII calls net', data: ordered.map(d => d.FII.optIdxCallNet), borderColor: bear },
+      { label: 'FII puts net', data: ordered.map(d => d.FII.optIdxPutNet), borderColor: bull },
+      { label: 'Client calls net', data: ordered.map(d => d.Client.optIdxCallNet), borderColor: bear, borderWidth: 1.5, borderDash: [4, 3] },
+      { label: 'Client puts net', data: ordered.map(d => d.Client.optIdxPutNet), borderColor: bull, borderWidth: 1.5, borderDash: [4, 3] }
+    ], v => fmtK(v));
+    return;
+  }
+  renderLineChart(canvasId, labels, [
+    { label: 'FII', data: ordered.map(d => d.FII.futIdxLongPct), borderColor: accent },
+    { label: 'DII', data: ordered.map(d => d.DII.futIdxLongPct), borderColor: muted, borderWidth: 1.5 },
+    { label: 'Pro', data: ordered.map(d => d.Pro.futIdxLongPct), borderColor: warn, borderWidth: 1.5 },
+    { label: 'Client', data: ordered.map(d => d.Client.futIdxLongPct), borderColor: text, borderWidth: 1.5, borderDash: [4, 3] }
+  ], v => `${Math.round(v)}%`);
+}
+
 let oiChart = null;
 
 // Vertical reference lines (spot, max pain, ...) drawn at a fractional position between strike bars.
