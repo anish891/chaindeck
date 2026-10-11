@@ -1,141 +1,198 @@
 # ChainDeck: NIFTY Options Analytics
 
-Formerly Nifty OI Tracker.
+A live NIFTY 50 options dashboard. ChainDeck reads the NSE option chain during market hours and turns it into
+open interest structure, gamma exposure, volatility, positioning and intraday history in one page, with alerts and
+a plain-language explanation for every number.
 
-A live, auto-refreshing Nifty 50 option chain dashboard showing Change in OI for ±10 strikes around the current ATM strike. Data is pulled directly from NSE India's API.
-
-## Features
-- **Real NSE data** — fetches from `nseindia.com` API, same source as Sensibull/NiftyTrader
-- **Auto-refresh** — 3s / 5s / 10s / 30s options
-- **Change in OI** with inline bar charts for both calls and puts
-- **Buildup detection** — Long Buildup, Short Buildup, Long Unwinding, Short Covering
-- **PCR bar** — real-time put-call ratio with sentiment indicator
-- **Expiry selector** — switch between weekly / monthly expiries
-- **All key metrics** — Spot, ATM, PCR, Max Call OI strike (resistance), Max Put OI strike (support)
-- **Sortable columns** — click any column header to sort
-- **Rolling ATM straddle** — CE + PE premium at each snapshot's ATM strike, against the first value and the running average
-- **IV vs realised vol** — ATM IV converted to trading time next to 15 / 30 / 60 minute realised vol from the stored spot series, plus IV percentile against saved session closes (needs 5+ sessions)
-- **Sector heatmap** — today's move for 16 NSE sector indices with up/down counts, plus NIFTY 50 breadth
-- **FII / DII positions** — NSE's end-of-day participant-wise OI (FII, DII, Pro, Client) for index futures and options, last 10 trading days, cached in storage once fetched
-- **"What does this mean?"** — a help button on every panel and key metric with a plain-language explanation in English or Hindi
+ChainDeck is for information and education only. It does not give investment advice, tips or recommendations.
 
 ---
 
-## Deploy to Vercel (free, takes 3 minutes)
+## At a glance
 
-### Step 1 — Push to GitHub
-```bash
-# If you don't have git initialized:
-git init
-git add .
-git commit -m "initial"
-
-# Create a new repo on github.com, then:
-git remote add origin https://github.com/YOUR_USERNAME/chaindeck.git
-git push -u origin main
-```
-
-### Step 2 — Deploy on Vercel
-1. Go to [vercel.com](https://vercel.com) → Sign up / Log in
-2. Click **Add New Project**
-3. Import your GitHub repo
-4. **No env variables needed** — just click **Deploy**
-5. Done! You'll get a URL like `https://chaindeck.vercel.app`
+- **Key numbers strip** (stays on screen while you scroll): spot, ATM strike, day change, PCR, India VIX, max pain,
+  implied future, market regime and the age of the data.
+- **Expiry selector** for every weekly and monthly expiry NSE lists.
+- **Auto-refresh** every 3, 5, 10 or 30 seconds while the market is open (every 60 seconds once it closes),
+  plus a manual refresh button.
+- **Light, dark or system theme.**
 
 ---
 
-## Run locally (for testing)
-```bash
-npm install
-npm start
-# Open http://localhost:3000
-```
+## Market reading
+
+### Composite Market Regime
+A single label for the kind of day it looks like (for example rangebound or trending), built from gamma exposure,
+PCR, CPR width, IV skew and where spot sits against max pain. A "signal agreement" score shows how many of those
+readings point the same way, and a bias badge summarises the direction.
+
+### Live Trade Setup
+An automatic summary of today's bias, key target, invalidation level and the strategy type that suits current
+conditions, derived from CPR, the zero-gamma level, PCR rate of change and the straddle range.
+
+### Smart Money Flow
+A ticker of strikes where volume or open interest jumped far above that strike's own recent pace (scored as a
+z-score). Only back-to-back snapshots are compared, so gaps in the data do not raise false alarms.
 
 ---
 
-## How it works
+## Metric cards
 
-```
-Browser  →  /api/option-chain  →  NSE India API
-             (your Vercel backend adds proper headers & cookies)
-```
-
-NSE blocks direct browser requests (CORS). The backend proxy:
-1. Fetches a session cookie from `nseindia.com`
-2. Uses that cookie + browser-like headers to call the NSE option chain API
-3. Parses and returns clean JSON to your frontend
-4. Caches for 5 seconds to avoid hammering NSE
-
----
-
-## Notes
-- NSE API is only live during market hours (9:15 AM – 3:30 PM IST on weekdays)
-- Outside market hours, NSE returns the last EOD snapshot
-- If NSE blocks requests temporarily, you may see an error — it auto-retries
+| Card | What it shows |
+|---|---|
+| **Price & Range** | Spot, ATM strike, expected range to expiry and the ATM straddle price |
+| **Sentiment & Bias** | PCR by OI, near-the-money PCR, volume PCR, PCR rate of change over 5 and 15 minutes, 25-delta IV skew and a volatility regime badge (ATM IV against recent sessions, or India VIX when there is not enough history) |
+| **Open Interest & Velocity** | Total call and put OI, change on the day, and OI rate of change over 5 and 15 minutes |
+| **Key Levels** | Max pain, the largest call and put OI strikes with their share of total OI, and the top three call and put walls |
+| **Central Pivot Range** | Pivot, top and bottom CPR, CPR width and type (narrow, normal or wide), and R1, R2, S1, S2 from the previous session's real high, low and close |
+| **Gamma Exposure (GEX)** | Net dealer gamma exposure in crores per 1% move, call and put GEX, the gamma regime and the zero-gamma level with its distance from spot |
+| **Sessions That Looked Like Today** | The closest past sessions by PCR, gamma regime, CPR width, IV skew and OI change, with a similarity score |
 
 ---
 
-## History & persistence (optional but recommended)
+## Charts and panels
 
-Each time NSE publishes a new option-chain snapshot (~once a minute) the server stores a compact copy
-(series point + per-strike OI/price/IV). That powers the **Intraday Timeline** chart, the 5m/15m rate-of-change
-figures (which now survive a page refresh), and end-of-day **session summaries** used by
-"Sessions That Looked Like Today" and the IV z-score.
+### OI Structure by Strike
+Call and put open interest at every strike, with markers for spot, max pain and the main call and put walls.
+Switch the view to see:
+- open interest
+- change in OI against the previous close
+- OI change over the last 5, 15 or 30 minutes
+- OI change since the first snapshot of the day
 
-Storage is **Upstash Redis over REST** (no connection pool, no extra dependency):
+Click any bar to open that strike's drill-down.
 
-1. Vercel → your project → **Storage / Marketplace → Upstash Redis → Create** (free tier is plenty:
-   ≈1–2 KB per snapshot, ~400 snapshots per trading day).
-2. Vercel injects `KV_REST_API_URL` / `KV_REST_API_TOKEN` (or set `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`).
-3. Redeploy. The chip on the timeline card switches from `History: in-memory` to `History: saved`.
+### Rolling ATM Straddle
+The ATM call plus put premium at every snapshot, always at whichever strike is at the money at that moment,
+against the day's first value and the running average. The summary shows the current straddle, ATM strike,
+change against the open and the day average, and the day's range.
 
-Without those variables the app still works; history just lives in memory and disappears on restart / cold start.
-Check status any time at `/api/storage-status`.
+### IV vs Realised Volatility
+ATM implied volatility next to realised volatility over the last 15, 30 and 60 minutes. The summary shows ATM IV,
+NSE's calendar IV, each realised vol window, the gap between IV and 30-minute realised vol, and an IV percentile
+against saved session closes.
 
-**Recording while nobody has the page open.** Snapshots are recorded whenever someone's browser polls, and also by
-`GET /api/cron/snapshot`. Hit it every minute during market hours (09:15-15:30 IST, Mon-Fri) from an external pinger
-(e.g. cron-job.org) or Vercel Cron on a plan that allows per-minute crons (Hobby only allows daily).
-The endpoint **requires** `Authorization: Bearer <CRON_SECRET>`. In production it refuses every request (503)
-until `CRON_SECRET` is set, and the secret is never accepted in the URL.
+### Intraday Timeline
+Spot through the day with one overlay on a second axis: PCR, volume PCR, ATM straddle, ATM IV, IV skew, India VIX,
+net GEX, total call OI or total put OI.
 
-Optional env: `NIFTY_LOT_SIZE` (GEX scaling, default 65), `RISK_FREE_RATE` (default 0.065).
+### Sector Heatmap
+Today's percentage move for 16 NSE sector indices (Bank, Private Bank, PSU Bank, Financial Services, IT, Auto,
+FMCG, Pharma, Healthcare, Metal, Energy, Oil & Gas, Realty, Media, Consumer Durables and Infrastructure), sorted
+from strongest to weakest, with how many stocks in each are up and down. NIFTY 50 breadth (stocks up against down)
+sits above the tiles. It updates live while the page is open.
 
----
+### FII / DII Positions
+Participant-wise open interest from NSE's end-of-day file for FIIs, DIIs, Pro traders and Clients:
+- **Index futures view:** long, short and net contracts, long percentage, and the change in net position against
+  the previous trading day.
+- **Index options view:** net calls and net puts, and their change against the previous trading day.
+- A chart of the last 10 trading days (FII, DII, Pro and Client long percentage, or FII and Client net options).
 
-## Security and privacy
-
-There are no user accounts and no personal data is collected: no cookies, no analytics, no tracking.
-What is in place:
-
-- **Nothing third-party loads in the browser.** Fonts (Inter, JetBrains Mono), Chart.js and the PDF/snapshot libraries
-  are served from this site (`public/fonts`, `public/vendor`), so visitors' IP addresses are never sent to Google or a CDN.
-  Vendored libraries are pinned by hash in `api/verify-security.js`; update them from the official source and re-pin.
-- **Strict Content-Security-Policy and friends** (scripts from `'self'` only, no inline scripts, no framing,
-  `Referrer-Policy: no-referrer`, `nosniff`, `Permissions-Policy`). The headers live in `api/security.js`;
-  `vercel.json` mirrors them for static files and a test fails if the two drift apart.
-- **No cross-origin reads.** There is no CORS header; the page and API share one origin.
-- **Operational endpoints are authenticated.** `/api/cron/snapshot` and `/api/session-summary` need
-  `Authorization: Bearer <CRON_SECRET>`, compared in constant time and failing closed in production.
-- **Inputs are validated** (expiry, date, strike) before anything reaches NSE or Redis, and error responses are generic:
-  details go to the server log only.
-- **Rate limiting** (per IP, in memory per serverless instance) is a speed bump. For a hard limit add a rate-limit
-  rule in the Vercel Firewall.
-- **Dependencies:** `npm audit` is clean; the app uses `express`, `node-fetch` and `dotenv` only.
-- Run `npm test` (includes `verify-security.js`) after any change. If you find a vulnerability, please open a
-  private security advisory on GitHub rather than a public issue.
-
-Rotate `CRON_SECRET` (Vercel env var + the pinger's header) if it is ever exposed.
+### Advanced analytics (collapsible)
+- **ATM Straddle and Expected Move:** call and put legs, total straddle, change against the previous session,
+  decay status, expected move to expiry and per day, and the upper and lower range bounds.
+- **Market-Implied Expiry Probability:** the probability distribution of the expiry close implied by option prices
+  across strikes, with the most likely level.
+- **Intraday Trend and Breakout Scoring:** a 15 to 30 minute directional score and the balance between breakout and
+  rangebound conditions.
 
 ---
 
-## File structure
-```
-chaindeck/
-├── api/
-│   └── index.js        ← Backend proxy (runs on Vercel serverless)
-├── public/
-│   └── index.html      ← Frontend dashboard
-├── package.json
-├── vercel.json         ← Vercel routing config
-└── README.md
-```
+## Option chain
+
+- ±10 strikes around the ATM strike, with the ATM row highlighted.
+- Change in OI, OI, IV, LTP and bid/ask for calls and puts, with inline bars.
+- Buildup colouring for every leg: long buildup, short buildup, long unwinding and short covering.
+- Optional Delta and Theta columns.
+- Sort by any column.
+- Click a strike to open its drill-down.
+
+### Strike drill-down
+A side drawer with one strike's call and put open interest, premium and IV across the day. On phones it can be
+swiped closed.
+
+---
+
+## Alerts
+
+Alerts fire only when something changes, not while a condition simply holds, and every alert type has a buffer
+so a value hovering around a threshold does not fire repeatedly.
+
+| Alert | Fires when |
+|---|---|
+| PCR zones | PCR moves above 1.2 or below 0.8 (both adjustable) |
+| Key levels | Spot crosses the CPR top or bottom, the zero-gamma level, or the main call or put wall |
+| Wall shifts | The largest call or put OI strike moves to a new strike |
+| Gamma flip | Net GEX changes sign |
+| Regime change | The composite regime label changes (off by default) |
+| Unusual flow | A strike shows a volume or OI spike |
+| Momentum | Spot moves 0.3% or more within 5 minutes (adjustable) |
+| VIX spike | India VIX is up 5% or more on the day (adjustable) |
+
+Each alert type can be switched on or off. Alerts are kept in a log behind the bell icon and can also appear as an
+on-page pop-up, a sound or a desktop notification. You can choose the lowest severity that interrupts you, set a
+cooldown and snooze everything. Settings and the log are stored only in your browser.
+
+---
+
+## Explanations in English and Hindi
+
+Every panel and key metric has a small help button. It opens a short explanation of what the number means and how
+traders read it, with an English and हिन्दी toggle. The language choice is remembered.
+
+---
+
+## Export
+
+- **Option chain (CSV)**
+- **Analytics summary (PDF)**
+- **Dashboard snapshot (PNG)**
+
+---
+
+## Data and how it is calculated
+
+### Sources
+
+| Data | Source | Freshness |
+|---|---|---|
+| Option chain | NSE option chain | NSE updates about once a minute during market hours |
+| India VIX, sector indices, NIFTY 50 breadth | NSE index list | Live while the page is open, reused for up to 15 seconds |
+| Previous session high, low and close for CPR | Daily NIFTY bars | Once per session |
+| FII / DII / Pro / Client positions | NSE end-of-day participant-wise OI file | Published each evening after the close |
+
+Outside market hours the dashboard shows the last session's values.
+
+### Intraday history
+A compact copy of each new NSE snapshot (series values and per-strike OI, premium and IV) is saved about once a
+minute. This powers the Intraday Timeline, the Rolling ATM Straddle, IV vs Realised Volatility, the 5, 15 and 30
+minute OI views, rate-of-change figures that survive a page refresh, and the strike drill-down. A summary of each
+session is saved after the close for "Sessions That Looked Like Today", the volatility regime and the IV percentile.
+
+### Methods
+- **Expected move:** about 0.85 times the ATM straddle, as a one-standard-deviation move to expiry, scaled by the
+  square root of trading days for a per-day figure.
+- **Implied future:** put-call parity at the ATM strike.
+- **Max pain:** the expiry level at which option holders collectively lose the most.
+- **IV skew:** 25-delta risk reversal (put IV minus call IV at the strikes nearest 25 delta), falling back to the
+  ATM put-call IV gap.
+- **GEX:** Black-Scholes gamma for every strike multiplied by open interest, lot size and spot squared, scaled to a
+  1% move, with call and put exposure netted against each other. The zero-gamma level is where net GEX changes sign.
+- **Implied probability:** a smoothed volatility smile turned into a distribution of expiry prices
+  (Breeden-Litzenberger), with a lognormal fallback.
+- **Realised volatility:** squared log returns of spot between snapshots, divided by the trading minutes they cover
+  and annualised over 252 trading days of 375 minutes.
+- **Trading-time IV:** NSE quotes IV on a 365-day calendar. It is converted so the same variance is spread over
+  trading hours only (09:15 to 15:30 IST, weekdays), which makes it directly comparable with intraday realised
+  volatility. Exchange holidays are not modelled.
+- **IV percentile:** the share of saved session closing IVs at or below today's IV (shown once 5 sessions exist).
+- **Buildup:** price change and OI change taken together for each leg.
+
+### Limitations
+- NSE's data can lag by a minute or more, and NSE sometimes times out. When that happens the dashboard keeps the
+  last good values on screen.
+- Realised volatility needs about 15 minutes of snapshots each morning and reads high in the first half hour.
+- Intraday realised volatility leaves out overnight gaps, so implied volatility usually sits above it.
+- Scores, regimes and probabilities describe current conditions and how option prices are set. They are not
+  forecasts.
