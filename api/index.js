@@ -21,7 +21,7 @@ app.use('/api', apiRoutes);
 
 if (require.main === module) {
   app.listen(PORT, () => {
-    console.log(`Nifty OI Tracker running on http://localhost:${PORT}`);
+    console.log(`Strikewise running on http://localhost:${PORT}`);
   });
 }
 

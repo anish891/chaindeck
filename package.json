@@ -1,7 +1,7 @@
 {
-  "name": "nifty-oi-tracker",
+  "name": "strikewise",
   "version": "1.0.0",
-  "description": "Live Nifty 50 Change in OI tracker — ±10 strikes",
+  "description": "Strikewise: live NIFTY option chain analytics (OI, GEX, volatility, alerts)",
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js",

@@ -1,4 +1,6 @@
-# Nifty OI Tracker — Live Change in OI Dashboard
+# Strikewise: NIFTY Options Analytics
+
+Formerly Nifty OI Tracker.
 
 A live, auto-refreshing Nifty 50 option chain dashboard showing Change in OI for ±10 strikes around the current ATM strike. Data is pulled directly from NSE India's API.
 

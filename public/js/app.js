@@ -1206,7 +1206,7 @@ export function exportCSV() {
   const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  const filename = `Nifty_OI_${currentData.expiry || 'chain'}_${new Date().toISOString().slice(0, 10)}.csv`;
+  const filename = `Strikewise_${currentData.expiry || 'chain'}_${new Date().toISOString().slice(0, 10)}.csv`;
   link.setAttribute('href', url);
   link.setAttribute('download', filename);
   document.body.appendChild(link);
@@ -1241,7 +1241,7 @@ export async function takeSnapshot() {
     });
     const image = canvas.toDataURL('image/png');
     const link = document.createElement('a');
-    const filename = `Nifty_OI_Snapshot_${new Date().toISOString().slice(0, 10)}.png`;
+    const filename = `Strikewise_Snapshot_${new Date().toISOString().slice(0, 10)}.png`;
     link.download = filename;
     link.href = image;
     link.click();
@@ -1275,7 +1275,7 @@ export async function exportPDF() {
     try {
       const opt = {
         margin: [0.25, 0.25, 0.25, 0.25],
-        filename: `Nifty_OI_Report_${new Date().toISOString().slice(0, 10)}.pdf`,
+        filename: `Strikewise_Report_${new Date().toISOString().slice(0, 10)}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, logging: false },
         jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape', compress: true },
@@ -1455,7 +1455,7 @@ function buildPdfReportElement(d) {
 
     <!-- Footer Disclaimer -->
     <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 8px; font-size: 9px; color: #94a3b8; text-align: center;">
-      Report generated automatically by Nifty OI Tracker. Data sourced from NSE India. For analytical purposes only.
+      Report generated automatically by Strikewise. Data sourced from NSE India. For analytical purposes only.
     </div>
   `;
 
