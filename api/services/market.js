@@ -37,16 +37,6 @@ function pick(row) {
   };
 }
 
-// Sector tiles: [short label, exact NSE index name]
-const SECTORS = [
-  ['Bank', 'NIFTY BANK'], ['Private Bank', 'NIFTY PRIVATE BANK'], ['PSU Bank', 'NIFTY PSU BANK'],
-  ['Financial Services', 'NIFTY FINANCIAL SERVICES'], ['IT', 'NIFTY IT'], ['Auto', 'NIFTY AUTO'],
-  ['FMCG', 'NIFTY FMCG'], ['Pharma', 'NIFTY PHARMA'], ['Healthcare', 'NIFTY HEALTHCARE INDEX'],
-  ['Metal', 'NIFTY METAL'], ['Energy', 'NIFTY ENERGY'], ['Oil & Gas', 'NIFTY OIL & GAS'],
-  ['Realty', 'NIFTY REALTY'], ['Media', 'NIFTY MEDIA'], ['Consumer Durables', 'NIFTY CONSUMER DURABLES'],
-  ['Infrastructure', 'NIFTY INFRASTRUCTURE']
-];
-
 async function loadIndices() {
   const cookies = await getCookies();
   const json = await fetchWithTimeout('https://www.nseindia.com/api/allIndices', cookies);
@@ -54,12 +44,7 @@ async function loadIndices() {
   const nifty = rows.find(r => r.index === 'NIFTY 50');
   const vix = rows.find(r => r.index === 'INDIA VIX');
   if (!nifty) throw new Error('NIFTY 50 missing from allIndices');
-  const sectors = SECTORS.map(([name, index]) => {
-    const r = rows.find(x => x.index === index);
-    return r ? { name, index, last: r.last, percentChange: r.percentChange, advances: Number(r.advances) || 0, declines: Number(r.declines) || 0 } : null;
-  }).filter(Boolean);
-  const breadth = { advances: Number(nifty.advances) || 0, declines: Number(nifty.declines) || 0, unchanged: Number(nifty.unchanged) || 0 };
-  return { nifty: pick(nifty), vix: vix ? pick(vix) : null, sectors, breadth };
+  return { nifty: pick(nifty), vix: vix ? pick(vix) : null };
 }
 
 async function getIndexSnapshot() {

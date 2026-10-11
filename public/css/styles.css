@@ -1449,7 +1449,7 @@ body.exporting-pdf .keystrip {
   }
 }
 
-/* Two panels side by side on wide screens (vol panels, market context) */
+/* Two panels side by side on wide screens (vol panels) */
 .pair-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -2059,43 +2059,7 @@ body.exporting-pdf #alertToasts {
   }
 }
 
-/* ═════════ Market context: sectors + participant OI ═════════ */
-.sector-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 6px;
-}
-
-.sector-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  min-width: 0;
-}
-
-.sector-name {
-  font-size: 11px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sector-pct {
-  font-family: var(--mono);
-  font-size: 14px;
-  color: var(--text);
-}
-
-.sector-breadth {
-  font-size: 10px;
-  color: var(--text);
-  opacity: 0.75;
-}
-
+/* ═════════ Participant OI (FII / DII / Pro / Client) ═════════ */
 .ctx-empty {
   color: var(--muted);
   font-size: 11px;

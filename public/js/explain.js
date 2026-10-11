@@ -95,14 +95,6 @@ const EXPLAIN = {
     en: ['Option Greeks', 'Delta is roughly how much the option price moves for a 1 point move in NIFTY, and also a rough chance of finishing in the money. Theta is how much value the option loses per day from time decay, all else equal.'],
     hi: ['ऑप्शन ग्रीक्स', 'डेल्टा लगभग बताता है कि NIFTY के 1 पॉइंट हिलने पर ऑप्शन की कीमत कितनी हिलेगी, और मोटे तौर पर इन-द-मनी खत्म होने की संभावना भी। थीटा बताता है कि बाकी सब वैसा ही रहे तो समय बीतने से ऑप्शन रोज़ कितनी वैल्यू खोता है।']
   },
-  sectors: {
-    en: ['Sector Heatmap', 'Today\'s percentage change for the main NSE sector indices, greener for gains and redder for losses. When banks and financials move together, NIFTY usually follows, because they are its biggest weight. Each tile also shows how many of that sector\'s stocks are up and down.'],
-    hi: ['सेक्टर हीटमैप', 'मुख्य NSE सेक्टर इंडेक्स का आज का प्रतिशत बदलाव, बढ़त हरे में और गिरावट लाल में। जब बैंक और फ़ाइनेंशियल साथ चलते हैं तो NIFTY अक्सर उनके पीछे चलता है, क्योंकि इंडेक्स में उनका वज़न सबसे ज़्यादा है। हर टाइल यह भी दिखाती है कि उस सेक्टर के कितने शेयर ऊपर और कितने नीचे हैं।']
-  },
-  breadth: {
-    en: ['Market Breadth', 'How many of the 50 NIFTY stocks are up versus down today. A rise led by only a few heavyweights with most stocks falling is weaker than a broad rise.'],
-    hi: ['मार्केट ब्रेड्थ', 'आज NIFTY के 50 शेयरों में से कितने ऊपर और कितने नीचे हैं। अगर सिर्फ़ कुछ बड़े शेयरों के दम पर तेज़ी हो और ज़्यादातर शेयर गिर रहे हों, तो वह चौड़ी तेज़ी से कमज़ोर मानी जाती है।']
-  },
   participants: {
     en: ['FII / DII Positions', 'NSE publishes, every evening, how many index futures and options contracts each type of trader holds: FIIs (foreign institutions), DIIs (domestic institutions such as mutual funds), Pro (brokers trading their own money) and Client (mostly retail). Long % in index futures is the share of their futures that are long; FIIs below about 30% are heavily short, above about 70% heavily long. Net change is versus the previous trading day.'],
     hi: ['FII / DII पोज़ीशन', 'NSE हर शाम बताता है कि हर तरह के ट्रेडर के पास कितने इंडेक्स फ़्यूचर्स और ऑप्शन कॉन्ट्रैक्ट हैं: FII (विदेशी संस्थान), DII (घरेलू संस्थान जैसे म्यूचुअल फ़ंड), Pro (अपने पैसे से ट्रेड करने वाले ब्रोकर) और Client (ज़्यादातर रिटेल)। इंडेक्स फ़्यूचर्स में Long % बताता है कि उनके फ़्यूचर्स का कितना हिस्सा लॉन्ग है; FII का लगभग 30% से नीचे होना भारी शॉर्ट और 70% से ऊपर भारी लॉन्ग माना जाता है। Net change पिछले ट्रेडिंग दिन के मुकाबले है।']
