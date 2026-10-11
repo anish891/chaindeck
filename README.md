@@ -1,4 +1,4 @@
-# Strikewise: NIFTY Options Analytics
+# ChainDeck: NIFTY Options Analytics
 
 Formerly Nifty OI Tracker.
 
@@ -28,7 +28,7 @@ git add .
 git commit -m "initial"
 
 # Create a new repo on github.com, then:
-git remote add origin https://github.com/YOUR_USERNAME/nifty-oi-tracker.git
+git remote add origin https://github.com/YOUR_USERNAME/chaindeck.git
 git push -u origin main
 ```
 
@@ -37,7 +37,7 @@ git push -u origin main
 2. Click **Add New Project**
 3. Import your GitHub repo
 4. **No env variables needed** — just click **Deploy**
-5. Done! You'll get a URL like `https://nifty-oi-tracker.vercel.app`
+5. Done! You'll get a URL like `https://chaindeck.vercel.app`
 
 ---
 
@@ -127,7 +127,7 @@ Rotate `CRON_SECRET` (Vercel env var + the pinger's header) if it is ever expose
 
 ## File structure
 ```
-nifty-oi-tracker/
+chaindeck/
 ├── api/
 │   └── index.js        ← Backend proxy (runs on Vercel serverless)
 ├── public/
