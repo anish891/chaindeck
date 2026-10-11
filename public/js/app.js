@@ -146,6 +146,40 @@ function renderParticipants() {
   }
 }
 
+// NSE's index list sometimes times out for one refresh; keep the last good sectors on screen meanwhile.
+let lastSectorData = null;
+
+function renderSectors(d) {
+  if (d.sectors && d.sectors.length) lastSectorData = { sectors: d.sectors, breadth: d.breadth };
+  else if (lastSectorData) d = lastSectorData;
+  const grid = document.getElementById('sectorGrid');
+  const breadthEl = document.getElementById('breadthNote');
+  if (breadthEl) {
+    const b = d.breadth;
+    breadthEl.textContent = b ? `NIFTY 50 breadth: ${b.advances} up, ${b.declines} down` : 'NIFTY 50 breadth: n/a';
+  }
+  if (!grid) return;
+  const sectors = (d.sectors || []).slice().sort((a, b) => b.percentChange - a.percentChange);
+  if (!sectors.length) {
+    grid.replaceChildren(cell('div', 'Sector data is unavailable right now.', 'ctx-empty'));
+    return;
+  }
+  grid.replaceChildren(...sectors.map(sct => {
+    const pctChg = Number(sct.percentChange) || 0;
+    const strength = Math.round(12 + Math.min(Math.abs(pctChg) / 2, 1) * 58); // 2% or more = full colour
+    const tile = document.createElement('div');
+    tile.className = 'sector-tile';
+    tile.style.background = pctChg === 0 ? 'var(--surface2)' : `color-mix(in srgb, var(${pctChg > 0 ? '--bull' : '--bear'}) ${strength}%, var(--surface))`;
+    tile.title = `${sct.index}: ${fmt(sct.last)}`;
+    tile.append(
+      cell('span', sct.name, 'sector-name'),
+      cell('strong', `${pctChg > 0 ? '+' : ''}${pctChg.toFixed(2)}%`, 'sector-pct'),
+      cell('span', `${sct.advances} up · ${sct.declines} down`, 'sector-breadth')
+    );
+    return tile;
+  }));
+}
+
 export function onTimelineMetricChange() {
   const sel = document.getElementById('timelineMetric');
   timelineMetric = sel ? sel.value : 'pcr';
@@ -744,6 +778,7 @@ export function renderAll() {
 
 
   recordSnapshot(d);
+  renderSectors(d);
   renderFlowFeed(d);
   renderTimeline();
   renderVolPanels();
