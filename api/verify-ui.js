@@ -53,25 +53,45 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   });
 }
 
-// ── 4. PDF report: the things that produced a blank / clipped / half-empty PDF ──
+// ── 4. PDF report: built from the live dashboard (same information as the Snapshot), and the traps that made it
+//       blank / clipped / sliced ──
 {
-  const start = app.indexOf('function buildPdfReportElement');
-  assert(start > 0, 'buildPdfReportElement not found');
-  const end = app.indexOf('\nexport function toggleExportMenu', start) > 0 ? app.indexOf('\nexport function toggleExportMenu', start) : app.length;
-  const fn = app.slice(start, start + 12000);
-  const head = fn.slice(0, fn.indexOf('container.innerHTML'));
-  // html2pdf renders a clone inside its own container; an absolutely positioned child takes no space, so the
-  // container (and every page) came out 0px tall: a "successful" export that was completely blank.
-  assert(!/position:\s*(absolute|fixed)/.test(head), 'the PDF report element must stay in normal flow (absolute/fixed positioning makes the PDF blank)');
-  assert(!/left:\s*-?\d{3,}px/.test(head), 'do not hide the report by pushing it off-screen on the element itself; use a wrapper');
-  // html2pdf lays the clone out as wide as the page (746px portrait), so a fixed wider width is clipped
-  assert(/width:\s*100%/.test(head) && !/width:\s*\d+px/.test(head), 'the report must be width:100%, not a fixed pixel width');
-  assert(/jsPDF:\s*\{[^}]*orientation:\s*'portrait'/.test(app), 'portrait keeps the report on one page');
-  // field names must match what the API sends (a mismatch printed "n/a" / blank in the PDF)
-  assert(/gex\.totalGexCr/.test(fn) && !/gex\.netGexCr/.test(fn), 'PDF must read gex.totalGexCr');
-  assert(/cpr\.cprType/.test(fn) && !/cpr\.type\b/.test(fn), 'PDF must read cpr.cprType');
+  const grab = name => {
+    const i = app.indexOf(name);
+    assert(i > 0, `${name} not found in app.js`);
+    return app.slice(i, i + 5500);
+  };
+  const build = grab('function buildDashboardReport');
+  const mark = grab('function markAvoidBreaks');
   const css = read('public/css/styles.css');
-  assert(/\.pdf-export-report table\s*\{[^}]*min-width:\s*0/.test(css), 'the report table must override the global min-width: 860px or it is clipped on the page');
+  const rule = sel => {
+    const m = new RegExp(`${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(css);
+    return m ? m[1] : '';
+  };
+
+  assert(!app.includes('buildPdfReportElement'), 'the old hand-built summary report must be gone (the PDF mirrors the dashboard)');
+  // content: clones the dashboard sections, so every panel (including future ones) is included
+  assert(/document\.body\.children/.test(build) && /cloneNode\(true\)/.test(build), 'the report must clone the live dashboard sections');
+  assert(/position === 'fixed'/.test(build), 'fixed overlays, drawers and the footer must be skipped');
+  // a cloned <canvas> is blank, so charts must be swapped for images or the PDF has empty chart areas
+  assert(/querySelectorAll\('canvas'\)/.test(build) && /toDataURL/.test(build), 'charts must be converted to images (cloned canvases are blank)');
+  assert(/querySelectorAll\('select'\)/.test(build) && /querySelectorAll\('button/.test(build), 'dropdowns become text and buttons are dropped');
+  assert(/details/.test(build) && /\.open = true/.test(build), 'collapsed "Advanced analytics" must be opened');
+  assert(/data-theme', 'light'/.test(build), 'the report uses the light print palette');
+  // layout traps
+  const root = rule('.pdf-export-report');
+  assert(root && !/position:\s*(absolute|fixed)/.test(root), 'the report root must stay in normal flow (absolute/fixed makes the PDF blank)');
+  assert(/width:\s*100%/.test(root) && !/[^-]width:\s*\d+px/.test(root), 'the report must be width:100%, not a fixed pixel width (clipped otherwise)');
+  assert(/overflow:\s*visible/.test(rule('.pdf-export-report .table-wrap')) && /max-height:\s*none/.test(rule('.pdf-export-report .table-wrap')), 'the option chain must not be height/scroll limited in the report');
+  assert(/min-width:\s*0/.test(rule('.pdf-export-report table')), 'the report tables must override the global min-width: 860px');
+  // pagination
+  assert(/jsPDF:\s*\{[^}]*orientation:\s*'landscape'/.test(app), 'landscape keeps the dashboard layout');
+  const pagebreak = (/^\s*pagebreak:\s*\{.*\}\s*$/m.exec(app) || [''])[0];
+  assert(pagebreak, 'html2pdf pagebreak option not found');
+  assert(pagebreak.includes("'.pdf-avoid'") && !pagebreak.includes('avoid-all'), "cards are kept whole via .pdf-avoid (not 'avoid-all', which leaves huge gaps)");
+  assert(/display === 'grid'/.test(mark), 'grids must be kept together (a page-break spacer cannot hold back a single grid item)');
+  assert(/previous\.style\.pageBreakBefore/.test(build), 'the option chain starts on its own page, keeping its heading with the table');
+  assert(/markAvoidBreaks\(reportContainer\)/.test(app) && /width: 1074px/.test(app), 'avoid-marking must run on the attached report at the page width (1074px)');
 }
 
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

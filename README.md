@@ -146,7 +146,7 @@ traders read it, with an English and हिन्दी toggle. The language cho
 ## Export
 
 - **Option chain (CSV)**
-- **Analytics summary (PDF)**
+- **Analytics summary (PDF)**: the full dashboard as multi-page A4 landscape (every panel, chart and the option chain, light theme), the same information as the Snapshot
 - **Dashboard snapshot (PNG)**
 
 ---

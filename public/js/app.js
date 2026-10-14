@@ -1403,23 +1403,26 @@ export async function exportPDF() {
   if (btn) setIconText(btn, 'loader', 'Generating PDF...', 'spin');
 
   const generatePDF = async () => {
-    const reportContainer = buildPdfReportElement(currentData);
+    const reportContainer = buildDashboardReport(currentData);
     // Keep it laid out (so it has a real size) but out of sight, via a wrapper instead of positioning the report itself.
     const holder = document.createElement('div');
     holder.setAttribute('aria-hidden', 'true');
-    holder.style.cssText = 'position: fixed; left: -10000px; top: 0; width: 1100px; overflow: hidden; pointer-events: none;';
+    // 1074px = A4 landscape printable width, so heights measured here match the layout html2pdf will use
+    holder.style.cssText = 'position: fixed; left: -10000px; top: 0; width: 1074px; overflow: hidden; pointer-events: none;';
     holder.appendChild(reportContainer);
     document.body.appendChild(holder);
+    markAvoidBreaks(reportContainer);
 
     try {
       const opt = {
         margin: [0.25, 0.25, 0.25, 0.25],
         filename: `ChainDeck_Report_${new Date().toISOString().slice(0, 10)}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
-        // Portrait: the report is ~1.4x taller than wide, so it fits one A4 page (landscape pushed the table to page 2 and left page 1 mostly blank)
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait', compress: true },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 1.6, useCORS: true, logging: false, backgroundColor: '#ffffff' },
+        // Landscape: the dashboard is laid out for a wide screen, so this keeps panels side by side as they appear on screen.
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape', compress: true },
+        // Keep cards, panels and table rows whole instead of slicing through them ('avoid-all' would leave huge gaps).
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['.pdf-avoid', 'img', '.keystrip', '.oi-summary', 'tr'] }
       };
 
       if (window.html2pdf) {
@@ -1443,162 +1446,97 @@ export async function exportPDF() {
   }
 }
 
-function buildPdfReportElement(d) {
-  const container = document.createElement('div');
-  container.className = 'pdf-export-report';
-  container.style.cssText = `
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    color: #0f172a;
-    background: #ffffff;
-    padding: 24px 32px;
-    width: 100%;
-    margin: 0 auto;
-    box-sizing: border-box;
-  `;
-  // width: 100% (not a fixed px width): html2pdf lays the clone out inside a container exactly as wide as the PDF page,
-  // so a wider fixed width gets clipped on the right.
-  // No position/left/top here on purpose: html2pdf renders a clone of this element inside its own container, and an
-  // absolutely positioned child takes no space, so that container (and the PDF page) came out 0px tall and blank.
+/**
+ * Builds the PDF from the live dashboard (every panel, chart and table as shown on screen), so the PDF carries the same
+ * information as the Snapshot and new panels are included automatically. Each section is cloned into a print-friendly
+ * light-theme container. Things a clone cannot carry over are handled explicitly:
+ *   - <canvas> charts clone as blank, so they become <img> snapshots of the original canvas;
+ *   - dropdowns become plain text, and buttons / help popovers / the greeks toggle are dropped;
+ *   - collapsed "Advanced analytics" is opened; fixed overlays, drawers and the toolbar are skipped.
+ * The container is normal-flow and width:100%: html2pdf lays the clone out inside a container as wide as the page,
+ * and an absolutely positioned or fixed-width element there gets clipped or collapses to 0px (blank PDF).
+ */
+const PDF_PAGE_PX = 746; // printable page height in CSS px at the report width (A4 landscape, 0.25in margins)
+
+/**
+ * html2pdf can keep chosen elements from being sliced by a page break, but only via selectors. The dashboard's cards
+ * are a mix of classes and inline-styled boxes, so tag them by how they look instead: any rounded box that is bordered
+ * or filled and no more than 60% of a page tall (larger containers may break between their inner cards). Must run while the report is attached and laid out at the page width.
+ */
+function markAvoidBreaks(root) {
+  root.querySelectorAll('div, details, table').forEach(el => {
+    const h = el.getBoundingClientRect().height;
+    if (h < 24) return;
+    const cs = getComputedStyle(el);
+    // A grid's items cannot be held back one at a time (the page-break spacer becomes a grid cell and shifts the layout
+    // instead of moving the card), so keep a whole grid together whenever it fits on one page.
+    if (cs.display === 'grid' && h <= PDF_PAGE_PX * 0.95) { el.classList.add('pdf-avoid'); return; }
+    if (h > PDF_PAGE_PX * 0.6) return; // bigger containers may split between their inner cards
+    const rounded = parseFloat(cs.borderTopLeftRadius) > 0;
+    const bordered = parseFloat(cs.borderTopWidth) > 0 && cs.borderTopStyle !== 'none';
+    const filled = cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent';
+    if (rounded && (bordered || filled)) el.classList.add('pdf-avoid');
+  });
+}
+
+function buildDashboardReport(d) {
+  const root = document.createElement('div');
+  root.className = 'pdf-export-report';
+  root.setAttribute('data-theme', 'light'); // scopes the light palette to the report, whatever theme the page is in
 
   const dateStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
-  const cr = d.compositeRegime || {};
-  const sd = d.straddleDetails || {};
-  const gex = d.gex || {};
-
-  container.innerHTML = `
-    <!-- Header Banner -->
-    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 16px;">
-      <div>
-        <h1 style="margin: 0; font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">
-          Chain<span style="color: #2563eb;">Deck</span> Analytics Report
-        </h1>
-        <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
-          Generated: <strong>${dateStr} IST</strong> | Expiry: <strong>${escapeHtml(d.expiry || 'n/a')}</strong>
-        </div>
-      </div>
-      <div style="text-align: right;">
-        <div style="font-size: 18px; font-weight: 800; color: #2563eb;">Spot: ${fmt(d.spot)}</div>
-        <div style="font-size: 11px; color: #64748b;">ATM Strike: ${fmt(d.atm)}</div>
-      </div>
+  const head = document.createElement('div');
+  head.className = 'pdf-report-head';
+  head.innerHTML = `
+    <div>
+      <h1>Chain<span>Deck</span> Analytics Report</h1>
+      <div class="pdf-report-sub">Generated: <strong>${escapeHtml(dateStr)} IST</strong> | Expiry: <strong>${escapeHtml(d.expiry || 'n/a')}</strong> | Data sourced from NSE India. For analytical purposes only.</div>
     </div>
+    <div class="pdf-report-spot">
+      <div>Spot: ${escapeHtml(fmt(d.spot))}</div>
+      <div class="pdf-report-sub">ATM Strike: ${escapeHtml(fmt(d.atm))}</div>
+    </div>`;
+  root.appendChild(head);
 
-    <!-- Executive Summary Grid -->
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px;">
-        <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Market Regime</div>
-        <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 2px;">${escapeHtml(cr.regimeLabel || 'n/a')}</div>
-        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Bias: <strong style="color: #2563eb;">${escapeHtml((cr.tacticalBias || 'n/a').replace('_', ' '))}</strong></div>
-      </div>
+  let previous = null;
+  [...document.body.children].forEach(node => {
+    if (node.tagName === 'SCRIPT' || node.classList.contains('topbar')) return;
+    if (getComputedStyle(node).position === 'fixed') return; // overlay, drawers, toasts, footer, popovers
+    const clone = node.cloneNode(true);
+    // the option chain (heading + table) reads best starting on a fresh page, and keeps its heading with the table
+    if (node.classList.contains('table-wrap') && previous) {
+      previous.style.pageBreakBefore = 'always';
+      previous.style.breakBefore = 'page';
+    }
 
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px;">
-        <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">PCR & Sentiment</div>
-        <div style="font-size: 16px; font-weight: 800; color: ${d.pcr > 1.2 ? '#059669' : d.pcr < 0.8 ? '#dc2626' : '#d97706'}; margin-top: 2px;">
-          ${d.pcr ? d.pcr.toFixed(2) : 'n/a'} <span style="font-size: 11px; font-weight: 600;">(${d.pcr > 1.2 ? 'Bullish' : d.pcr < 0.8 ? 'Bearish' : 'Neutral'})</span>
-        </div>
-        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Near ATM: ${d.ntmPcr ? d.ntmPcr.toFixed(2) : 'n/a'} | Vol: ${d.volPcr ? d.volPcr.toFixed(2) : 'n/a'}</div>
-      </div>
+    // charts: a cloned <canvas> is blank, so swap in an image of the real one
+    const sources = node.querySelectorAll('canvas');
+    clone.querySelectorAll('canvas').forEach((cv, i) => {
+      const src = sources[i];
+      if (!src || !src.width || !src.height) { cv.remove(); return; }
+      const img = document.createElement('img');
+      img.src = src.toDataURL('image/png');
+      img.alt = '';
+      img.style.cssText = `display: block; width: 100%; height: ${src.clientHeight || src.height}px;`;
+      cv.replaceWith(img);
+    });
 
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px;">
-        <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Max Pain & Key Levels</div>
-        <div style="font-size: 16px; font-weight: 800; color: #d97706; margin-top: 2px;">${fmt(d.maxPain)}</div>
-        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Res: <strong style="color:#dc2626;">${fmt(d.maxCallOIStrike)}</strong> | Sup: <strong style="color:#059669;">${fmt(d.maxPutOIStrike)}</strong></div>
-      </div>
+    // dropdowns keep their current value as text; controls are not useful on paper
+    clone.querySelectorAll('select').forEach(sel => {
+      const span = document.createElement('span');
+      span.className = 'pdf-select-value';
+      span.textContent = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : '';
+      sel.replaceWith(span);
+    });
+    clone.querySelectorAll('input').forEach(inp => (inp.closest('label') || inp).remove());
+    clone.querySelectorAll('button, textarea').forEach(el => el.remove());
+    clone.querySelectorAll('details').forEach(el => { el.open = true; });
+    if (clone.tagName === 'DETAILS') clone.open = true;
+    root.appendChild(clone);
+    previous = clone;
+  });
 
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px;">
-        <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Expected Range (to Expiry)</div>
-        <div style="font-size: 13px; font-weight: 700; color: #0f172a; margin-top: 2px;">
-          ${d.lowerRange ? fmt(Math.round(d.lowerRange)) : 'n/a'} - ${d.upperRange ? fmt(Math.round(d.upperRange)) : 'n/a'}
-        </div>
-        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Straddle: ₹${sd.straddlePrice ? sd.straddlePrice.toFixed(1) : 'n/a'} (±${sd.expectedMove ? sd.expectedMove.toFixed(1) : 'n/a'} pts)</div>
-      </div>
-    </div>
-
-    <!-- Technical Levels Summary Table -->
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
-        <div style="font-size: 11px; font-weight: 700; color: #2563eb; margin-bottom: 6px; text-transform: uppercase;">Central Pivot Range (CPR)</div>
-        <div style="font-size: 11px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-          <div>Pivot (P): <strong>${d.cpr ? fmt(d.cpr.pivot) : 'n/a'}</strong></div>
-          <div>CPR Type: <strong>${d.cpr && d.cpr.cprType ? escapeHtml(d.cpr.cprType) : 'n/a'}</strong></div>
-          <div>TC: <strong>${d.cpr ? fmt(d.cpr.tc) : 'n/a'}</strong></div>
-          <div>BC: <strong>${d.cpr ? fmt(d.cpr.bc) : 'n/a'}</strong></div>
-          <div>R1: <strong style="color:#dc2626;">${d.cpr ? fmt(d.cpr.r1) : 'n/a'}</strong></div>
-          <div>S1: <strong style="color:#059669;">${d.cpr ? fmt(d.cpr.s1) : 'n/a'}</strong></div>
-        </div>
-      </div>
-
-      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
-        <div style="font-size: 11px; font-weight: 700; color: #2563eb; margin-bottom: 6px; text-transform: uppercase;">Gamma Exposure (GEX)</div>
-        <div style="font-size: 11px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-          <div>Net GEX: <strong>${gex.totalGexCr !== undefined ? gex.totalGexCr + ' Cr' : 'n/a'}</strong></div>
-          <div>Regime: <strong>${escapeHtml(gex.gexRegime || 'n/a')}</strong></div>
-          <div>Zero-Gamma: <strong style="color:#d97706;">${gex.zeroGammaLevel ? fmt(gex.zeroGammaLevel) : 'n/a'}</strong></div>
-          <div>Flip Dist: <strong>${gex.distToZeroGamma !== undefined ? gex.distToZeroGamma + ' pts' : 'n/a'}</strong></div>
-          <div>Call GEX: <strong style="color:#dc2626;">${gex.callGexCr !== undefined ? gex.callGexCr + ' Cr' : 'n/a'}</strong></div>
-          <div>Put GEX: <strong style="color:#059669;">${gex.putGexCr !== undefined ? gex.putGexCr + ' Cr' : 'n/a'}</strong></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Option Chain Data Table -->
-    <div style="margin-top: 14px;">
-      <div style="font-size: 12px; font-weight: 700; color: #0f172a; margin-bottom: 8px;">
-        Option Chain Overview (ATM ± 10 Strikes)
-      </div>
-      <table style="width: 100%; border-collapse: collapse; font-size: 10px; text-align: right;">
-        <thead>
-          <tr style="background: #0f172a; color: #ffffff;">
-            <th colspan="4" style="padding: 6px; text-align: center; border: 1px solid #334155;">CALLS</th>
-            <th style="padding: 6px; text-align: center; background: #2563eb; border: 1px solid #334155;">STRIKE</th>
-            <th colspan="4" style="padding: 6px; text-align: center; border: 1px solid #334155;">PUTS</th>
-          </tr>
-          <tr style="background: #1e293b; color: #f8fafc;">
-            <th style="padding: 5px; border: 1px solid #334155;">Chg OI</th>
-            <th style="padding: 5px; border: 1px solid #334155;">OI</th>
-            <th style="padding: 5px; border: 1px solid #334155;">IV%</th>
-            <th style="padding: 5px; border: 1px solid #334155;">LTP</th>
-            <th style="padding: 5px; text-align: center; border: 1px solid #334155;">Strike</th>
-            <th style="padding: 5px; border: 1px solid #334155;">LTP</th>
-            <th style="padding: 5px; border: 1px solid #334155;">IV%</th>
-            <th style="padding: 5px; border: 1px solid #334155;">OI</th>
-            <th style="padding: 5px; border: 1px solid #334155;">Chg OI</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${(d.strikes || []).map(s => {
-
-
-    const isAtm = s.strike === d.atm;
-    const bg = isAtm ? '#dbeafe' : '#ffffff';
-    const fontWeight = isAtm ? '700' : '400';
-    const ceChg = s.CE?.changeinOpenInterest || 0;
-    const peChg = s.PE?.changeinOpenInterest || 0;
-
-    return `
-              <tr style="background: ${bg}; font-weight: ${fontWeight}; border-bottom: 1px solid #e2e8f0;">
-                <td style="padding: 4px 6px; color: ${ceChg >= 0 ? '#059669' : '#dc2626'};">${fmtChg(ceChg)}</td>
-                <td style="padding: 4px 6px;">${fmtK(s.CE?.openInterest || 0)}</td>
-                <td style="padding: 4px 6px;">${(s.CE?.impliedVolatility || 0).toFixed(1)}%</td>
-                <td style="padding: 4px 6px;">₹${(s.CE?.lastPrice || 0).toFixed(2)}</td>
-                <td style="padding: 4px 6px; text-align: center; background: ${isAtm ? '#bfdbfe' : '#f1f5f9'}; font-weight: 700;">${s.strike}</td>
-                <td style="padding: 4px 6px;">₹${(s.PE?.lastPrice || 0).toFixed(2)}</td>
-                <td style="padding: 4px 6px;">${(s.PE?.impliedVolatility || 0).toFixed(1)}%</td>
-                <td style="padding: 4px 6px;">${fmtK(s.PE?.openInterest || 0)}</td>
-                <td style="padding: 4px 6px; color: ${peChg >= 0 ? '#059669' : '#dc2626'};">${fmtChg(peChg)}</td>
-              </tr>
-            `;
-  }).join('')}
-        </tbody>
-      </table>
-    </div>
-
-    <!-- Footer Disclaimer -->
-    <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 8px; font-size: 9px; color: #94a3b8; text-align: center;">
-      Report generated automatically by ChainDeck. Data sourced from NSE India. For analytical purposes only.
-    </div>
-  `;
-
-  return container;
+  return root;
 }
 
 // Dropdown Menu Handlers

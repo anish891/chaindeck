@@ -2296,14 +2296,92 @@ body.exporting-pdf #alertToasts {
   color: var(--text);
 }
 
-/* PDF report: it is rendered by html2pdf into a container as wide as the page (746px in portrait), but the global table
-   rules (min-width: 860px, 12px mono cells) would make its option chain wider than the page and clip the PUTS columns. */
+/* PDF report: a clone of the live dashboard, rendered by html2pdf into a container as wide as the page.
+   data-theme="light" on the root scopes the print palette; everything below undoes screen-only behaviour. */
+.pdf-export-report {
+  background: #ffffff;
+  color: var(--text);
+  font-family: var(--font);
+  width: 100%;
+  padding: 0 0 8px;
+  box-sizing: border-box;
+}
+
+.pdf-export-report * {
+  animation: none !important;
+  transition: none !important;
+  backdrop-filter: none !important;
+}
+
+.pdf-export-report .keystrip,
+.pdf-export-report .thead-section th,
+.pdf-export-report .thead-cols th {
+  position: static;
+}
+
+.pdf-export-report .table-wrap {
+  max-height: none;
+  overflow: visible;
+  margin: 0 12px;
+}
+
 .pdf-export-report table {
   min-width: 0;
   width: 100%;
 }
 
-.pdf-export-report td,
-.pdf-export-report th {
-  font-size: 10px;
+/* the on-screen table is ~1100px wide and ~640px tall; tighter cells keep it inside one printable page (1034 x 746px) */
+.pdf-export-report table td,
+.pdf-export-report table th {
+  padding: 4px 6px;
+}
+
+.pdf-export-report .oi-chart-wrap,
+.pdf-export-report .vol-chart-wrap,
+.pdf-export-report .ctx-chart-wrap {
+  overflow: hidden;
+}
+
+.pdf-export-report .explain-btn,
+.pdf-export-report .explain-pop {
+  display: none !important;
+}
+
+.pdf-export-report .pdf-select-value {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pdf-report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 8px 20px 10px;
+  margin: 0 0 4px;
+  border-bottom: 2px solid #2563eb;
+}
+
+.pdf-report-head h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.pdf-report-head h1 span {
+  color: #2563eb;
+}
+
+.pdf-report-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 3px;
+}
+
+.pdf-report-spot {
+  text-align: right;
+  font-size: 18px;
+  font-weight: 800;
+  color: #2563eb;
 }
