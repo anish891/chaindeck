@@ -275,6 +275,7 @@ button:hover {
 }
 
 .dropdown-menu {
+  max-width: calc(100vw - 16px);
   display: none;
   position: absolute;
   top: calc(100% + 6px);
@@ -2074,6 +2075,38 @@ body.exporting-pdf #alertToasts {
   border-radius: 6px;
   border: 1px solid var(--border);
   min-width: 0;
+}
+
+/* Heatmap tint: plain rgba() chosen by class, strength via --tile-a. (Not color-mix(): the snapshot export's
+   html2canvas cannot parse it and the whole export fails.) The RGB values are --bull / --bear per theme. */
+.sector-tile.flat {
+  background: var(--surface2);
+}
+
+.sector-tile.up {
+  background: rgba(16, 185, 129, var(--tile-a, 0.2));
+}
+
+.sector-tile.down {
+  background: rgba(239, 68, 68, var(--tile-a, 0.2));
+}
+
+[data-theme="light"] .sector-tile.up {
+  background: rgba(5, 150, 105, var(--tile-a, 0.2));
+}
+
+[data-theme="light"] .sector-tile.down {
+  background: rgba(220, 38, 38, var(--tile-a, 0.2));
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme="system"] .sector-tile.up {
+    background: rgba(5, 150, 105, var(--tile-a, 0.2));
+  }
+
+  [data-theme="system"] .sector-tile.down {
+    background: rgba(220, 38, 38, var(--tile-a, 0.2));
+  }
 }
 
 .sector-name {

@@ -169,7 +169,8 @@ function renderSectors(d) {
     const strength = Math.round(12 + Math.min(Math.abs(pctChg) / 2, 1) * 58); // 2% or more = full colour
     const tile = document.createElement('div');
     tile.className = 'sector-tile';
-    tile.style.background = pctChg === 0 ? 'var(--surface2)' : `color-mix(in srgb, var(${pctChg > 0 ? '--bull' : '--bear'}) ${strength}%, var(--surface))`;
+    tile.classList.add(pctChg === 0 ? 'flat' : pctChg > 0 ? 'up' : 'down');
+    if (pctChg !== 0) tile.style.setProperty('--tile-a', (strength / 100).toFixed(2));
     tile.title = `${sct.index}: ${fmt(sct.last)}`;
     tile.append(
       cell('span', sct.name, 'sector-name'),
@@ -1596,11 +1597,37 @@ function buildPdfReportElement(d) {
 }
 
 // Dropdown Menu Handlers
+/**
+ * The menu is right-aligned under its button, but on narrow screens the toolbar wraps and the button can sit at the
+ * left edge, which pushed the menu partly off-screen (its icons and the start of every label were clipped).
+ * Measure it once open and slide it back inside the viewport.
+ */
+function placeExportMenu() {
+  const dd = document.getElementById('exportDropdown');
+  const menu = document.getElementById('exportMenu');
+  if (!dd || !menu || !dd.classList.contains('active')) return;
+  menu.style.left = '';
+  menu.style.right = ''; // back to the default right-aligned position before measuring
+  const margin = 8;
+  const m = menu.getBoundingClientRect();
+  const maxLeft = Math.max(margin, window.innerWidth - margin - m.width);
+  const wanted = Math.min(Math.max(m.left, margin), maxLeft);
+  if (Math.abs(wanted - m.left) > 0.5) {
+    menu.style.right = 'auto';
+    menu.style.left = `${wanted - dd.getBoundingClientRect().left}px`;
+  }
+}
+
 export function toggleExportMenu(e) {
   if (e) e.stopPropagation();
   const dd = document.getElementById('exportDropdown');
-  if (dd) dd.classList.toggle('active');
+  if (!dd) return;
+  dd.classList.toggle('active');
+  placeExportMenu();
 }
+
+// A resize (rotation, window drag) can change where the button sits: re-clamp instead of leaving it misplaced.
+window.addEventListener('resize', placeExportMenu);
 
 export function closeExportMenu() {
   const dd = document.getElementById('exportDropdown');
