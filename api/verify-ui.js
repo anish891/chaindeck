@@ -53,4 +53,25 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   });
 }
 
+// ── 4. PDF report: the things that produced a blank / clipped / half-empty PDF ──
+{
+  const start = app.indexOf('function buildPdfReportElement');
+  assert(start > 0, 'buildPdfReportElement not found');
+  const end = app.indexOf('\nexport function toggleExportMenu', start) > 0 ? app.indexOf('\nexport function toggleExportMenu', start) : app.length;
+  const fn = app.slice(start, start + 12000);
+  const head = fn.slice(0, fn.indexOf('container.innerHTML'));
+  // html2pdf renders a clone inside its own container; an absolutely positioned child takes no space, so the
+  // container (and every page) came out 0px tall: a "successful" export that was completely blank.
+  assert(!/position:\s*(absolute|fixed)/.test(head), 'the PDF report element must stay in normal flow (absolute/fixed positioning makes the PDF blank)');
+  assert(!/left:\s*-?\d{3,}px/.test(head), 'do not hide the report by pushing it off-screen on the element itself; use a wrapper');
+  // html2pdf lays the clone out as wide as the page (746px portrait), so a fixed wider width is clipped
+  assert(/width:\s*100%/.test(head) && !/width:\s*\d+px/.test(head), 'the report must be width:100%, not a fixed pixel width');
+  assert(/jsPDF:\s*\{[^}]*orientation:\s*'portrait'/.test(app), 'portrait keeps the report on one page');
+  // field names must match what the API sends (a mismatch printed "n/a" / blank in the PDF)
+  assert(/gex\.totalGexCr/.test(fn) && !/gex\.netGexCr/.test(fn), 'PDF must read gex.totalGexCr');
+  assert(/cpr\.cprType/.test(fn) && !/cpr\.type\b/.test(fn), 'PDF must read cpr.cprType');
+  const css = read('public/css/styles.css');
+  assert(/\.pdf-export-report table\s*\{[^}]*min-width:\s*0/.test(css), 'the report table must override the global min-width: 860px or it is clipped on the page');
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

@@ -2295,3 +2295,15 @@ body.exporting-pdf #alertToasts {
   line-height: 1.6;
   color: var(--text);
 }
+
+/* PDF report: it is rendered by html2pdf into a container as wide as the page (746px in portrait), but the global table
+   rules (min-width: 860px, 12px mono cells) would make its option chain wider than the page and clip the PUTS columns. */
+.pdf-export-report table {
+  min-width: 0;
+  width: 100%;
+}
+
+.pdf-export-report td,
+.pdf-export-report th {
+  font-size: 10px;
+}

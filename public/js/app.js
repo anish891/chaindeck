@@ -1404,7 +1404,12 @@ export async function exportPDF() {
 
   const generatePDF = async () => {
     const reportContainer = buildPdfReportElement(currentData);
-    document.body.appendChild(reportContainer);
+    // Keep it laid out (so it has a real size) but out of sight, via a wrapper instead of positioning the report itself.
+    const holder = document.createElement('div');
+    holder.setAttribute('aria-hidden', 'true');
+    holder.style.cssText = 'position: fixed; left: -10000px; top: 0; width: 1100px; overflow: hidden; pointer-events: none;';
+    holder.appendChild(reportContainer);
+    document.body.appendChild(holder);
 
     try {
       const opt = {
@@ -1412,7 +1417,8 @@ export async function exportPDF() {
         filename: `ChainDeck_Report_${new Date().toISOString().slice(0, 10)}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, logging: false },
-        jsPDF: { unit: 'in', format: 'a4', orientation: 'landscape', compress: true },
+        // Portrait: the report is ~1.4x taller than wide, so it fits one A4 page (landscape pushed the table to page 2 and left page 1 mostly blank)
+        jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait', compress: true },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
       };
 
@@ -1422,9 +1428,7 @@ export async function exportPDF() {
         throw new Error('PDF library failed to load');
       }
     } finally {
-      if (document.body.contains(reportContainer)) {
-        document.body.removeChild(reportContainer);
-      }
+      holder.remove();
     }
   };
 
@@ -1447,13 +1451,14 @@ function buildPdfReportElement(d) {
     color: #0f172a;
     background: #ffffff;
     padding: 24px 32px;
-    width: 1020px;
+    width: 100%;
     margin: 0 auto;
     box-sizing: border-box;
-    position: absolute;
-    left: -9999px;
-    top: 0;
   `;
+  // width: 100% (not a fixed px width): html2pdf lays the clone out inside a container exactly as wide as the PDF page,
+  // so a wider fixed width gets clipped on the right.
+  // No position/left/top here on purpose: html2pdf renders a clone of this element inside its own container, and an
+  // absolutely positioned child takes no space, so that container (and the PDF page) came out 0px tall and blank.
 
   const dateStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
   const cr = d.compositeRegime || {};
@@ -1465,7 +1470,7 @@ function buildPdfReportElement(d) {
     <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #2563eb; padding-bottom: 12px; margin-bottom: 16px;">
       <div>
         <h1 style="margin: 0; font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">
-          Nifty <span style="color: #2563eb;">OI</span> Analytics Report
+          Chain<span style="color: #2563eb;">Deck</span> Analytics Report
         </h1>
         <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
           Generated: <strong>${dateStr} IST</strong> | Expiry: <strong>${escapeHtml(d.expiry || 'n/a')}</strong>
@@ -1514,7 +1519,7 @@ function buildPdfReportElement(d) {
         <div style="font-size: 11px; font-weight: 700; color: #2563eb; margin-bottom: 6px; text-transform: uppercase;">Central Pivot Range (CPR)</div>
         <div style="font-size: 11px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
           <div>Pivot (P): <strong>${d.cpr ? fmt(d.cpr.pivot) : 'n/a'}</strong></div>
-          <div>CPR Type: <strong>${d.cpr ? escapeHtml(d.cpr.type) : 'n/a'}</strong></div>
+          <div>CPR Type: <strong>${d.cpr && d.cpr.cprType ? escapeHtml(d.cpr.cprType) : 'n/a'}</strong></div>
           <div>TC: <strong>${d.cpr ? fmt(d.cpr.tc) : 'n/a'}</strong></div>
           <div>BC: <strong>${d.cpr ? fmt(d.cpr.bc) : 'n/a'}</strong></div>
           <div>R1: <strong style="color:#dc2626;">${d.cpr ? fmt(d.cpr.r1) : 'n/a'}</strong></div>
@@ -1525,7 +1530,7 @@ function buildPdfReportElement(d) {
       <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px;">
         <div style="font-size: 11px; font-weight: 700; color: #2563eb; margin-bottom: 6px; text-transform: uppercase;">Gamma Exposure (GEX)</div>
         <div style="font-size: 11px; display: grid; grid-template-columns: 1fr 1fr; gap: 4px;">
-          <div>Net GEX: <strong>${gex.netGexCr !== undefined ? gex.netGexCr + ' Cr' : 'n/a'}</strong></div>
+          <div>Net GEX: <strong>${gex.totalGexCr !== undefined ? gex.totalGexCr + ' Cr' : 'n/a'}</strong></div>
           <div>Regime: <strong>${escapeHtml(gex.gexRegime || 'n/a')}</strong></div>
           <div>Zero-Gamma: <strong style="color:#d97706;">${gex.zeroGammaLevel ? fmt(gex.zeroGammaLevel) : 'n/a'}</strong></div>
           <div>Flip Dist: <strong>${gex.distToZeroGamma !== undefined ? gex.distToZeroGamma + ' pts' : 'n/a'}</strong></div>
