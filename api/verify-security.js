@@ -58,7 +58,8 @@ const url = (s, p) => `http://127.0.0.1:${s.address().port}${p}`;
   const pinned = {
     'public/vendor/chart.umd.js': 'sha512-ZwR1/gSZM3ai6vCdI+LVF1zSq/5HznD3ZSTk7kajkaj4D292NLuduDCO1c/NT8Id+jE58KYLKT7hXnbtryGmMg==', // chart.js 4.4.1 npm tarball
     'public/vendor/html2canvas.min.js': 'sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==', // cdnjs SRI, 1.4.1
-    'public/vendor/html2pdf.bundle.min.js': 'sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==' // cdnjs SRI, 0.10.1
+    'public/vendor/html2pdf.bundle.min.js': 'sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==', // cdnjs SRI, 0.10.1
+    'public/vendor/lightweight-charts.standalone.production.js': 'sha512-C76k0yV9MsfI42H6hU7QXuhtuj9/1OLOEEUfIRpqlU5u6p8ZrOYxOFQkn3TlcC8JWuU6Maf4yUrDcAgcGjSOVA==' // lightweight-charts 5.2.1 npm tarball (Apache-2.0)
   };
   for (const [f, h] of Object.entries(pinned)) {
     const got = 'sha512-' + crypto.createHash('sha512').update(fs.readFileSync(path.join(root, f))).digest('base64');

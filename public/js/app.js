@@ -4,6 +4,7 @@ import { initExplain } from './explain.js';
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
 import { escapeHtml } from './ui-utils.js';
+import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, restyleChart, chartScreenshot, currentChartSignals } from './price-chart.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderParticipantChart } from './charts.js';
 
 let currentData = null;
@@ -424,6 +425,7 @@ export async function fetchNow() {
     setLive(true);
     refreshIntraday();
     refreshParticipants();
+    refreshPriceChart();
   } catch (e) {
     setLive(false);
     console.error('Fetch failed:', e);
@@ -784,7 +786,7 @@ export function renderAll() {
   renderTimeline();
   renderVolPanels();
   renderOiChart_();
-  processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot });
+  processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot, chart: currentChartSignals() });
   fetchSimilarSessions();
   renderTable();
 }
@@ -1280,6 +1282,7 @@ export function applyTheme(theme) {
     renderOiChart_();
   }
   if (participantDays) renderParticipants();
+  restyleChart();
 }
 
 export function initTheme() {
@@ -1513,13 +1516,28 @@ function buildDashboardReport(d) {
     const sources = node.querySelectorAll('canvas');
     clone.querySelectorAll('canvas').forEach((cv, i) => {
       const src = sources[i];
-      if (!src || !src.width || !src.height) { cv.remove(); return; }
+      if (!src || !src.width || !src.height || src.closest('#priceChart')) { cv.remove(); return; } // the price chart is handled below
       const img = document.createElement('img');
       img.src = src.toDataURL('image/png');
       img.alt = '';
       img.style.cssText = `display: block; width: 100%; height: ${src.clientHeight || src.height}px;`;
       cv.replaceWith(img);
     });
+
+    // the price chart is several stacked canvases (and a logo link), so it is captured with the library's own screenshot
+    const chartHost = clone.querySelector('#priceChart');
+    if (chartHost) {
+      const shot = chartScreenshot();
+      if (shot) {
+        const img = document.createElement('img');
+        img.src = shot.src;
+        img.alt = '';
+        img.style.cssText = `display: block; width: 100%; aspect-ratio: ${shot.width} / ${shot.height};`;
+        chartHost.replaceWith(img);
+      } else {
+        chartHost.remove();
+      }
+    }
 
     // dropdowns keep their current value as text; controls are not useful on paper
     clone.querySelectorAll('select').forEach(sel => {
@@ -1721,7 +1739,9 @@ const ACTIONS = {
   onOiChartModeChange,
   onTimelineMetricChange,
   toggleGreeksView,
-  onParticipantModeChange
+  onParticipantModeChange,
+  setChartTimeframe,
+  toggleChartLayer
 };
 
 function runActions(spec, event) {
@@ -1748,6 +1768,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAlerts();
   initStrikePanel();
   initExplain();
+  initPriceChart({ getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null });
   window.addEventListener('strike-click', e => openStrike(e.detail));
   document.getElementById('chainBody')?.addEventListener('click', e => {
     const cell = e.target.closest('.strike-cell');

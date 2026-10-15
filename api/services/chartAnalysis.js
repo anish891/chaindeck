@@ -1,0 +1,98 @@
+// Orchestrates the chart payload: candles + levels + patterns + backtest + signals, in one response.
+const candlesSvc = require('./candles');
+const levels = require('./levels');
+const patternsSvc = require('./patterns');
+const backtestSvc = require('./backtest');
+const signalsSvc = require('./signals');
+
+const BACKTEST_TTL_MS = 6 * 3600 * 1000;
+const btCache = new Map(); // interval -> { ts, value }
+const btInflight = new Map();
+
+async function getBacktest(interval, deps) {
+  const hit = btCache.get(interval);
+  if (hit && Date.now() - hit.ts < BACKTEST_TTL_MS) return hit.value;
+  if (btInflight.has(interval)) return btInflight.get(interval);
+  const p = (async () => {
+    try {
+      const hist = await deps.getHistoryCandles(interval);
+      if (!hist || hist.length < 100) return hit ? hit.value : null;
+      const value = backtestSvc.backtest(hist, interval);
+      btCache.set(interval, { ts: Date.now(), value });
+      return value;
+    } catch (err) {
+      console.error(`backtest ${interval} failed:`, err.message);
+      return hit ? hit.value : null;
+    }
+  })().finally(() => btInflight.delete(interval));
+  btInflight.set(interval, p);
+  return p;
+}
+
+const round1 = n => (Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
+
+/**
+ * @param interval '5m' | '15m' | '1d'
+ * @param opts.d latest processed option chain (may be null before the first fetch)
+ * @param opts.fallbackPoints stored per-minute spot points used if Yahoo is unreachable
+ * @param opts.deps injectable data sources for tests
+ */
+async function analyze(interval, { d = null, fallbackPoints = null, deps = candlesSvc } = {}) {
+  const base = await deps.getCandles(interval, { fallbackPoints });
+  const candles = base.candles;
+  if (!candles.length) {
+    return { interval, source: base.source, volumeSource: base.volumeSource, candles: [], vwap: [], zones: [], patterns: [], signals: [], actionZones: [], profile: null, backtest: null, spot: d ? d.spot : null, updatedAt: Date.now() };
+  }
+
+  const daily = interval === '1d' ? base : await deps.getCandles('1d', {}).catch(() => ({ candles: [] }));
+  const lastDay = candlesSvc.istDay(candles[candles.length - 1].t);
+  const prior = levels.priorRanges(daily.candles, lastDay);
+
+  const intraday = interval !== '1d';
+  const sessionCandles = intraday ? candles.filter(c => candlesSvc.istDay(c.t) === lastDay) : candles.slice(-20);
+  const profileCandles = intraday ? candles : candles.slice(-60);
+  const profile = levels.volumeProfile(profileCandles, intraday ? 10 : 25);
+  const vwap = intraday ? levels.vwapSeries(candles) : [];
+  const lastVwap = vwap.length && candlesSvc.istDay(vwap[vwap.length - 1].t) === lastDay ? vwap[vwap.length - 1].value : null;
+  const spot = d && Number.isFinite(d.spot) ? d.spot : candles[candles.length - 1].c;
+
+  const ladder = levels.buildLadder({
+    spot,
+    walls: d && d.walls,
+    maxPain: d && d.maxPain,
+    zeroGamma: d && d.gex && d.gex.zeroGammaLevel,
+    cpr: d && d.cpr,
+    prior,
+    candles,
+    profile,
+    vwap: lastVwap
+  }, { tracking: sessionCandles });
+
+  const patterns = patternsSvc.detectAll(candles);
+  const backtest = await getBacktest(interval, deps);
+  const strikes = d && d.strikes ? d.strikes : [];
+  const signals = signalsSvc.buildSignals({ candles, patterns, ladder, strikes, backtest, interval });
+  const actionZones = signalsSvc.buildActionZones({ candles, ladder, strikes, profile, patterns, interval });
+
+  const visibleFrom = candles[Math.max(0, candles.length - (intraday ? 400 : 260))].t;
+  return {
+    interval,
+    source: base.source,
+    volumeSource: base.volumeSource,
+    spot,
+    atr: round1(ladder.atr),
+    candles,
+    vwap: vwap.map(v => ({ t: v.t, value: round1(v.value) })),
+    zones: ladder.zones.map(z => ({ ...z, low: round1(z.low), high: round1(z.high), mid: round1(z.mid), distancePct: Math.round(z.distancePct * 100) / 100 })),
+    profile: profile ? { binSize: profile.binSize, poc: profile.poc, vah: profile.vah, val: profile.val, bins: profile.bins.map(b => ({ price: b.price, volume: Math.round(b.volume) })) } : null,
+    patterns: patterns.filter(p => p.t >= visibleFrom).map(p => ({ t: p.t, i: p.i, name: p.name, label: p.label, dir: p.dir, kind: p.kind, quality: p.quality, level: p.level ?? null })),
+    signals,
+    actionZones,
+    backtest: backtest ? { interval: backtest.interval, horizon: backtest.horizon, sessions: backtest.sessions, candles: backtest.candles, minSamples: backtest.minSamples, baseline: backtest.baseline, patterns: backtest.patterns } : null,
+    updatedAt: Date.now()
+  };
+}
+
+function clearCache() { btCache.clear(); btInflight.clear(); }
+
+module.exports = { analyze, clearCache };

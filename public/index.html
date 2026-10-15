@@ -7,6 +7,7 @@
   <title>ChainDeck: NIFTY Options Analytics</title>
   <link rel="stylesheet" href="/css/styles.css" />
   <script src="/vendor/chart.umd.js"></script>
+  <script src="/vendor/lightweight-charts.standalone.production.js"></script>
 </head>
 
 <body>
@@ -136,6 +137,71 @@
       <div id="flowAlertsFeed" class="flow-feed">
         <span style="color: var(--muted);">Scanning for strike volume &amp; OI anomalies...</span>
       </div>
+    </div>
+  </div>
+
+  <!-- PRICE CHART, LEVELS, PATTERNS -->
+  <div id="priceChartSection" class="section">
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M6 4v3M6 15v5M6 7h0M4 7h4v8H4zM14 3v4M14 17v4M12 7h4v10h-4zM20 8v3M20 16v4M18 11h4v5h-4z"/></svg>
+          Price, Levels and Patterns
+          <span data-explain="priceChart"></span>
+        </div>
+        <div class="chart-controls">
+          <div class="seg" role="group" aria-label="Timeframe">
+            <button type="button" class="seg-btn" data-tf="5m" data-click="setChartTimeframe:5m">5m</button>
+            <button type="button" class="seg-btn" data-tf="15m" data-click="setChartTimeframe:15m">15m</button>
+            <button type="button" class="seg-btn" data-tf="1d" data-click="setChartTimeframe:1d">1D</button>
+          </div>
+        </div>
+      </div>
+      <div class="chart-layers">
+        <label><input type="checkbox" data-layer="zones" data-change="toggleChartLayer"> Zones</label>
+        <label><input type="checkbox" data-layer="vwap" data-change="toggleChartLayer"> VWAP</label>
+        <label><input type="checkbox" data-layer="volume" data-change="toggleChartLayer"> Volume</label>
+        <label><input type="checkbox" data-layer="profile" data-change="toggleChartLayer"> Volume profile</label>
+        <label><input type="checkbox" data-layer="patterns" data-change="toggleChartLayer"> Patterns</label>
+      </div>
+      <div id="chartLegend" class="chart-legend"></div>
+      <div id="priceChart" class="price-chart"></div>
+      <div class="panel-note" id="chartNote">Loading chart data...</div>
+    </div>
+  </div>
+
+  <div id="levelsSignalsSection" class="section pair-grid">
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="7" cy="18" r="1.5"/></svg>
+          Support and Resistance Ladder
+          <span data-explain="levelLadder"></span>
+        </div>
+      </div>
+      <div id="levelLadder" class="level-ladder"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+          Reversal Signals
+          <span data-explain="signals"></span>
+        </div>
+      </div>
+      <div id="signalsList" class="signals-list"></div>
+      <div class="panel-head subhead">
+        <div class="panel-title">
+          Buying and selling interest zones
+          <span data-explain="actionZones"></span>
+        </div>
+      </div>
+      <div id="actionZones" class="signals-list"></div>
+      <details class="pattern-stats-wrap">
+        <summary>How reliable are these patterns? <span data-explain="patternStats"></span></summary>
+        <div id="patternStats"></div>
+      </details>
+      <div class="panel-note">Shows evidence consistent with buying or selling pressure, not who actually bought or sold: no order-flow data is available. Volume is the Nifty ETF as a proxy. Not investment advice.</div>
     </div>
   </div>
 

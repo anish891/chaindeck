@@ -38,3 +38,11 @@ export async function fetchParticipantData() {
   if (!json.ok) throw new Error(json.error);
   return json.days || [];
 }
+
+export async function fetchChartAnalysis(interval, expiry) {
+  const q = `interval=${encodeURIComponent(interval)}${expiry ? `&expiry=${encodeURIComponent(expiry)}` : ''}`;
+  const r = await fetch(`/api/chart-analysis?${q}`);
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json;
+}

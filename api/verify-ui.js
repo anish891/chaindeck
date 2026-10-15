@@ -94,4 +94,34 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(/markAvoidBreaks\(reportContainer\)/.test(app) && /width: 1074px/.test(app), 'avoid-marking must run on the attached report at the page width (1074px)');
 }
 
+// ── 5. price chart: vendored library, exports, and safe rendering ──
+{
+  const chartJs = read('public/js/price-chart.js');
+  assert(/id="priceChart"/.test(html), 'chart container missing');
+  assert(/<script src="\/vendor\/lightweight-charts\.standalone\.production\.js"><\/script>/.test(html), 'the vendored (same-origin) Lightweight Charts build must be loaded');
+  assert(fs.existsSync(path.join(root, 'public/vendor/LICENSE-lightweight-charts.md')), 'the Apache-2.0 licence must ship with the vendored build');
+  assert(/attributionLogo:\s*true/.test(chartJs), 'Lightweight Charts requires its attribution to stay visible');
+  assert(/takeScreenshot\(/.test(chartJs), 'the chart is several stacked canvases; exports must use the library screenshot');
+  // a cloned DOM chart is blank: the report must skip its canvases and substitute the screenshot
+  assert(/closest\('#priceChart'\)/.test(app) && /chartScreenshot\(\)/.test(app), 'the PDF report must replace the price chart with a screenshot');
+  assert(/import \{[^}]*escapeHtml[^}]*\} from '\.\/ui-utils\.js'/.test(chartJs), 'network-derived strings must be escaped before they reach innerHTML');
+  // Every ${...} in the panel templates that is NOT wrapped in escapeHtml() must be on this reviewed list: numbers the
+  // server computed, fixed labels and class names. Adding another forces a look at whether it can carry text from the network.
+  {
+    const panels = chartJs.slice(chartJs.indexOf('// ── panels'), chartJs.indexOf('// ── public API'));
+    const bare = new Set();
+    for (const m of panels.matchAll(/\$\{((?:[^{}]|\{[^{}]*\})*)\}/g)) if (!/^escapeHtml\(/.test(m[1])) bare.add(m[1]);
+    const reviewed = new Set(["Math.max(4, Math.min(100, z.strength))", "Math.round(z.high)", "Math.round(z.low)", "Math.round(z.mid)", "bt.candles.toLocaleString('en-IN')", "bt.horizon", "bt.sessions", "dir", "e.against ? 'against' : e.neutral ? 'neutral' : ''", "evidence", "h.horizon", "h.n", "kind", "kindLabel", "p.dir === 'bull' ? 'Bullish' : 'Bearish'", "p.dir === 'bull' ? 'bull' : 'bear'", "p.n", "pc(h.baseline)", "pc(h.ci.high)", "pc(h.ci.low)", "pc(h.hitRate)", "pc(p.baseline)", "pc(p.hitRate)", "rows", "s.age === 0 ? 'latest candle' : s.age + ' candle' + (s.age > 1 ? 's' : '') + ' ago'", "s.dir === 'bull' ? 'Bullish reversal' : 'Bearish reversal'", "s.rr ? ` (about ${escapeHtml(String(s.rr))}R)` : ''", "s.score", "side", "tgt", "why", "z.distancePct > 0 ? '+' : ''", "z.evidence.map(e => `<li><em>${escapeHtml(e.family)}</em> ${escapeHtml(e.text)}</li>`).join('')", "z.families.length", "z.families.length >= 3 ? 'strong' : 'moderate'", "z.held", "z.side === 'buy' ? 'Buying interest' : 'Selling interest'", "z.strength", "z.touches"]);
+    const unreviewed = [...bare].filter(x => !reviewed.has(x));
+    assert.deepStrictEqual(unreviewed, [], 'unescaped expressions in chart panel templates need review: ' + unreviewed.join(' | '));
+  }
+  for (const id of ['levelLadder', 'signalsList', 'actionZones', 'patternStats', 'chartNote', 'chartLegend']) {
+    assert(new RegExp(`id="${id}"`).test(html), `#${id} missing from the page`);
+  }
+  for (const key of ['priceChart', 'levelLadder', 'signals', 'actionZones', 'patternStats']) {
+    assert(html.includes(`data-explain="${key}"`), `explain popover for ${key} not wired in the page`);
+    assert(new RegExp(`\\n  ${key}: \\{\\n    en:`).test(read('public/js/explain.js')) && new RegExp(`\\n  ${key}: \\{[\\s\\S]*?hi: \\[`).test(read('public/js/explain.js')), `explain text (English and Hindi) missing for ${key}`);
+  }
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

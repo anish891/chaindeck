@@ -89,6 +89,51 @@ Participant-wise open interest from NSE's end-of-day file for FIIs, DIIs, Pro tr
 - **Index options view:** net calls and net puts, and their change against the previous trading day.
 - A chart of the last 10 trading days (FII, DII, Pro and Client long percentage, or FII and Client net options).
 
+### Price, Levels and Patterns
+A candlestick chart of NIFTY (5 minute, 15 minute or daily) with the following layers, each switchable:
+- **Support and resistance zones** drawn as shaded bands, darker when stronger.
+- **VWAP**, restarting each session.
+- **Volume** and a **volume profile** (point of control and value area).
+- **Pattern markers** for candlestick and chart patterns.
+
+NIFTY itself has no volume, so volume comes from the Nifty 50 ETF (NIFTYBEES) as a proxy. That is a proxy: it also
+includes arbitrage and creation or redemption activity.
+
+### Support and Resistance Ladder
+Every level the app can justify is collected with a weight and merged into zones. A zone is stronger when different
+kinds of evidence land on the same price:
+
+| Family | Levels |
+|---|---|
+| Options | Largest call and put OI walls, max pain, zero-gamma level |
+| Prior sessions | Previous day high, low and close, previous week high and low, CPR and pivots |
+| Chart structure | Day high and low, recent swing highs and lows |
+| Volume | VWAP, volume point of control, value area edges, high volume nodes |
+| Round numbers | Multiples of 500 and 100 |
+
+Strength is a score out of 100, not a probability. Each zone also tracks today's behaviour: untested, held (touched and
+bounced) or broken (closed through).
+
+### Reversal Signals and buying / selling interest zones
+- **Patterns detected:** hammer, inverted hammer, shooting star, hanging man, bullish and bearish engulfing, piercing
+  line, dark cloud cover, bullish and bearish harami, morning and evening star, tweezer tops and bottoms, doji at an
+  extreme, double top and bottom, head and shoulders (and inverse), and failed breakouts (liquidity sweeps). A reversal
+  pattern only counts when there was a trend to reverse.
+- **Confluence score (0 to 100)** from four families of evidence: the pattern, whether it formed at a strong zone,
+  volume expansion on the ETF proxy, and option evidence (put writing or call unwinding for bullish; call writing or put
+  unwinding for bearish). A signal is only called confirmed when at least two families agree.
+- **Each signal shows** the trigger, the invalidation level, the nearest opposing zone as a target, the evidence and
+  the pattern's own history.
+- **Buying and selling interest zones** are support and resistance zones where at least two families of evidence agree.
+  This is evidence consistent with buying or selling pressure. No data source says who actually bought or sold.
+
+### Pattern reliability (backtest)
+Every detector is run over the last 60 sessions of 5 and 15 minute candles, and five years of daily candles. Entry is the
+open of the candle after the pattern, and a hit means the close, a fixed number of candles later, is beyond the entry in
+the pattern's direction. Intraday trades must finish inside the session. Results are compared with a **baseline** (how
+often any candle moved that way), with a 95 percent Wilson confidence interval. A pattern is labelled "edge" only with
+at least 30 samples and a lower bound above the baseline. Most patterns show no clear edge, and the panel says so.
+
 ### Advanced analytics (collapsible)
 - **ATM Straddle and Expected Move:** call and put legs, total straddle, change against the previous session,
   decay status, expected move to expiry and per day, and the upper and lower range bounds.
@@ -129,6 +174,8 @@ so a value hovering around a threshold does not fire repeatedly.
 | Unusual flow | A strike shows a volume or OI spike |
 | Momentum | Spot moves 0.3% or more within 5 minutes (adjustable) |
 | VIX spike | India VIX is up 5% or more on the day (adjustable) |
+| Reversal signal | A new strong, confirmed pattern signal appears on the chart (once per signal) |
+| Nearing a level | Spot comes within about half an ATR of a zone with strength 70 or more (adjustable), then re-arms after moving away |
 
 Each alert type can be switched on or off. Alerts are kept in a log behind the bell icon and can also appear as an
 on-page pop-up, a sound or a desktop notification. You can choose the lowest severity that interrupts you, set a
@@ -161,6 +208,7 @@ traders read it, with an English and हिन्दी toggle. The language cho
 | India VIX, sector indices, NIFTY 50 breadth | NSE index list | Live while the page is open, reused for up to 15 seconds |
 | Previous session high, low and close for CPR | Daily NIFTY bars | Once per session |
 | FII / DII / Pro / Client positions | NSE end-of-day participant-wise OI file | Published each evening after the close |
+| NIFTY candles and ETF volume | Yahoo Finance chart data (unofficial, delayed) | 20 seconds while the market is open; falls back to candles built from saved spot values |
 
 Outside market hours the dashboard shows the last session's values.
 
@@ -194,5 +242,9 @@ session is saved after the close for "Sessions That Looked Like Today", the vola
   last good values on screen.
 - Realised volatility needs about 15 minutes of snapshots each morning and reads high in the first half hour.
 - Intraday realised volatility leaves out overnight gaps, so implied volatility usually sits above it.
+- Candle data comes from an unofficial Yahoo Finance endpoint and can be delayed or unavailable. The chart says when it
+  is using saved spot values instead, whose highs and lows are only as good as the once-a-minute sampling.
+- Pattern signals are weak evidence. The backtest usually shows hit rates close to chance, and the panel reports that
+  rather than hiding it.
 - Scores, regimes and probabilities describe current conditions and how option prices are set. They are not
   forecasts.

@@ -190,6 +190,57 @@ const path = require('path');
     console.log(`  noisy-day replay: ${logged} logged, ${popups} popups (previously 375)`);
   }
 
+  // ── chart signals and level proximity ───────────────────────────────────
+  {
+    const sig = (id, over = {}) => ({ id, label: 'Hammer', dir: 'bull', score: 78, grade: 'strong', confirmed: true, age: 0, state: 'waiting', trigger: 22210, invalidation: 22150, target: 22400, families: ['price', 'level', 'volume'], ...over });
+    const zone = (mid, strength, kind = 'resistance', over = {}) => ({ low: mid - 5, high: mid + 5, mid, strength, kind, sources: [{ label: 'Call OI wall' }], touches: 0, held: 0, ...over });
+    const chart = (spot, signals, zones, interval = '5m') => ({ interval, spot, atr: 30, signals, zones });
+    const withChart = (list) => list.map(c => ({ chart: c }));
+    const snaps = n => Array.from({ length: n }, () => base());
+    // quiet snapshots at given spots (no CPR / walls / zero-gamma, so only the chart rules can fire)
+    const at = list => list.map(sp => base({ spot: sp, cpr: null, gex: { gexRegime: 'POSITIVE_GAMMA' }, maxCallOIStrike: null, maxPutOIStrike: null }));
+
+    // a signal already on the chart when we start is not news; a new one is announced once
+    let res = feed(snaps(4), withChart([chart(22200, [sig('a')], []), chart(22200, [sig('a')], []), chart(22200, [sig('a'), sig('b')], []), chart(22200, [sig('a'), sig('b')], [])]));
+    assert.deepStrictEqual(keys(res), ['signal:b'], 'only the new signal fires, once');
+    assert.strictEqual(res.events[0].severity, 'high');
+    assert(/Trigger 22,210/.test(res.events[0].body) && /3 kinds/.test(res.events[0].body));
+
+    // weak, unconfirmed or invalidated signals never alert
+    res = feed(snaps(3), withChart([chart(22200, [], []), chart(22200, [sig('w', { grade: 'moderate' }), sig('u', { confirmed: false }), sig('i', { state: 'invalidated' }), sig('o', { age: 3 })], []), chart(22200, [], [])]));
+    assert.deepStrictEqual(res.events, [], 'only strong, confirmed, fresh, live signals alert');
+
+    // rule off
+    const off = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)); off.rules.signals.on = false;
+    res = feed(snaps(3), withChart([chart(22200, [], []), chart(22200, [sig('n')], []), chart(22200, [sig('n')], [])]), off);
+    assert.deepStrictEqual(res.events, [], 'signals rule can be switched off');
+
+    // switching timeframe re-baselines quietly instead of replaying existing signals
+    res = feed(snaps(3), withChart([chart(22200, [], [], '5m'), chart(22200, [sig('x')], [], '15m'), chart(22200, [sig('x')], [], '15m')]));
+    assert.deepStrictEqual(res.events, [], 'a timeframe change is not news');
+
+    // no chart data yet: rules stay silent and nothing breaks
+    assert.deepStrictEqual(feed(snaps(3)).events, []);
+
+    // approaching a strong zone: fires once, stays quiet while near, re-arms after moving away
+    const z = zone(22300, 80);
+    const path = [22100, 22150, 22262, 22270, 22290, 22150, 22262, 22270];
+    res = feed(at(path), withChart(path.map(sp => chart(sp, [], [z]))));
+    assert.deepStrictEqual(keys(res), ['approach:resistance:22300', 'approach:resistance:22300'], 'once per approach, again only after moving away');
+    assert(/Strength 80/.test(res.events[0].body));
+
+    // weak zones and zones already near at start do not alert
+    res = feed(at([22100, 22295, 22296]), withChart([22100, 22295, 22296].map(sp => chart(sp, [], [zone(22300, 40)]))));
+    assert.deepStrictEqual(res.events, [], 'zone below the strength threshold is ignored');
+    res = feed(at([22296, 22297, 22298]), withChart([22296, 22297, 22298].map(sp => chart(sp, [], [z]))));
+    assert.deepStrictEqual(res.events, [], 'already at the level when the page opened is not news');
+
+    // settings merge keeps the new fields
+    const ms = mergeSettings({ rules: { approach: { minStrength: 60 } } });
+    assert.strictEqual(ms.rules.approach.minStrength, 60);
+    assert.strictEqual(ms.rules.signals.on, true);
+  }
+
   // ── settings merge ──────────────────────────────────────────────────────
   const m = mergeSettings({ cooldownMin: 'x', notifyLevel: 'loud', rules: { pcr: { hi: 1.4, lo: 'bad' }, nope: {} }, sound: true });
   assert.strictEqual(m.cooldownMin, DEFAULT_SETTINGS.cooldownMin);

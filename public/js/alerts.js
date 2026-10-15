@@ -251,6 +251,8 @@ const RULE_META = [
   { id: 'flow', label: 'Smart-money flow & fast OI builds', fields: [] },
   { id: 'momentum', label: 'Fast spot move in 5 min', fields: [['pct', 'Move ≥ (%)', 0.05]] },
   { id: 'vix', label: 'India VIX spike', fields: [['pct', 'Day change ≥ (%)', 0.5]] },
+  { id: 'signals', label: 'New strong reversal signal on the chart', fields: [] },
+  { id: 'approach', label: 'Spot nears a strong support / resistance zone', fields: [['minStrength', 'Zone strength ≥', 5]] },
   { id: 'regime', label: 'Composite regime label changes (noisy)', fields: [] }
 ];
 

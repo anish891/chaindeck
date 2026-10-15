@@ -1,0 +1,204 @@
+const fetch = require('node-fetch');
+const { istNow } = require('./market');
+
+// OHLC candles for the Nifty 50 index from Yahoo Finance, with volume borrowed from the Nifty 50 ETF (NIFTYBEES).
+// The index itself carries no volume, so the ETF's traded volume on the same candle is used as a proxy. It is a proxy:
+// it includes arbitrage and creation/redemption activity, and the UI says so.
+//
+// Candle shape everywhere: { t: epoch ms (candle open), o, h, l, c, v: number | null }
+
+const YAHOO = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+const SYMBOLS = { index: '^NSEI', etf: 'NIFTYBEES.NS' };
+const IST_OFFSET_MS = 330 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 6000;
+
+// What the chart shows, per timeframe. `minutes` is the candle size (null for daily).
+const PRESETS = {
+  '5m': { yahooInterval: '5m', range: '5d', minutes: 5 },
+  '15m': { yahooInterval: '15m', range: '30d', minutes: 15 },
+  '1d': { yahooInterval: '1d', range: '1y', minutes: null }
+};
+
+// How much history the backtests learn from (Yahoo limits: intraday 60 sessions, daily years).
+const HISTORY_PRESETS = {
+  '5m': { yahooInterval: '5m', range: '60d' },
+  '15m': { yahooInterval: '15m', range: '60d' },
+  '1d': { yahooInterval: '1d', range: '5y' }
+};
+
+const TTL_OPEN_MS = 20 * 1000;
+const TTL_CLOSED_MS = 15 * 60 * 1000;
+const TTL_HISTORY_MS = 6 * 3600 * 1000;
+
+const istDay = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
+const istMinuteOfDay = ms => {
+  const d = new Date(ms + IST_OFFSET_MS);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+};
+
+/** Yahoo chart JSON -> clean, sorted, de-duplicated candles. Candles with any missing OHLC value are dropped. */
+function parseYahoo(json) {
+  const r = json && json.chart && json.chart.result && json.chart.result[0];
+  if (!r || !Array.isArray(r.timestamp) || !r.indicators || !r.indicators.quote || !r.indicators.quote[0]) return [];
+  const q = r.indicators.quote[0];
+  const out = [];
+  const seen = new Set();
+  r.timestamp.forEach((ts, i) => {
+    const o = q.open[i], h = q.high[i], l = q.low[i], c = q.close[i];
+    if ([o, h, l, c].some(x => x === null || x === undefined || !Number.isFinite(x))) return;
+    const t = ts * 1000;
+    if (seen.has(t)) return;
+    seen.add(t);
+    const v = q.volume && Number.isFinite(q.volume[i]) && q.volume[i] > 0 ? q.volume[i] : null;
+    out.push({ t, o, h, l, c, v });
+  });
+  return out.sort((a, b) => a.t - b.t);
+}
+
+async function fetchYahooCandles(symbol, interval, range, fetchImpl = fetch) {
+  const url = `${YAHOO}${encodeURIComponent(symbol)}?range=${range}&interval=${interval}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetchImpl(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: controller.signal });
+    const json = await res.json();
+    if (json && json.chart && json.chart.error) throw new Error(`Yahoo: ${json.chart.error.description || 'error'}`);
+    return parseYahoo(json);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Attach ETF volume to index candles. Intraday candles match on the exact timestamp; daily candles match on the IST date.
+ * Returns the merged candles plus how many candles got a volume.
+ */
+function mergeVolume(indexCandles, etfCandles, daily = false) {
+  if (!etfCandles || !etfCandles.length) return { candles: indexCandles.map(c => ({ ...c, v: null })), covered: 0 };
+  const key = c => (daily ? istDay(c.t) : String(c.t));
+  const vols = new Map(etfCandles.filter(c => c.v).map(c => [key(c), c.v]));
+  let covered = 0;
+  const candles = indexCandles.map(c => {
+    const v = vols.get(key(c)) || null;
+    if (v) covered += 1;
+    return { ...c, v };
+  });
+  return { candles, covered };
+}
+
+/**
+ * Build candles from the per-minute spot values we store ourselves. This is the fallback when Yahoo is unavailable:
+ * the open/high/low/close are only as good as the sampling (about one point a minute) and there is no volume.
+ */
+function candlesFromSpotPoints(points, minutes) {
+  const OPEN = 9 * 60 + 15;
+  const buckets = new Map();
+  (points || []).forEach(p => {
+    if (!p || !Number.isFinite(p.spot) || !Number.isFinite(p.t)) return;
+    const mod = istMinuteOfDay(p.t);
+    if (mod < OPEN || mod > 15 * 60 + 30) return;
+    const slot = Math.floor((mod - OPEN) / minutes);
+    const startMs = Math.floor((p.t + IST_OFFSET_MS) / 86400000) * 86400000 - IST_OFFSET_MS + (OPEN + slot * minutes) * 60000;
+    const b = buckets.get(startMs);
+    if (!b) buckets.set(startMs, { t: startMs, o: p.spot, h: p.spot, l: p.spot, c: p.spot, v: null, first: p.t, last: p.t });
+    else {
+      if (p.t < b.first) { b.o = p.spot; b.first = p.t; }
+      if (p.t >= b.last) { b.c = p.spot; b.last = p.t; }
+      b.h = Math.max(b.h, p.spot);
+      b.l = Math.min(b.l, p.spot);
+    }
+  });
+  return [...buckets.values()].sort((a, b) => a.t - b.t).map(({ first, last, ...c }) => c);
+}
+
+// ── caching ──────────────────────────────────────────────────────────────
+
+const cache = new Map(); // key -> { ts, value }
+const inflight = new Map();
+
+function marketOpenNow(nowMs = Date.now()) {
+  const n = istNow(new Date(nowMs));
+  return n.isWeekday && n.mins >= 9 * 60 + 10 && n.mins <= 15 * 60 + 40;
+}
+
+async function cached(key, ttl, loader) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.ts < ttl) return hit.value;
+  if (inflight.has(key)) return inflight.get(key);
+  const p = loader()
+    .then(value => {
+      cache.set(key, { ts: Date.now(), value });
+      while (cache.size > 40) cache.delete(cache.keys().next().value);
+      return value;
+    })
+    .catch(err => {
+      if (hit) {
+        console.error(`candles: serving stale ${key}:`, err.message);
+        return hit.value;
+      }
+      throw err;
+    })
+    .finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
+/**
+ * Candles for the chart: index OHLC with ETF volume merged in.
+ * `fallbackPoints` (optional) are stored { t, spot } values used when Yahoo cannot be reached.
+ */
+async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch } = {}) {
+  const preset = PRESETS[interval];
+  if (!preset) throw new Error(`Unsupported interval ${interval}`);
+  const ttl = marketOpenNow() ? TTL_OPEN_MS : TTL_CLOSED_MS;
+  const daily = interval === '1d';
+
+  try {
+    const result = await cached(`chart|${interval}`, ttl, async () => {
+      const [idx, etf] = await Promise.all([
+        fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
+        fetchYahooCandles(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => [])
+      ]);
+      if (!idx.length) throw new Error('No index candles returned');
+      const merged = mergeVolume(idx, etf, daily);
+      return { candles: merged.candles, volumeSource: merged.covered > idx.length * 0.5 ? 'etf' : 'none', source: 'yahoo', updatedAt: Date.now() };
+    });
+    return result;
+  } catch (err) {
+    console.error('candles: Yahoo unavailable:', err.message);
+    const minutes = preset.minutes;
+    if (fallbackPoints && minutes) {
+      const stored = candlesFromSpotPoints(fallbackPoints, minutes);
+      if (stored.length) return { candles: stored, volumeSource: 'none', source: 'stored', updatedAt: Date.now() };
+    }
+    return { candles: [], volumeSource: 'none', source: 'none', updatedAt: Date.now() };
+  }
+}
+
+/** Long history for backtests (index only; volume is not needed to detect patterns). Cached for hours. */
+async function getHistoryCandles(interval, { fetchImpl = fetch } = {}) {
+  const preset = HISTORY_PRESETS[interval];
+  if (!preset) throw new Error(`Unsupported interval ${interval}`);
+  return cached(`history|${interval}`, TTL_HISTORY_MS, () => fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl));
+}
+
+function clearCache() {
+  cache.clear();
+  inflight.clear();
+}
+
+module.exports = {
+  SYMBOLS,
+  PRESETS,
+  HISTORY_PRESETS,
+  istDay,
+  istMinuteOfDay,
+  parseYahoo,
+  fetchYahooCandles,
+  mergeVolume,
+  candlesFromSpotPoints,
+  getCandles,
+  getHistoryCandles,
+  marketOpenNow,
+  clearCache
+};

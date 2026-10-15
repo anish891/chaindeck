@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const history = require('../services/history');
 const { getParticipantHistory } = require('../services/participants');
+const chartAnalysis = require('../services/chartAnalysis');
 const { istNow } = require('../services/market');
 const { fetchRawNSEOptionChain } = require('../services/nse');
 const { rateLimit, requireSecret, isValidExpiry, isValidDate, sendError } = require('../security');
@@ -41,6 +42,26 @@ router.get('/intraday', async (req, res) => {
     res.json({ ok: true, persistent: history.configured, ...data });
   } catch (err) {
     return sendError(res, 500, 'Error reading intraday history', err);
+  }
+});
+
+// Candles + support/resistance zones + patterns + signals for the price chart. Intervals are whitelisted.
+const CHART_INTERVALS = new Set(['5m', '15m', '1d']);
+router.get('/chart-analysis', async (req, res) => {
+  const interval = req.query.interval || '5m';
+  const { expiry } = req.query;
+  if (!CHART_INTERVALS.has(interval)) return res.status(400).json({ ok: false, error: 'interval must be 5m, 15m or 1d.' });
+  if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
+  try {
+    let fallbackPoints = null;
+    if (expiry && interval !== '1d') {
+      try { fallbackPoints = (await history.getIntraday(expiry)).points; } catch (e) { fallbackPoints = null; }
+    }
+    const data = await chartAnalysis.analyze(interval, { d: getCacheData(), fallbackPoints });
+    res.set('Cache-Control', HISTORY_CACHE);
+    res.json({ ok: true, ...data });
+  } catch (err) {
+    return sendError(res, 502, 'Error building chart analysis', err);
   }
 });
 

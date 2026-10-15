@@ -25,7 +25,9 @@ export const DEFAULT_SETTINGS = {
     regime: { on: false },
     flow: { on: true },
     momentum: { on: true, pct: 0.3 },
-    vix: { on: true, pct: 5 }
+    vix: { on: true, pct: 5 },
+    signals: { on: true },
+    approach: { on: true, minStrength: 70 }
   }
 };
 
@@ -140,6 +142,26 @@ function spikeCandidates(d, ctx, r) {
   return out;
 }
 
+
+// ── chart signals and level proximity (ctx.chart comes from the price chart's analysis; absent until it loads) ──
+
+function zoneDistance(spot, z) {
+  return spot >= z.low && spot <= z.high ? 0 : Math.min(Math.abs(spot - z.low), Math.abs(spot - z.high));
+}
+const zoneKey = z => `${z.kind}:${Math.round(z.mid / 10) * 10}`;
+const approachDist = chart => Math.max(chart.spot * 0.0015, (chart.atr || 0) * 0.5);
+const strongSignals = chart => (chart.signals || []).filter(s => s.confirmed && s.grade === 'strong' && s.age <= 1 && s.state !== 'invalidated');
+const nearZones = (chart, spot, minStrength) => (chart.zones || []).filter(z => z.kind !== 'inside' && z.strength >= minStrength && zoneDistance(spot, z) <= approachDist(chart));
+
+/** Silent baseline: whatever is already visible is not news. Also used when the chart timeframe changes. */
+function seedChart(chart, spot, minStrength, asOf) {
+  const chartSeen = {};
+  const approach = {};
+  strongSignals(chart).forEach(sig => { chartSeen[sig.id] = asOf; });
+  nearZones(chart, spot, minStrength).forEach(z => { approach[zoneKey(z)] = false; });
+  return { chartInterval: chart.interval, chartSeen, approach };
+}
+
 function dayOf(ms) {
   return new Date(ms + 5.5 * 3600e3).toISOString().slice(0, 10); // IST calendar day
 }
@@ -163,7 +185,8 @@ function seedState(d, ctx, settings, asOf, walls) {
     spikes,
     pending: {},
     momentum: { up: true, down: true },
-    vixZone: d.vix && d.vix.percentChange >= r.vix.pct ? 'spike' : 'normal'
+    vixZone: d.vix && d.vix.percentChange >= r.vix.pct ? 'spike' : 'normal',
+    ...(ctx.chart ? seedChart(ctx.chart, d.spot, r.approach.minStrength, asOf) : { chartInterval: null, chartSeen: {}, approach: {} })
   };
 }
 
@@ -183,7 +206,7 @@ export function evaluateRules(prev, d, ctx = {}, settings = DEFAULT_SETTINGS) {
   if (reseed) return { events, next: seedState(d, ctx, settings, asOf, walls) };
 
   const now = asOf ?? prev.asOf ?? 0;
-  const next = { ...prev, asOf, spot: d.spot, momentum: { ...prev.momentum }, spikes: { ...prev.spikes }, sides: { ...prev.sides }, pending: { ...prev.pending } };
+  const next = { ...prev, asOf, spot: d.spot, momentum: { ...prev.momentum }, spikes: { ...prev.spikes }, sides: { ...prev.sides }, pending: { ...prev.pending }, chartSeen: { ...prev.chartSeen }, approach: { ...prev.approach } };
 
   // 1. PCR zone (with hysteresis)
   next.pcrZone = confirm(next, 'pcr', nextPcrZone(prev.pcrZone, d.pcr, r.pcr.hi, r.pcr.lo), prev.pcrZone);
@@ -318,6 +341,51 @@ export function evaluateRules(prev, d, ctx = {}, settings = DEFAULT_SETTINGS) {
       title: 'India VIX spiking',
       body: `VIX ${d.vix.last.toFixed(2)} (+${d.vix.percentChange.toFixed(1)}% today, threshold ${r.vix.pct}%)`
     });
+  }
+
+  // 9. Chart signals: a new strong, multi-evidence reversal signal, announced once per signal
+  const chart = ctx.chart;
+  if (chart && Array.isArray(chart.zones) && Number.isFinite(chart.spot)) {
+    if (prev.chartInterval !== chart.interval) {
+      Object.assign(next, seedChart(chart, d.spot, r.approach.minStrength, now)); // timeframe changed: re-baseline quietly
+    } else {
+      if (r.signals.on) {
+        strongSignals(chart).forEach(sig => {
+          if (next.chartSeen[sig.id] !== undefined) return;
+          next.chartSeen[sig.id] = now;
+          const bull = sig.dir === 'bull';
+          events.push({
+            key: `signal:${sig.id}`,
+            severity: 'high',
+            title: `${sig.label}: ${bull ? 'bullish' : 'bearish'} reversal signal (score ${sig.score})`,
+            body: `Trigger ${fmt(sig.trigger)}, invalid ${fmt(sig.invalidation)}${sig.target ? `, target ${fmt(sig.target)}` : ''}. ${sig.families.length} kinds of evidence agree.`
+          });
+        });
+      }
+      Object.keys(next.chartSeen).forEach(id => { if (now - next.chartSeen[id] > 2 * 3600e3) delete next.chartSeen[id]; });
+
+      // 10. Approaching a strong level: fires once, re-arms after price moves well away again
+      const near = new Set();
+      nearZones(chart, d.spot, r.approach.minStrength).forEach(z => {
+        const key = zoneKey(z);
+        near.add(key);
+        if (next.approach[key] === false) return;
+        next.approach[key] = false;
+        if (!r.approach.on) return;
+        const gap = Math.round(zoneDistance(d.spot, z));
+        const why = z.sources.slice(0, 3).map(x => x.label).join(', ');
+        events.push({
+          key: `approach:${key}`,
+          severity: 'warn',
+          title: `Spot nearing ${z.kind} zone ${fmt(z.low)}${z.high - z.low >= 1 ? `-${fmt(z.high)}` : ''}`,
+          body: `${gap ? `${gap} pts away` : 'inside the zone'}. Strength ${z.strength}: ${why}.${z.touches ? ` Held ${z.held} of ${z.touches} tests today.` : ''}`
+        });
+      });
+      (chart.zones || []).forEach(z => {
+        const key = zoneKey(z);
+        if (next.approach[key] === false && !near.has(key) && zoneDistance(d.spot, z) > approachDist(chart) * 2) delete next.approach[key];
+      });
+    }
   }
 
   return { events, next };
