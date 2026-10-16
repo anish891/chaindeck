@@ -323,7 +323,9 @@ function renderLadder() {
     if (!spotPlaced && z.mid < data.spot) { rows.push(spotRow); spotPlaced = true; }
     const kind = z.kind === 'support' ? 'support' : z.kind === 'resistance' ? 'resistance' : 'inside';
     const kindLabel = kind === 'support' ? 'Support' : kind === 'resistance' ? 'Resistance' : 'At price';
-    const status = z.status === 'broken' ? 'Broken' : z.status === 'held' ? `Held ${z.held}/${z.touches}` : 'Untested';
+    const status = z.status === 'broken' ? 'Broken'
+      : z.status === 'held' ? (z.held > 0 ? `Held ${z.held}/${z.touches}` : `Tested ${z.touches}x, not held`)
+      : 'Untested';
     const range = z.high - z.low >= 1 ? `${Math.round(z.low)} to ${Math.round(z.high)}` : `${Math.round(z.mid)}`;
     const why = z.sources.slice(0, 4).map(s => escapeHtml(s.label)).join(', ');
     rows.push(`<div class="ladder-row ${kind}">
@@ -337,10 +339,11 @@ function renderLadder() {
   el.innerHTML = rows.join('');
 }
 
+/** Plain text: the caller escapes it once when building the card. */
 function historyLine(h) {
   if (!h) return 'No backtest available for this pattern yet.';
   const pc = x => Math.round(x * 100);
-  return `Past sessions: ${pc(h.hitRate)}% moved the expected way over ${h.horizon} candles vs ${pc(h.baseline)}% for any candle (n=${h.n}, range ${pc(h.ci.low)}-${pc(h.ci.high)}%): ${escapeHtml(VERDICT_TEXT[h.verdict] || h.verdict)}.`;
+  return `Past sessions: ${pc(h.hitRate)}% moved the expected way over ${h.horizon} candles vs ${pc(h.baseline)}% for any candle (n=${h.n}, range ${pc(h.ci.low)}-${pc(h.ci.high)}%): ${VERDICT_TEXT[h.verdict] || h.verdict}.`;
 }
 
 function renderSignals() {
@@ -442,6 +445,8 @@ export async function refreshPriceChart(force = false) {
     if (el && !data) el.textContent = 'Could not load chart data. Retrying.';
   } finally {
     inflight = false;
+    // The timeframe changed while this was loading: that request was skipped (one at a time), so make it now.
+    if (requested !== tf) refreshPriceChart(true);
   }
 }
 

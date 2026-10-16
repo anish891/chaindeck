@@ -53,10 +53,8 @@ router.get('/chart-analysis', async (req, res) => {
   if (!CHART_INTERVALS.has(interval)) return res.status(400).json({ ok: false, error: 'interval must be 5m, 15m or 1d.' });
   if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    let fallbackPoints = null;
-    if (expiry && interval !== '1d') {
-      try { fallbackPoints = (await history.getIntraday(expiry)).points; } catch (e) { fallbackPoints = null; }
-    }
+    // Stored spot history is only read if Yahoo is down (it is a fallback; reading it every time cost a storage round trip).
+    const fallbackPoints = expiry && interval !== '1d' ? async () => (await history.getIntraday(expiry)).points : null;
     const data = await chartAnalysis.analyze(interval, { d: getCacheData(), fallbackPoints });
     res.set('Cache-Control', HISTORY_CACHE);
     res.json({ ok: true, ...data });

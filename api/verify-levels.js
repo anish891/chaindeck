@@ -98,8 +98,8 @@ const mk = (i, o, h, l, c, v = 1000, base = day0) => ({ t: base + i * 300000, o,
   assert.ok(res.families.includes('options') && res.families.includes('prior'), 'call wall + previous high agree');
   assert.ok(a.zones.every((z, i, arr) => i === 0 || arr[i - 1].mid >= z.mid), 'sorted high to low');
   assert.ok(a.zones.some(z => z.kind === 'inside'), 'spot sits inside the pivot/vwap/max-pain cluster');
-  const n = L.nearestZones(a);
-  assert.ok(n.above.mid > spot && n.below.mid < spot);
+  assert.ok(a.zones.some(z => z.kind === 'resistance' && z.mid > spot), 'resistance above spot');
+  assert.ok(a.zones.some(z => z.kind === 'support' && z.mid < spot), 'support below spot');
   assert.strictEqual(L.buildLadder({ spot: NaN }).zones.length, 0);
 }
 

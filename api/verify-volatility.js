@@ -52,4 +52,15 @@ assert.strictEqual(pts[0].ivT, undefined);
 assert.deepStrictEqual(v.ivPercentile(15, [10, 12, 14, 16, 18]), { pct: 60, samples: 5 });
 assert.deepStrictEqual(v.ivPercentile(15, [10, 12]), { pct: null, samples: 2 });
 
+// Time to expiry is measured from when NSE quoted the prices, not from the wall clock: on a Sunday, Friday's
+// closing chain still has 4 days to a Tuesday expiry (before the fix it was treated as 2, skewing Greeks and GEX).
+{
+  const { getDTEInYears } = require('./services/analytics');
+  const friClose = ist(2026, 10, 9, 15, 30);
+  near(getDTEInYears('13-Oct-2026', friClose) * 365, 4, 1e-9, 'Fri 15:30 -> Tue 15:30 is 4 days');
+  near(getDTEInYears('13-Oct-2026', ist(2026, 10, 13, 9, 15)) * 365, 375 / 1440, 1e-9, 'expiry morning: the session is left');
+  assert.strictEqual(getDTEInYears('13-Oct-2026', ist(2026, 10, 14, 10, 0)), 0.00005, 'after expiry: floored, never negative');
+  assert(getDTEInYears(null) > 0, 'missing expiry still returns a small positive time');
+}
+
 console.log('volatility checks passed');

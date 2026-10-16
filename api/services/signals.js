@@ -6,7 +6,6 @@
 
 const { atr } = require('./levels');
 
-const FAMILIES = ['price', 'level', 'volume', 'options'];
 const MIN_FAMILIES = 2;
 const MAX_AGE = { '5m': 6, '15m': 4, '1d': 2 };
 
@@ -219,7 +218,8 @@ function buildActionZones({ candles, ladder, strikes, profile, patterns, interva
     // price: reversal patterns in that direction formed here, or the zone already held on a test
     const patt = recent.filter(p => p.dir === dir && candles[p.i] && (buy ? candles[p.i].l : candles[p.i].h) >= z.low - tol * 1.5 && (buy ? candles[p.i].l : candles[p.i].h) <= z.high + tol * 1.5);
     if (patt.length) { fam.add('price'); evidence.push({ family: 'price', text: `${patt[patt.length - 1].label} formed here` }); }
-    else if (z.status === 'held' && z.touches > 0) { fam.add('price'); evidence.push({ family: 'price', text: `Held on ${z.held} of ${z.touches} test${z.touches > 1 ? 's' : ''} today` }); }
+    // 'held' only means "not broken"; it is evidence only if at least one test actually closed on the right side
+    else if (z.status === 'held' && z.held > 0) { fam.add('price'); evidence.push({ family: 'price', text: `Held on ${z.held} of ${z.touches} test${z.touches > 1 ? 's' : ''} today` }); }
 
     if (fam.size < MIN_FAMILIES) continue;
     if (z.status === 'broken') continue;
@@ -236,4 +236,4 @@ function buildActionZones({ candles, ladder, strikes, profile, patterns, interva
   return out.sort((x, y) => Math.abs(x.distancePct) - Math.abs(y.distancePct));
 }
 
-module.exports = { FAMILIES, MIN_FAMILIES, MAX_AGE, optionEvidence, volumeRatio, buildSignals, buildActionZones, gradeOf };
+module.exports = { MIN_FAMILIES, MAX_AGE, optionEvidence, volumeRatio, buildSignals, buildActionZones, gradeOf };

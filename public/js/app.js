@@ -1045,8 +1045,8 @@ export function renderTable() {
     const pBid = pe.bidprice || 0;
     const pAsk = pe.askPrice || 0;
 
-    const cBD = getSmoothedBuildup(r.strike, cOI, cLTP, true, cChg, ce.change || 0);
-    const pBD = getSmoothedBuildup(r.strike, pOI, pLTP, false, pChg, pe.change || 0);
+    const cBD = getSmoothedBuildup(r.strike, cOI, cLTP, true, cChg, ce.change || 0, d.expiry);
+    const pBD = getSmoothedBuildup(r.strike, pOI, pLTP, false, pChg, pe.change || 0, d.expiry);
 
     const cBarW = pct(cOI, maxCallOI);
     const pBarW = pct(pOI, maxPutOI);
@@ -1211,7 +1211,19 @@ export function toggleGreeksView() {
 export function sortTable(col) {
   if (sortCol === col) sortDir *= -1;
   else { sortCol = col; sortDir = -1; }
+  renderSortIndicator();
   renderTable();
+}
+
+// Arrow on the sorted column header (styles .sort-asc / .sort-desc) and aria-sort for screen readers.
+function renderSortIndicator() {
+  document.querySelectorAll('#chainTable th[data-click^="sortTable:"]').forEach(th => {
+    const col = th.dataset.click.split(':')[1];
+    const active = col === sortCol;
+    th.classList.toggle('sort-asc', active && sortDir === 1);
+    th.classList.toggle('sort-desc', active && sortDir === -1);
+    th.setAttribute('aria-sort', active ? (sortDir === 1 ? 'ascending' : 'descending') : 'none');
+  });
 }
 
 function isMarketOpen() {

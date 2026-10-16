@@ -872,50 +872,6 @@ td.muted {
   animation: flashBull 0.7s ease;
 }
 
-/* ── PDF Export Compact Formatting (Forces 2 Page fit) ── */
-body.exporting-pdf {
-  font-size: 11px !important;
-}
-
-body.exporting-pdf .topbar {
-  padding: 6px 12px !important;
-}
-
-body.exporting-pdf .hero-banner-container,
-body.exporting-pdf .unusual-flow-container {
-  padding: 6px 12px 0 12px !important;
-}
-
-body.exporting-pdf .metrics-dashboard {
-  padding: 8px 12px !important;
-  gap: 8px !important;
-}
-
-body.exporting-pdf .dashboard-card {
-  padding: 8px 10px !important;
-  gap: 6px !important;
-}
-
-body.exporting-pdf .pcr-row,
-body.exporting-pdf .expiry-row {
-  padding: 4px 12px !important;
-}
-
-body.exporting-pdf .table-wrap {
-  padding: 0 0 10px !important;
-}
-
-body.exporting-pdf td,
-body.exporting-pdf th {
-  padding: 4px 6px !important;
-  font-size: 10px !important;
-}
-
-body.exporting-pdf .footer {
-  position: static !important;
-  padding: 6px 12px !important;
-}
-
 .hidden-greeks {
   display: none !important;
 }
@@ -1391,10 +1347,6 @@ tbody tr.atm-row td {
   }
 }
 
-body.exporting-pdf .keystrip {
-  display: none !important;
-}
-
 .timeline-empty {
   position: absolute;
   inset: 0;
@@ -1705,11 +1657,6 @@ body.exporting-pdf .keystrip {
 
 .as-danger {
   color: var(--bear);
-}
-
-body.exporting-pdf #alertsDrawer,
-body.exporting-pdf #alertToasts {
-  display: none !important;
 }
 
 /* ═════════ Alerts: dismissal, backdrop, snooze ═════════ */

@@ -108,8 +108,8 @@ const EXPLAIN = {
     hi: ['इंट्राडे टाइमलाइन', 'पूरे दिन का स्पॉट और दाईं तरफ़ कोई एक और पैमाना, लगभग हर मिनट सेव हुए स्नैपशॉट से। इससे देखें कि PCR, IV, GEX या OI कीमत के साथ चले या उलटे।']
   },
   buildup: {
-    en: ['Buildup colours', 'Each option is labelled by how its price and open interest changed together. Long buildup: price up, OI up (fresh buying). Short buildup: price down, OI up (fresh selling). Long unwinding: price down, OI down (buyers exiting). Short covering: price up, OI down (sellers exiting).'],
-    hi: ['बिल्डअप के रंग', 'हर ऑप्शन को इस आधार पर लेबल किया जाता है कि उसकी कीमत और ओपन इंटरेस्ट साथ में कैसे बदले। लॉन्ग बिल्डअप: कीमत ऊपर, OI ऊपर (नई खरीद)। शॉर्ट बिल्डअप: कीमत नीचे, OI ऊपर (नई बिकवाली)। लॉन्ग अनवाइंडिंग: कीमत नीचे, OI नीचे (खरीदार निकल रहे)। शॉर्ट कवरिंग: कीमत ऊपर, OI नीचे (बेचने वाले निकल रहे)।']
+    en: ['Buildup colours', 'Each option is labelled by how its open interest and price moved together over the last few snapshots (or since yesterday when there is no recent change). For calls: long buildup is price up with OI up, short buildup is price down with OI up, long unwinding is price down with OI down, short covering is price up with OI down. For puts the labels are read from NIFTY\'s side, so the colours mean the same thing on both sides: put writing (put price down, OI up) shows as long buildup and fresh put buying (put price up, OI up) shows as short buildup. Green is bullish for NIFTY, red is bearish.'],
+    hi: ['बिल्डअप के रंग', 'हर ऑप्शन को इस आधार पर लेबल किया जाता है कि पिछले कुछ स्नैपशॉट में (या हाल में बदलाव न हो तो कल से) उसका ओपन इंटरेस्ट और कीमत साथ में कैसे बदले। कॉल के लिए: लॉन्ग बिल्डअप = कीमत ऊपर, OI ऊपर; शॉर्ट बिल्डअप = कीमत नीचे, OI ऊपर; लॉन्ग अनवाइंडिंग = कीमत नीचे, OI नीचे; शॉर्ट कवरिंग = कीमत ऊपर, OI नीचे। पुट के लेबल NIFTY के नज़रिए से पढ़े जाते हैं, ताकि दोनों तरफ़ रंगों का मतलब एक ही रहे: पुट राइटिंग (पुट की कीमत नीचे, OI ऊपर) लॉन्ग बिल्डअप दिखती है और नई पुट खरीद (पुट की कीमत ऊपर, OI ऊपर) शॉर्ट बिल्डअप। हरा NIFTY के लिए तेज़ी, लाल मंदी।']
   },
   greeks: {
     en: ['Option Greeks', 'Delta is roughly how much the option price moves for a 1 point move in NIFTY, and also a rough chance of finishing in the money. Theta is how much value the option loses per day from time decay, all else equal.'],
@@ -242,5 +242,3 @@ export function initExplain() {
   document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
   window.addEventListener('resize', () => place());
 }
-
-export const EXPLAIN_KEYS = Object.keys(EXPLAIN);

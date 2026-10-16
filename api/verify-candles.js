@@ -86,6 +86,24 @@ const min = m => open + m * 60000;
   const r4 = await C.getCandles('5m', { fetchImpl: down });
   assert.strictEqual(r4.source, 'none');
   assert.deepStrictEqual(r4.candles, []);
+
+  // The stored-history fallback is only loaded when Yahoo fails. It used to be read from storage on every
+  // chart request (about every 15 seconds per viewer) and then thrown away.
+  {
+    let loads = 0;
+    const loader = async () => { loads += 1; return pts; };
+    C.clearCache();
+    const ok = await C.getCandles('5m', { fetchImpl: async () => ({ json: async () => mk(0) }), fallbackPoints: loader });
+    assert.strictEqual(ok.source, 'yahoo');
+    assert.strictEqual(loads, 0, 'Yahoo worked: storage is not read');
+    C.clearCache();
+    const fb = await C.getCandles('5m', { fetchImpl: down, fallbackPoints: loader });
+    assert.strictEqual(fb.source, 'stored');
+    assert.strictEqual(loads, 1, 'Yahoo down: storage is read once');
+    C.clearCache();
+    const broken = await C.getCandles('5m', { fetchImpl: down, fallbackPoints: async () => { throw new Error('redis'); } });
+    assert.strictEqual(broken.source, 'none', 'a failing fallback loader degrades to no candles, not an error');
+  }
   console.error = origErr;
 
   console.log('candles checks passed');

@@ -34,7 +34,7 @@ const round1 = n => (Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
 /**
  * @param interval '5m' | '15m' | '1d'
  * @param opts.d latest processed option chain (may be null before the first fetch)
- * @param opts.fallbackPoints stored per-minute spot points used if Yahoo is unreachable
+ * @param opts.fallbackPoints stored per-minute spot points (or an async loader for them) used if Yahoo is unreachable
  * @param opts.deps injectable data sources for tests
  */
 async function analyze(interval, { d = null, fallbackPoints = null, deps = candlesSvc } = {}) {

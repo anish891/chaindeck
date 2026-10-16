@@ -7,6 +7,7 @@ const { getCookies, fetchWithTimeout } = require('./nse');
 
 
 const INDICES_TTL = 15 * 1000;
+const INDICES_MAX_STALE = 10 * 60 * 1000; // older than this, a fallback value would mislead more than help
 const OHLC_TTL = 30 * 60 * 1000;
 
 let indicesCache = { ts: 0, value: null };
@@ -62,18 +63,41 @@ async function loadIndices() {
   return { nifty: pick(nifty), vix: vix ? pick(vix) : null, sectors, breadth };
 }
 
-async function getIndexSnapshot() {
+let indexLoader = loadIndices; // swappable in tests
+
+const staleIndices = () => (indicesCache.value && Date.now() - indicesCache.ts < INDICES_MAX_STALE ? indicesCache.value : null);
+
+/**
+ * VIX, NIFTY day stats, sectors and breadth. Fresh data within 15 s is served from cache; otherwise NSE is asked.
+ * If NSE fails, or does not answer within `timeoutMs`, the last good snapshot (at most 10 minutes old) is returned
+ * instead of nothing, so one slow reply does not blank VIX and the sector tiles.
+ */
+async function getIndexSnapshot({ timeoutMs = 0 } = {}) {
   if (indicesCache.value && Date.now() - indicesCache.ts < INDICES_TTL) return indicesCache.value;
   if (!indicesInflight) {
-    indicesInflight = loadIndices()
+    indicesInflight = indexLoader()
       .then(v => { indicesCache = { ts: Date.now(), value: v }; return v; })
       .catch(err => {
         console.error('allIndices failed:', err.message);
-        return indicesCache.value; // stale (or null) is better than nothing
+        return staleIndices();
       })
       .finally(() => { indicesInflight = null; });
   }
-  return indicesInflight;
+  if (!timeoutMs) return indicesInflight;
+  let timer;
+  const fallback = new Promise(resolve => { timer = setTimeout(() => resolve(staleIndices()), timeoutMs); });
+  try {
+    return await Promise.race([indicesInflight, fallback]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Test hooks: replace the NSE loader and clear the cache. */
+function _setIndexLoader(fn) {
+  indexLoader = fn || loadIndices;
+  indicesCache = { ts: 0, value: null };
+  indicesInflight = null;
 }
 
 async function loadDailyBars() {
@@ -125,4 +149,4 @@ async function getPivotBasis() {
   }
 }
 
-module.exports = { getIndexSnapshot, getPivotBasis, istNow };
+module.exports = { getIndexSnapshot, getPivotBasis, istNow, _setIndexLoader };

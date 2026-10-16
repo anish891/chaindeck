@@ -145,7 +145,8 @@ async function cached(key, ttl, loader) {
 
 /**
  * Candles for the chart: index OHLC with ETF volume merged in.
- * `fallbackPoints` (optional) are stored { t, spot } values used when Yahoo cannot be reached.
+ * `fallbackPoints` (optional) are stored { t, spot } values used when Yahoo cannot be reached: either the array itself
+ * or an async function returning it, which is only called if Yahoo fails (so storage is not read on every request).
  */
 async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch } = {}) {
   const preset = PRESETS[interval];
@@ -168,7 +169,11 @@ async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch }
     console.error('candles: Yahoo unavailable:', err.message);
     const minutes = preset.minutes;
     if (fallbackPoints && minutes) {
-      const stored = candlesFromSpotPoints(fallbackPoints, minutes);
+      let points = fallbackPoints;
+      if (typeof points === 'function') {
+        try { points = await points(); } catch (e) { console.error('candles: stored fallback unavailable:', e.message); points = null; }
+      }
+      const stored = candlesFromSpotPoints(points, minutes);
       if (stored.length) return { candles: stored, volumeSource: 'none', source: 'stored', updatedAt: Date.now() };
     }
     return { candles: [], volumeSource: 'none', source: 'none', updatedAt: Date.now() };

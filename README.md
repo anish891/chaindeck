@@ -111,8 +111,10 @@ kinds of evidence land on the same price:
 | Volume | VWAP, volume point of control, value area edges, high volume nodes |
 | Round numbers | Multiples of 500 and 100 |
 
-Strength is a score out of 100, not a probability. Each zone also tracks today's behaviour: untested, held (touched and
-bounced) or broken (closed through).
+Strength is a score out of 100, not a probability. Each zone also tracks today's behaviour: untested, held (touched,
+with closes staying on its side, shown as "Held 3/4"), tested but not held (touched, closes went into it without
+breaking it) or broken (closed through). Only a zone that actually held counts as price evidence for a buying or
+selling interest zone.
 
 ### Reversal Signals and buying / selling interest zones
 - **Patterns detected:** hammer, inverted hammer, shooting star, hanging man, bullish and bearish engulfing, piercing
@@ -148,9 +150,11 @@ at least 30 samples and a lower bound above the baseline. Most patterns show no 
 
 - ±10 strikes around the ATM strike, with the ATM row highlighted.
 - Change in OI, OI, IV, LTP and bid/ask for calls and puts, with inline bars.
-- Buildup colouring for every leg: long buildup, short buildup, long unwinding and short covering.
+- Buildup colouring for every leg: long buildup, short buildup, long unwinding and short covering, from the last few
+  snapshots of that contract (or the day's change when nothing has moved yet). Put labels are read from NIFTY's side
+  (put writing shows as long buildup), so green is bullish and red bearish on both sides.
 - Optional Delta and Theta columns.
-- Sort by any column.
+- Sort by any column; an arrow marks the sorted column and direction.
 - Click a strike to open its drill-down.
 
 ### Strike drill-down
@@ -205,10 +209,10 @@ traders read it, with an English and हिन्दी toggle. The language cho
 | Data | Source | Freshness |
 |---|---|---|
 | Option chain | NSE option chain | NSE updates about once a minute during market hours |
-| India VIX, sector indices, NIFTY 50 breadth | NSE index list | Live while the page is open, reused for up to 15 seconds |
+| India VIX, sector indices, NIFTY 50 breadth | NSE index list | Live while the page is open, reused for up to 15 seconds; if NSE is slow (over 2.5 seconds) or fails, the last good values are kept for up to 10 minutes |
 | Previous session high, low and close for CPR | Daily NIFTY bars | Once per session |
 | FII / DII / Pro / Client positions | NSE end-of-day participant-wise OI file | Published each evening after the close |
-| NIFTY candles and ETF volume | Yahoo Finance chart data (unofficial, delayed) | 20 seconds while the market is open; falls back to candles built from saved spot values |
+| NIFTY candles and ETF volume | Yahoo Finance chart data (unofficial, delayed) | 20 seconds while the market is open; only if Yahoo fails are candles built from saved spot values |
 
 Outside market hours the dashboard shows the last session's values.
 
@@ -221,6 +225,8 @@ session is saved after the close for "Sessions That Looked Like Today", the vola
 ### Methods
 - **Expected move:** about 0.85 times the ATM straddle, as a one-standard-deviation move to expiry, scaled by the
   square root of trading days for a per-day figure.
+- **Time to expiry:** measured from when NSE quoted the prices to 15:30 IST on expiry day, so Greeks, GEX, the
+  zero-gamma level and the implied distribution stay consistent with the quotes after hours and over weekends.
 - **Implied future:** put-call parity at the ATM strike.
 - **Max pain:** the expiry level at which option holders collectively lose the most.
 - **IV skew:** 25-delta risk reversal (put IV minus call IV at the strikes nearest 25 delta), falling back to the
@@ -235,11 +241,12 @@ session is saved after the close for "Sessions That Looked Like Today", the vola
   trading hours only (09:15 to 15:30 IST, weekdays), which makes it directly comparable with intraday realised
   volatility. Exchange holidays are not modelled.
 - **IV percentile:** the share of saved session closing IVs at or below today's IV (shown once 5 sessions exist).
-- **Buildup:** price change and OI change taken together for each leg.
+- **Buildup:** price change and OI change taken together for each contract (expiry and strike), over distinct
+  snapshots only, with put labels read from NIFTY's side.
 
 ### Limitations
 - NSE's data can lag by a minute or more, and NSE sometimes times out. When that happens the dashboard keeps the
-  last good values on screen.
+  last good values on screen (for the index list, at most 10 minutes old).
 - Realised volatility needs about 15 minutes of snapshots each morning and reads high in the first half hour.
 - Intraday realised volatility leaves out overnight gaps, so implied volatility usually sits above it.
 - Candle data comes from an unofficial Yahoo Finance endpoint and can be delayed or unavailable. The chart says when it

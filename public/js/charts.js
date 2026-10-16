@@ -25,16 +25,19 @@ export function timeStr(iso) {
   return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-// Ring buffer for strike tick history (last 8 ticks)
+// Ring buffer of the last 8 distinct snapshots per contract (expiry + strike). Re-rendering the same data (sorting,
+// toggling Greeks) is not a new tick, and the same strike on another expiry is a different contract.
 const tickHistory = {
   CE: {},
   PE: {}
 };
 
-export function updateTickHistory(strike, oi, price, isCall) {
+export function updateTickHistory(key, oi, price, isCall) {
   const targetMap = isCall ? tickHistory.CE : tickHistory.PE;
-  if (!targetMap[strike]) targetMap[strike] = [];
-  const history = targetMap[strike];
+  if (!targetMap[key]) targetMap[key] = [];
+  const history = targetMap[key];
+  const last = history[history.length - 1];
+  if (last && last.oi === oi && last.price === price) return;
 
   history.push({ oi, price, ts: Date.now() });
   if (history.length > 8) history.shift();
@@ -47,10 +50,11 @@ export function buildupSingle(chgOI, chgPrice, isCall) {
   return priceUp ? { label: 'SHORT COV', cls: 'bd-sc' } : { label: 'LONG UNWD', cls: 'bd-lu' };
 }
 
-export function getSmoothedBuildup(strike, currentOI, currentPrice, isCall, dayOiChg = 0, dayPriceChg = 0) {
-  updateTickHistory(strike, currentOI, currentPrice, isCall);
+export function getSmoothedBuildup(strike, currentOI, currentPrice, isCall, dayOiChg = 0, dayPriceChg = 0, expiry = '') {
+  const key = `${expiry}|${strike}`;
+  updateTickHistory(key, currentOI, currentPrice, isCall);
 
-  const history = isCall ? tickHistory.CE[strike] : tickHistory.PE[strike];
+  const history = isCall ? tickHistory.CE[key] : tickHistory.PE[key];
 
   // Intraday trend over the last few distinct snapshots, when there is one
   if (history && history.length >= 2) {

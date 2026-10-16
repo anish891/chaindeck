@@ -287,21 +287,12 @@ function buildLadder(input, { tracking = null, maxZones = 12 } = {}) {
 
   // A zone that price has since crossed flips role: broken resistance below price behaves as support, and vice versa.
   zones = zones.map(z => {
-    let kind = z.high < spot - tol * 0.25 ? 'support' : z.low > spot + tol * 0.25 ? 'resistance' : 'inside';
+    const kind = z.high < spot - tol * 0.25 ? 'support' : z.low > spot + tol * 0.25 ? 'resistance' : 'inside';
     return { ...z, kind, distance: z.mid - spot, distancePct: ((z.mid - spot) / spot) * 100 };
   });
 
   const keep = zones.sort((a, b) => b.strength - a.strength).slice(0, maxZones).sort((a, b) => b.mid - a.mid);
   return { spot, atr: atrValue, tolerance: tol, zones: keep };
-}
-
-/** Nearest zones above and below spot, optionally only those at least `minStrength` strong. */
-function nearestZones(ladder, minStrength = 0) {
-  const z = ladder.zones.filter(x => x.strength >= minStrength);
-  const above = z.filter(x => x.kind === 'resistance').sort((a, b) => a.mid - b.mid)[0] || null;
-  const below = z.filter(x => x.kind === 'support').sort((a, b) => b.mid - a.mid)[0] || null;
-  const inside = z.find(x => x.kind === 'inside') || null;
-  return { above, below, inside };
 }
 
 module.exports = {
@@ -315,6 +306,5 @@ module.exports = {
   collectLevels,
   clusterLevels,
   trackZones,
-  buildLadder,
-  nearestZones
+  buildLadder
 };

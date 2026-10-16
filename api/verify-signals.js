@@ -115,4 +115,16 @@ const zone = (low, high, strength, kind, sources = [{ label: 'Put OI wall', type
   assert.ok(zs.every(z => z.families.length >= 2));
 }
 
+// a zone that was touched but never held (every close went through it, just not far enough to count as broken)
+// must not be credited with price evidence: trackZones calls it 'held' with held === 0
+{
+  const cs = flat(40);
+  const ladder = { spot: 24300, tolerance: 25, atr: 30, zones: [
+    { ...zone(24200, 24215, 70, 'support'), status: 'held', touches: 3, held: 0, distancePct: -0.35 }
+  ] };
+  const zs = S.buildActionZones({ candles: cs, ladder, strikes: [], profile: null, patterns: [], interval: '5m' });
+  assert.strictEqual(zs.length, 0, 'held 0 of 3 is not evidence, so the zone has only one family and is skipped');
+  assert.ok(!JSON.stringify(zs).includes('Held on 0'), 'never shows "Held on 0 of N"');
+}
+
 console.log('signals checks passed');

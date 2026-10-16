@@ -152,27 +152,14 @@ function normalCdf(x) {
   return prob;
 }
 
-function getDTEInYears(expiryStr) {
-  if (!expiryStr) return 1 / 365;
-  const parts = expiryStr.split('-');
-  let expDate = new Date();
-  if (parts.length === 3) {
-    const day = parseInt(parts[0], 10);
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const monthIdx = monthNames.findIndex(m => m.toLowerCase() === parts[1].toLowerCase());
-    const year = parseInt(parts[2], 10);
-    if (monthIdx !== -1) {
-      expDate = new Date(Date.UTC(year, monthIdx, day, 10, 0, 0));
-    } else {
-      expDate = new Date(expiryStr);
-    }
-  } else {
-    expDate = new Date(expiryStr);
-  }
-  const now = new Date();
-  const diffMs = expDate.getTime() - now.getTime();
-  const diffDays = diffMs / (1000 * 3600 * 24);
-  return Math.max(0.00005, diffDays / 365);
+/**
+ * Years from `atMs` (when the prices were quoted) to the 15:30 IST expiry close, floored at a tiny positive value.
+ * Measured from the quote time, not the wall clock, so after-hours and weekend views stay consistent with the prices.
+ */
+function getDTEInYears(expiryStr, atMs = Date.now()) {
+  const expMs = expiryCloseMs(expiryStr);
+  if (!expMs) return 1 / 365;
+  return Math.max(0.00005, (expMs - atMs) / (1000 * 3600 * 24) / 365);
 }
 
 function calculateOptionGamma(S, K, T, v, r = RISK_FREE_RATE) {
@@ -243,7 +230,6 @@ function extractFeatureVector(data) {
   return [pcr, gexRegimeCode, cprWidthPct, ivSkew, totalCallChgCr, totalPutChgCr];
 }
 
-const WINDOW_SIZE = 20;
 const MIN_SAMPLES = 5;
 const Z_THRESHOLD = 1.5;
 
@@ -398,7 +384,7 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   }
 
   const [indices, pivotBasis, sessions] = await Promise.all([
-    withTimeout(getIndexSnapshot(), 2500),
+    getIndexSnapshot({ timeoutMs: 2500 }),
     withTimeout(getPivotBasis(), 2500),
     withTimeout(history.getSessions(252).catch(() => []), 2000)
   ]);
@@ -407,7 +393,10 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   const atm = Math.round(spot / 50) * 50;
   const MIN_STRIKE = atm - 500;
   const MAX_STRIKE = atm + 500;
-  const T = getDTEInYears(targetExpiry);
+  // When NSE quoted these prices (falls back to now); option maths is anchored to it.
+  const nseTs = raw.records.timestamp || null;
+  const snapMs = Date.parse(parseNseTimestamp(nseTs) || '') || now;
+  const T = getDTEInYears(targetExpiry, snapMs);
   const dteDays = T * 365;
   const allExpiryRows = (raw.records.data || []).filter(r => (r.expiryDate || r.expiryDates) === targetExpiry);
 
@@ -429,7 +418,6 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   const unusualFlowAlerts = [];
 
   // New NSE snapshot? Only then do increments mean anything.
-  const nseTs = raw.records.timestamp || null;
   const isNewSnapshot = nseTs === null || flowState.lastTs[targetExpiry] !== nseTs;
   flowState.lastTs[targetExpiry] = nseTs;
 
@@ -437,7 +425,6 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   // (or a restart after a long gap) would otherwise treat 30 minutes of volume as one minute's and
   // flag everything as a surge — so score only when the previous snapshot is 0.5–4 minutes old,
   // and normalise to per-minute rates so a skipped snapshot (2 min apart) doesn't look like a spike.
-  const snapMs = Date.parse(parseNseTimestamp(nseTs) || '') || now;
   const MIN_GAP_MIN = 0.5;
   const MAX_GAP_MIN = 4;
   const FLOW_MAX_DIST = 0.03; // ignore flow >3% away from spot: irrelevant for trading and mostly noise
