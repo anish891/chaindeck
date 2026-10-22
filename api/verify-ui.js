@@ -111,7 +111,7 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
     const panels = chartJs.slice(chartJs.indexOf('// ── panels'), chartJs.indexOf('// ── public API'));
     const bare = new Set();
     for (const m of panels.matchAll(/\$\{((?:[^{}]|\{[^{}]*\})*)\}/g)) if (!/^escapeHtml\(/.test(m[1])) bare.add(m[1]);
-    const reviewed = new Set(["Math.max(4, Math.min(100, z.strength))", "Math.round(z.high)", "Math.round(z.low)", "Math.round(z.mid)", "bt.candles.toLocaleString('en-IN')", "bt.horizon", "bt.sessions", "dir", "e.against ? 'against' : e.neutral ? 'neutral' : ''", "evidence", "h.horizon", "h.n", "kind", "kindLabel", "p.dir === 'bull' ? 'Bullish' : 'Bearish'", "p.dir === 'bull' ? 'bull' : 'bear'", "p.n", "pc(h.baseline)", "pc(h.ci.high)", "pc(h.ci.low)", "pc(h.hitRate)", "pc(p.baseline)", "pc(p.hitRate)", "rows", "s.age === 0 ? 'latest candle' : s.age + ' candle' + (s.age > 1 ? 's' : '') + ' ago'", "s.dir === 'bull' ? 'Bullish reversal' : 'Bearish reversal'", "s.rr ? ` (about ${escapeHtml(String(s.rr))}R)` : ''", "s.score", "side", "tgt", "why", "VERDICT_TEXT[h.verdict] || h.verdict", "z.distancePct > 0 ? '+' : ''", "z.evidence.map(e => `<li><em>${escapeHtml(e.family)}</em> ${escapeHtml(e.text)}</li>`).join('')", "z.families.length", "z.families.length >= 3 ? 'strong' : 'moderate'", "z.held", "z.side === 'buy' ? 'Buying interest' : 'Selling interest'", "z.strength", "z.touches"]);
+    const reviewed = new Set(["Math.max(4, Math.min(100, z.strength))","Math.round(z.high)","Math.round(z.low)","Math.round(z.mid)","VERDICT_TEXT[h.verdict] || h.verdict","bt.candles.toLocaleString('en-IN')","bt.horizon","bt.sessions","dir","e.against ? 'against' : e.neutral ? 'neutral' : ''","evidence","h.horizon","h.n","hidden ? ` (${hidden} weaker pattern${hidden > 1 ? 's' : ''} hidden.)` : ''","kind","kindLabel","p.dir === 'bull' ? 'Bullish' : 'Bearish'","p.dir === 'bull' ? 'bull' : 'bear'","p.n","pc(h.baseline)","pc(h.ci.high)","pc(h.ci.low)","pc(h.hitRate)","pc(p.baseline)","pc(p.hitRate)","rows","s.age === 0 ? 'latest candle' : s.age + ' candle' + (s.age > 1 ? 's' : '') + ' ago'","s.dir === 'bull' ? 'Bullish reversal' : 'Bearish reversal'","s.rr ? ` (about ${escapeHtml(String(s.rr))}R)` : ''","s.score","side","tgt","why","z.distancePct > 0 ? '+' : ''","z.evidence.map(e => `<li><em>${escapeHtml(e.family)}</em> ${escapeHtml(e.text)}</li>`).join('')","z.families.length","z.families.length >= 3 ? 'strong' : 'moderate'","z.held","z.side === 'buy' ? 'Buying interest' : 'Selling interest'","z.strength","z.touches"]);
     // historyLine() builds plain text, so its verdict is exempt above: that is only safe while every use is escaped once
     const historyUses = [...chartJs.matchAll(/historyLine\(/g)].length - 1; // minus the definition
     const escapedUses = [...chartJs.matchAll(/escapeHtml\(historyLine\(/g)].length;
@@ -171,6 +171,14 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(!/innerHTML/.test(sc), 'level-scorecard.js builds DOM with textContent only');
   assert(/refreshLevelScorecard\(\)/.test(app), 'the page must load the level scorecard');
   assert(/\n  levelScorecard: \{\n    en:/.test(read('public/js/explain.js')), 'explain text for levelScorecard missing');
+}
+
+// ── 9. chart arrows are filtered, not one per detection ──
+{
+  const chartJs = read('public/js/price-chart.js');
+  assert(/!pt\.notable/.test(chartJs), 'markers must default to the notable patterns only');
+  assert(/data-layer="allPatterns"/.test(html), 'the raw "show every pattern" switch must exist');
+  assert(/LAYER_DEFAULTS = \{[^}]*allPatterns:\s*false/.test(chartJs), 'every pattern must be OFF by default');
 }
 
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

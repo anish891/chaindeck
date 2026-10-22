@@ -8,7 +8,7 @@ import { escapeHtml } from './ui-utils.js';
 
 const REFRESH_MS = 15000;
 const IST_OFFSET_S = 19800;
-const LAYER_DEFAULTS = { zones: true, volume: true, vwap: true, profile: true, patterns: true };
+const LAYER_DEFAULTS = { zones: true, volume: true, vwap: true, profile: true, patterns: true, allPatterns: false };
 const TIMEFRAMES = ['5m', '15m', '1d'];
 
 let tf = '5m';
@@ -238,7 +238,8 @@ function markersFor(p) {
   if (!data || !layers.patterns) return [];
   const byTime = new Map();
   data.patterns.forEach(pt => {
-    if (pt.quality < 0.5) return;
+    // by default only the notable ones get an arrow; "All patterns" shows every detection (roughly one in four candles)
+    if (layers.allPatterns ? pt.quality < 0.5 : !pt.notable) return;
     const cur = byTime.get(pt.t);
     if (!cur || pt.quality > cur.quality) byTime.set(pt.t, pt);
   });
@@ -350,11 +351,13 @@ function renderSignals() {
   const el = document.getElementById('signalsList');
   if (!el) return;
   if (!data) { el.innerHTML = '<div class="timeline-empty">Waiting for chart data.</div>'; return; }
-  if (!data.signals.length) {
-    el.innerHTML = '<div class="timeline-empty">No reversal pattern on the latest candles. Signals appear only when a pattern forms; most of the time there is none.</div>';
+  const shown = data.signals.filter(s => s.confirmed);
+  const hidden = data.signals.length - shown.length;
+  if (!shown.length) {
+    el.innerHTML = `<div class="timeline-empty">No confirmed reversal signal right now. A signal needs a pattern at a support or resistance zone with a second kind of evidence behind it; most of the time there is none.${hidden ? ` (${hidden} weaker pattern${hidden > 1 ? 's' : ''} hidden.)` : ''}</div>`;
     return;
   }
-  el.innerHTML = data.signals.slice(0, 4).map(s => {
+  el.innerHTML = shown.slice(0, 4).map(s => {
     const dir = s.dir === 'bull' ? 'bull' : 'bear';
     const state = s.state === 'triggered' ? 'Trigger hit' : 'Waiting for trigger';
     const grade = s.confirmed ? s.grade : 'unconfirmed';

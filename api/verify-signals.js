@@ -127,4 +127,36 @@ const zone = (low, high, strength, kind, sources = [{ label: 'Put OI wall', type
   assert.ok(!JSON.stringify(zs).includes('Held on 0'), 'never shows "Held on 0 of N"');
 }
 
+// confirmation requires a level: pattern + volume at no zone is NOT a trade idea
+{
+  const cs = flat(30);
+  const i = cs.length;
+  cs.push(mk(i, 24296, 24300, 24250, 24298, 3000)); // big volume
+  const ladder = { spot: 24298, atr: 30, tolerance: 25, zones: [] };
+  const pattern = { i, t: cs[i].t, name: 'hammer', label: 'Hammer', dir: 'bull', kind: 'candle', quality: 0.9 };
+  const [sig] = S.buildSignals({ candles: cs, patterns: [pattern], ladder, strikes: [], backtest: null, interval: '5m' });
+  assert.ok(sig.families.includes('volume') && sig.families.length >= 2, 'two families agree');
+  assert.strictEqual(sig.confirmed, false, 'but with no zone behind it the signal stays unconfirmed');
+}
+
+// marker selection: structural types only, quality floor, spacing, no negative record, confirmed signals always kept
+{
+  const P = (i, name, quality) => ({ i, t: i * 300000, name, quality, dir: 'bull' });
+  const pats = [P(10, 'hammer', 0.9), P(12, 'bullEngulfing', 0.7), P(30, 'dojiLow', 0.95), P(40, 'tweezerBottom', 0.9), P(50, 'hammer', 0.5), P(60, 'morningStar', 0.8), P(70, 'hammer', 0.8)];
+  let keep = S.selectNotable(pats, { interval: '5m' });
+  assert.ok(keep.has('hammer|' + 10 * 300000), 'strong structural pattern kept');
+  assert.ok(!keep.has('bullEngulfing|' + 12 * 300000), 'a weaker pattern within the spacing window loses to the stronger one');
+  assert.ok(!keep.has('dojiLow|' + 30 * 300000) && !keep.has('tweezerBottom|' + 40 * 300000), 'noisy pattern types never get an arrow');
+  assert.ok(!keep.has('hammer|' + 50 * 300000), 'low quality dropped');
+  assert.ok(keep.has('morningStar|' + 60 * 300000) && keep.has('hammer|' + 70 * 300000));
+  keep = S.selectNotable(pats, { interval: '5m', backtest: { patterns: { hammer: { verdict: 'negative' } } } });
+  assert.ok(![...keep].some(k => k.startsWith('hammer|')), 'a pattern with a clearly negative record loses its arrow');
+  keep = S.selectNotable(pats, { interval: '5m', signals: [{ confirmed: true, pattern: 'tweezerBottom', t: 40 * 300000 }] });
+  assert.ok(keep.has('tweezerBottom|' + 40 * 300000), 'a pattern behind a confirmed signal always gets its arrow');
+  // density: a dense run of detections collapses to well spaced markers
+  const dense = Array.from({ length: 100 }, (_, i) => P(i, 'hammer', 0.7 + (i % 3) * 0.05));
+  const kept = [...S.selectNotable(dense, { interval: '5m' })].length;
+  assert.ok(kept <= 10, `100 candles of back-to-back patterns yield at most 10 arrows, got ${kept}`);
+}
+
 console.log('signals checks passed');

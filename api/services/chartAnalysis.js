@@ -108,6 +108,7 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
   const signals = signalsSvc.buildSignals({ candles, patterns, ladder, strikes, backtest, interval });
   const actionZones = signalsSvc.buildActionZones({ candles, ladder, strikes, profile, patterns, interval });
 
+  const notable = signalsSvc.selectNotable(patterns, { interval, backtest, signals });
   const visibleFrom = candles[Math.max(0, candles.length - (intraday ? 400 : 260))].t;
   return {
     interval,
@@ -121,7 +122,7 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
     vwap: vwap.map(v => ({ t: v.t, value: round1(v.value) })),
     zones: ladder.zones.map(z => ({ ...z, low: round1(z.low), high: round1(z.high), mid: round1(z.mid), distancePct: Math.round(z.distancePct * 100) / 100 })),
     profile: profile ? { binSize: profile.binSize, poc: profile.poc, vah: profile.vah, val: profile.val, bins: profile.bins.map(b => ({ price: b.price, volume: Math.round(b.volume) })) } : null,
-    patterns: patterns.filter(p => p.t >= visibleFrom).map(p => ({ t: p.t, i: p.i, name: p.name, label: p.label, dir: p.dir, kind: p.kind, quality: p.quality, level: p.level ?? null })),
+    patterns: patterns.filter(p => p.t >= visibleFrom).map(p => ({ t: p.t, i: p.i, name: p.name, label: p.label, dir: p.dir, kind: p.kind, quality: p.quality, level: p.level ?? null, notable: notable.has(`${p.name}|${p.t}`) })),
     signals,
     actionZones,
     backtest: backtest ? { interval: backtest.interval, horizon: backtest.horizon, sessions: backtest.sessions, candles: backtest.candles, minSamples: backtest.minSamples, baseline: backtest.baseline, patterns: backtest.patterns } : null,

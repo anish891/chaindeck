@@ -206,6 +206,10 @@ const path = require('path');
     assert.strictEqual(res.events[0].severity, 'high');
     assert(/Trigger 22,210/.test(res.events[0].body) && /3 kinds/.test(res.events[0].body));
 
+    // clusters in chop: after one bullish alert, another bullish signal within 30 minutes is logged as seen but not announced
+    res = feed(snaps(5), withChart([chart(22200, [], []), chart(22200, [sig('c1')], []), chart(22200, [sig('c1'), sig('c2')], []), chart(22200, [sig('c1'), sig('c2'), sig('c3', { dir: 'bear' })], []), chart(22200, [sig('c1'), sig('c2'), sig('c3', { dir: 'bear' })], [])]));
+    assert.deepStrictEqual(keys(res), ['signal:c1', 'signal:c3'], 'same direction within 30 min is throttled; the opposite direction is not');
+
     // weak, unconfirmed or invalidated signals never alert
     res = feed(snaps(3), withChart([chart(22200, [], []), chart(22200, [sig('w', { grade: 'moderate' }), sig('u', { confirmed: false }), sig('i', { state: 'invalidated' }), sig('o', { age: 3 })], []), chart(22200, [], [])]));
     assert.deepStrictEqual(res.events, [], 'only strong, confirmed, fresh, live signals alert');

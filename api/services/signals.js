@@ -70,6 +70,36 @@ function gradeOf(score) {
   return score >= 70 ? 'strong' : score >= 50 ? 'moderate' : 'weak';
 }
 
+// Chart markers: which of the detected patterns deserve an arrow. Raw detection fires on roughly every 4th candle, which is
+// noise. A marker needs a structural pattern type, decent quality and no clear negative record, and markers keep a minimum
+// spacing (the stronger one wins). Patterns behind a confirmed signal are always kept.
+const NOTABLE_TYPES = new Set([
+  'hammer', 'shootingStar', 'bullEngulfing', 'bearEngulfing', 'piercing', 'darkCloud', 'morningStar', 'eveningStar',
+  'doubleTop', 'doubleBottom', 'headShoulders', 'inverseHeadShoulders', 'sweepHigh', 'sweepLow'
+]);
+const MARKER_MIN_QUALITY = 0.65;
+const MARKER_GAP = { '5m': 10, '15m': 6, '1d': 4 };
+
+/** Returns a Set of "name|t" keys for patterns that should get a marker. */
+function selectNotable(patterns, { interval, backtest, signals = [] } = {}) {
+  const gap = MARKER_GAP[interval] || 8;
+  const keep = [];
+  const forced = new Set(signals.filter(s => s.confirmed).map(s => `${s.pattern}|${s.t}`));
+  const ok = p => {
+    if (forced.has(`${p.name}|${p.t}`)) return true;
+    if (!NOTABLE_TYPES.has(p.name) || p.quality < MARKER_MIN_QUALITY) return false;
+    const stats = backtest && backtest.patterns && backtest.patterns[p.name];
+    return !(stats && stats.verdict === 'negative');
+  };
+  const candidates = patterns.filter(ok).sort((a, b) => (forced.has(`${b.name}|${b.t}`) - forced.has(`${a.name}|${a.t}`)) || b.quality - a.quality);
+  for (const p of candidates) {
+    const isForced = forced.has(`${p.name}|${p.t}`);
+    if (!isForced && keep.some(k => Math.abs(k.i - p.i) < gap)) continue;
+    keep.push(p);
+  }
+  return new Set(keep.map(p => `${p.name}|${p.t}`));
+}
+
 /**
  * Build signals from patterns on the most recent candles.
  *  candles, patterns (detectAll output), ladder (buildLadder), strikes (option chain), backtest (backtest() output), interval
@@ -158,7 +188,8 @@ function buildSignals({ candles, patterns, ladder, strikes, backtest, interval }
     else if (after.some(x => (bull ? x.h > trigger : x.l < trigger))) state = 'triggered';
 
     const families = [...agree];
-    const confirmed = families.length >= MIN_FAMILIES;
+    // A reversal pattern floating in empty space is not a trade idea: it must sit at a level AND have one more family behind it.
+    const confirmed = families.length >= MIN_FAMILIES && agree.has('level');
     const total = Math.max(0, Math.min(100, Math.round(score)));
     out.push({
       id: `${p.name}|${p.t}`,
@@ -236,4 +267,4 @@ function buildActionZones({ candles, ladder, strikes, profile, patterns, interva
   return out.sort((x, y) => Math.abs(x.distancePct) - Math.abs(y.distancePct));
 }
 
-module.exports = { MIN_FAMILIES, MAX_AGE, optionEvidence, volumeRatio, buildSignals, buildActionZones, gradeOf };
+module.exports = { NOTABLE_TYPES, MARKER_MIN_QUALITY, MARKER_GAP, selectNotable, MIN_FAMILIES, MAX_AGE, optionEvidence, volumeRatio, buildSignals, buildActionZones, gradeOf };

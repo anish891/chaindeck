@@ -43,6 +43,7 @@ const SPIKE_RETAIN_MS = 10 * 60 * 1000; // a spike key stays "already announced"
 const MAX_GAP_MS = 5 * 60 * 1000; // longer than this between snapshots → treat as a fresh start
 const MAX_STRIKE_DIST = 0.03;     // flow/spike alerts only for strikes within 3% of spot
 const CONFIRM_SNAPSHOTS = 2;      // a state change must hold for this many consecutive snapshots to count
+const SIGNAL_DIR_GAP_MS = 30 * 60 * 1000; // after a signal alert, the same direction stays quiet this long (chop produces clusters)
 const MAX_BATCH_TOASTS = 2;       // more loud events than this in one snapshot collapse into one summary
 
 const fmt = n => (typeof n === 'number' ? Math.round(n).toLocaleString('en-IN') : 'n/a');
@@ -159,7 +160,7 @@ function seedChart(chart, spot, minStrength, asOf) {
   const approach = {};
   strongSignals(chart).forEach(sig => { chartSeen[sig.id] = asOf; });
   nearZones(chart, spot, minStrength).forEach(z => { approach[zoneKey(z)] = false; });
-  return { chartInterval: chart.interval, chartSeen, approach };
+  return { chartInterval: chart.interval, chartSeen, approach, signalLast: {} };
 }
 
 function dayOf(ms) {
@@ -186,7 +187,7 @@ function seedState(d, ctx, settings, asOf, walls) {
     pending: {},
     momentum: { up: true, down: true },
     vixZone: d.vix && d.vix.percentChange >= r.vix.pct ? 'spike' : 'normal',
-    ...(ctx.chart ? seedChart(ctx.chart, d.spot, r.approach.minStrength, asOf) : { chartInterval: null, chartSeen: {}, approach: {} })
+    ...(ctx.chart ? seedChart(ctx.chart, d.spot, r.approach.minStrength, asOf) : { chartInterval: null, chartSeen: {}, approach: {}, signalLast: {} })
   };
 }
 
@@ -206,7 +207,7 @@ export function evaluateRules(prev, d, ctx = {}, settings = DEFAULT_SETTINGS) {
   if (reseed) return { events, next: seedState(d, ctx, settings, asOf, walls) };
 
   const now = asOf ?? prev.asOf ?? 0;
-  const next = { ...prev, asOf, spot: d.spot, momentum: { ...prev.momentum }, spikes: { ...prev.spikes }, sides: { ...prev.sides }, pending: { ...prev.pending }, chartSeen: { ...prev.chartSeen }, approach: { ...prev.approach } };
+  const next = { ...prev, asOf, spot: d.spot, momentum: { ...prev.momentum }, spikes: { ...prev.spikes }, sides: { ...prev.sides }, pending: { ...prev.pending }, chartSeen: { ...prev.chartSeen }, approach: { ...prev.approach }, signalLast: { ...(prev.signalLast || {}) } };
 
   // 1. PCR zone (with hysteresis)
   next.pcrZone = confirm(next, 'pcr', nextPcrZone(prev.pcrZone, d.pcr, r.pcr.hi, r.pcr.lo), prev.pcrZone);
@@ -353,6 +354,9 @@ export function evaluateRules(prev, d, ctx = {}, settings = DEFAULT_SETTINGS) {
         strongSignals(chart).forEach(sig => {
           if (next.chartSeen[sig.id] !== undefined) return;
           next.chartSeen[sig.id] = now;
+          const lastSame = next.signalLast[sig.dir];
+          if (lastSame !== undefined && now - lastSame < SIGNAL_DIR_GAP_MS) return; // seen and logged as handled, just not announced
+          next.signalLast[sig.dir] = now;
           const bull = sig.dir === 'bull';
           events.push({
             key: `signal:${sig.id}`,
