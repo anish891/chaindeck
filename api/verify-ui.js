@@ -148,4 +148,11 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   for (const k of defined) assert(new RegExp(`  ${k}: \\{\\n    en: \\[`).test(explainJs) && new RegExp(`${k}: \\{[\\s\\S]*?\\n    hi: \\[`).test(explainJs), `${k} needs both en and hi text`);
 }
 
+// ── 6. feed freshness badges ──
+{
+  for (const id of ['freshChain', 'freshCandles', 'freshSaved']) assert(new RegExp(`id="${id}"`).test(html), `#${id} badge missing from the key strip`);
+  assert(/renderFreshness\(\);\s*\}/.test(app.slice(app.indexOf('function updateAge'), app.indexOf('function updateAge') + 700)), 'updateAge must refresh the badges every second');
+  assert(/stale:\s*!!\(currentData && currentData\.feed/.test(app), 'the NSE badge must reflect the server\'s stale flag');
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

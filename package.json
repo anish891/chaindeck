@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node api/index.js",
     "dev": "node api/index.js",
-    "test": "node api/verify-calculations.js && node api/verify-history.js && node api/verify-alerts.js && node api/verify-flow.js && node api/verify-volatility.js && node api/verify-market.js && node api/verify-buildup.js && node api/verify-price-chart.js && node api/verify-participants.js && node api/verify-candles.js && node api/verify-levels.js && node api/verify-patterns.js && node api/verify-signals.js && node api/verify-security.js && node api/verify-ui.js"
+    "test": "node api/verify-calculations.js && node api/verify-history.js && node api/verify-alerts.js && node api/verify-flow.js && node api/verify-volatility.js && node api/verify-market.js && node api/verify-buildup.js && node api/verify-price-chart.js && node api/verify-participants.js && node api/verify-candles.js && node api/verify-levels.js && node api/verify-patterns.js && node api/verify-signals.js && node api/verify-freshness.js && node api/verify-security.js && node api/verify-ui.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

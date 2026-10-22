@@ -29,6 +29,9 @@ const HISTORY_PRESETS = {
 const TTL_OPEN_MS = 20 * 1000;
 const TTL_CLOSED_MS = 15 * 60 * 1000;
 const TTL_HISTORY_MS = 6 * 3600 * 1000;
+// Longest an old copy may be shown when a refresh fails. Short while the market moves, long when nothing changes anyway.
+const STALE_MAX_OPEN_MS = 3 * 60 * 1000;
+const STALE_MAX_CLOSED_MS = 6 * 3600 * 1000;
 
 const istDay = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
 const istMinuteOfDay = ms => {
@@ -121,20 +124,23 @@ function marketOpenNow(nowMs = Date.now()) {
   return n.isWeekday && n.mins >= 9 * 60 + 10 && n.mins <= 15 * 60 + 40;
 }
 
-async function cached(key, ttl, loader) {
+// Resolves { value, ts, stale }. On a failed refresh the previous value is served only while it is younger than
+// `staleMax`; beyond that the error propagates so callers fall back or show "no data" instead of an old picture.
+async function cached(key, ttl, loader, staleMax = ttl * 4) {
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.ts < ttl) return hit.value;
+  if (hit && Date.now() - hit.ts < ttl) return { value: hit.value, ts: hit.ts, stale: false };
   if (inflight.has(key)) return inflight.get(key);
   const p = loader()
     .then(value => {
-      cache.set(key, { ts: Date.now(), value });
+      const ts = Date.now();
+      cache.set(key, { ts, value });
       while (cache.size > 40) cache.delete(cache.keys().next().value);
-      return value;
+      return { value, ts, stale: false };
     })
     .catch(err => {
-      if (hit) {
-        console.error(`candles: serving stale ${key}:`, err.message);
-        return hit.value;
+      if (hit && Date.now() - hit.ts < staleMax) {
+        console.error(`candles: serving stale ${key} (${Math.round((Date.now() - hit.ts) / 1000)}s old):`, err.message);
+        return { value: hit.value, ts: hit.ts, stale: true };
       }
       throw err;
     })
@@ -151,7 +157,9 @@ async function cached(key, ttl, loader) {
 async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch } = {}) {
   const preset = PRESETS[interval];
   if (!preset) throw new Error(`Unsupported interval ${interval}`);
-  const ttl = marketOpenNow() ? TTL_OPEN_MS : TTL_CLOSED_MS;
+  const open = marketOpenNow();
+  const ttl = open ? TTL_OPEN_MS : TTL_CLOSED_MS;
+  const staleMax = open ? STALE_MAX_OPEN_MS : STALE_MAX_CLOSED_MS;
   const daily = interval === '1d';
 
   try {
@@ -162,9 +170,9 @@ async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch }
       ]);
       if (!idx.length) throw new Error('No index candles returned');
       const merged = mergeVolume(idx, etf, daily);
-      return { candles: merged.candles, volumeSource: merged.covered > idx.length * 0.5 ? 'etf' : 'none', source: 'yahoo', updatedAt: Date.now() };
-    });
-    return result;
+      return { candles: merged.candles, volumeSource: merged.covered > idx.length * 0.5 ? 'etf' : 'none', source: 'yahoo' };
+    }, staleMax);
+    return { ...result.value, fetchedAt: result.ts, stale: result.stale, updatedAt: Date.now() };
   } catch (err) {
     console.error('candles: Yahoo unavailable:', err.message);
     const minutes = preset.minutes;
@@ -174,9 +182,9 @@ async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch }
         try { points = await points(); } catch (e) { console.error('candles: stored fallback unavailable:', e.message); points = null; }
       }
       const stored = candlesFromSpotPoints(points, minutes);
-      if (stored.length) return { candles: stored, volumeSource: 'none', source: 'stored', updatedAt: Date.now() };
+      if (stored.length) return { candles: stored, volumeSource: 'none', source: 'stored', fetchedAt: Date.now(), stale: false, updatedAt: Date.now() };
     }
-    return { candles: [], volumeSource: 'none', source: 'none', updatedAt: Date.now() };
+    return { candles: [], volumeSource: 'none', source: 'none', fetchedAt: null, stale: false, updatedAt: Date.now() };
   }
 }
 
@@ -184,7 +192,8 @@ async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch }
 async function getHistoryCandles(interval, { fetchImpl = fetch } = {}) {
   const preset = HISTORY_PRESETS[interval];
   if (!preset) throw new Error(`Unsupported interval ${interval}`);
-  return cached(`history|${interval}`, TTL_HISTORY_MS, () => fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl));
+  const r = await cached(`history|${interval}`, TTL_HISTORY_MS, () => fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl), TTL_HISTORY_MS * 4);
+  return r.value;
 }
 
 function clearCache() {
@@ -205,5 +214,7 @@ module.exports = {
   getCandles,
   getHistoryCandles,
   marketOpenNow,
+  STALE_MAX_OPEN_MS,
+  cached,
   clearCache
 };

@@ -21,10 +21,11 @@ router.get('/option-chain', async (req, res) => {
   const { expiry } = req.query;
   if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
+    const { raw, allExpiries, targetExpiry, fetchedMs, stale } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
     res.set('Cache-Control', READ_CACHE);
-    res.json({ ok: true, data });
+    // feed: when we last got this from NSE and whether it is a leftover copy served after a failed refresh
+    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale } } });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
     return sendError(res, 502, 'Error fetching option chain', err);

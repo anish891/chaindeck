@@ -489,6 +489,12 @@ export function chartScreenshot() {
   }
 }
 
+/** What the freshness badge needs: the server's feed facts plus when this page last managed to load them. */
+export function chartFeedStatus() {
+  if (!data) return null;
+  return { feed: data.feed || null, interval: data.interval, clientFetchedAt: fetchedAt, hasCandles: data.candles.length > 0 };
+}
+
 /** Best live signal, used by the alert rules. */
 export function currentChartSignals() {
   return data ? { interval: data.interval, spot: data.spot, signals: data.signals, zones: data.zones, atr: data.atr } : null;

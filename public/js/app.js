@@ -4,7 +4,8 @@ import { initExplain } from './explain.js';
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
 import { escapeHtml } from './ui-utils.js';
-import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, restyleChart, chartScreenshot, currentChartSignals } from './price-chart.js';
+import { freshness, candleLagSec } from './freshness.js';
+import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, restyleChart, chartScreenshot, currentChartSignals, chartFeedStatus } from './price-chart.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderParticipantChart } from './charts.js';
 
 let currentData = null;
@@ -468,8 +469,53 @@ function updateAge() {
   const sec = Math.max(0, Math.round((Date.now() - new Date(currentData.dataAsOf || currentData.fetchedAt).getTime()) / 1000));
   el.textContent = sec < 90 ? sec + 's ago' : sec < 5400 ? Math.round(sec / 60) + 'm ago' : (sec / 3600).toFixed(1) + 'h ago';
   el.classList.toggle('stale', sec > 120 && isMarketOpen());
+  renderFreshness();
 }
 setInterval(updateAge, 1000);
+
+const FEED_HELP = {
+  chain: 'Option chain from NSE. NSE refreshes about every 30 to 60 seconds. Amber after 90 seconds, red after 3 minutes or when the server is showing a leftover copy because NSE failed.',
+  candles: 'Price candles from Yahoo Finance (delayed by design). Shows how far the latest candle is behind the clock. Red when the server is showing a leftover copy or this page could not load them.',
+  saved: 'Saved per-minute snapshots (the cron job). Amber after 3 minutes without a new point, red after 6.'
+};
+
+function setChip(id, name, kind, result) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = `fresh-chip ${result.level}`;
+  el.title = FEED_HELP[kind];
+  el.textContent = '';
+  const dot = document.createElement('i');
+  dot.className = 'fresh-dot';
+  const label = document.createElement('span');
+  label.className = 'fresh-name';
+  label.textContent = name;
+  el.append(dot, label, document.createTextNode(' ' + result.text));
+}
+
+function renderFreshness() {
+  const now = Date.now();
+  const open = isMarketOpen();
+
+  const chainAge = currentData ? (now - new Date(currentData.dataAsOf || currentData.fetchedAt).getTime()) / 1000 : NaN;
+  setChip('freshChain', 'NSE', 'chain', freshness('chain', chainAge, { open, hasData: !!currentData, stale: !!(currentData && currentData.feed && currentData.feed.stale) }));
+
+  const cs = chartFeedStatus();
+  if (!cs) {
+    setChip('freshCandles', 'Candles', 'candles', freshness('candles', NaN, { open, hasData: false }));
+  } else {
+    const lag = candleLagSec(cs.feed, cs.interval, now);
+    const pollAge = cs.clientFetchedAt ? (now - cs.clientFetchedAt) / 1000 : 0;
+    // daily candles have no lag measure; otherwise also count this page failing to refresh them
+    const age = lag === null ? NaN : Math.max(lag, pollAge > 90 ? pollAge : 0);
+    const res = freshness('candles', age, { open: open && lag !== null, hasData: cs.hasCandles, stale: !!(cs.feed && cs.feed.stale) });
+    setChip('freshCandles', cs.feed && cs.feed.source === 'stored' ? 'Candles (saved)' : 'Candles', 'candles', res);
+  }
+
+  const pts = intraday && intraday.points;
+  const lastT = pts && pts.length ? pts[pts.length - 1].t : null;
+  setChip('freshSaved', 'Saved', 'saved', freshness('saved', lastT ? (now - lastT) / 1000 : NaN, { open, hasData: !!lastT }));
+}
 
 export function renderAll() {
   if (!currentData) return;

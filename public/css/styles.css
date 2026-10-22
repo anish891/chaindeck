@@ -2390,3 +2390,14 @@ tbody tr.atm-row td {
 .pattern-table .verdict-none, .pattern-table .verdict-insufficient { color: var(--muted); }
 .pdf-export-report .level-ladder { max-height: none; overflow: visible; }
 .pdf-export-report .signal-card, .pdf-export-report .action-zone, .pdf-export-report .ladder-row { break-inside: avoid; page-break-inside: avoid; }
+
+/* feed freshness chips in the key strip */
+.fresh-chips { display: flex; gap: 12px; font-family: var(--mono); font-size: 12px; font-weight: 600; min-height: 21px; align-items: center; }
+.fresh-chip { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.fresh-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+.fresh-chip.ok .fresh-dot { background: var(--bull); }
+.fresh-chip.warn, .fresh-chip.warn .fresh-name { color: var(--warn); }
+.fresh-chip.warn .fresh-dot { background: var(--warn); }
+.fresh-chip.bad, .fresh-chip.bad .fresh-name { color: var(--bear); }
+.fresh-chip.bad .fresh-dot { background: var(--bear); }
+.fresh-name { font-weight: 500; color: var(--muted); }

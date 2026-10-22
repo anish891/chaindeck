@@ -76,7 +76,7 @@ async function fetchWithTimeout(url, cookies, attempt = 0) {
 // --- Caching layers -------------------------------------------------------
 const EXPIRY_TTL = 60 * 60 * 1000;   // expiry list changes ~daily
 const RAW_TTL = 5000;                // NSE itself only updates every ~30-60s
-const STALE_MAX = 5 * 60 * 1000;     // serve last good data up to 5 min on errors
+const STALE_MAX = 2 * 60 * 1000;     // serve last good data up to 2 min on errors, flagged stale; beyond that fail loudly
 
 let expiryCache = { list: null, ts: 0 };
 const rawCache = new Map();          // `${symbol}|${expiry}` -> { value, ts }
@@ -152,15 +152,17 @@ async function fetchRawNSEOptionChain(symbol = 'NIFTY', expiryDate = null) {
 
   const p = loadFromNSE(symbol, expiryDate)
     .then(value => {
-      rawCache.set(key, { value, ts: Date.now() });
+      const ts = Date.now();
+      const stamped = { ...value, fetchedMs: ts, stale: false };
+      rawCache.set(key, { value: stamped, ts });
       while (rawCache.size > 20) rawCache.delete(rawCache.keys().next().value); // bounded: keys come from callers
-      return value;
+      return stamped;
     })
     .catch(err => {
       // Stale-on-error: better old data than a "Disconnected" dashboard
       if (hit && Date.now() - hit.ts < STALE_MAX) {
         console.error('NSE fetch failed, serving stale data:', err.message);
-        return hit.value;
+        return { ...hit.value, stale: true };
       }
       throw err;
     })

@@ -106,5 +106,32 @@ const min = m => open + m * 60000;
   }
   console.error = origErr;
 
+  // stale cap: a failed refresh may reuse an old copy only while it is younger than the cap, and says so
+  {
+    C.clearCache();
+    const origNow = Date.now;
+    let clock = origNow();
+    Date.now = () => clock;
+    const prevErr = console.error; console.error = () => {};
+    let fail = false;
+    const loader = async () => { if (fail) throw new Error('down'); return { n: clock }; };
+    const first = await C.cached('k', 1000, loader, 5000);
+    assert.strictEqual(first.stale, false);
+    clock += 500;
+    assert.strictEqual((await C.cached('k', 1000, loader, 5000)).ts, first.ts, 'inside the TTL the cache is used');
+    fail = true;
+    clock += 2000; // TTL passed, refresh fails, copy is 2.5s old, cap is 5s
+    const young = await C.cached('k', 1000, loader, 5000);
+    assert.strictEqual(young.stale, true, 'leftover copy is flagged stale');
+    assert.strictEqual(young.ts, first.ts, 'and keeps its real age');
+    clock += 4000; // now 6.5s old, beyond the cap
+    await assert.rejects(() => C.cached('k', 1000, loader, 5000), /down/, 'beyond the cap the error surfaces instead of an old picture');
+    fail = false;
+    assert.strictEqual((await C.cached('k', 1000, loader, 5000)).stale, false, 'recovers on the next success');
+    console.error = prevErr;
+    Date.now = origNow;
+    assert.ok(C.STALE_MAX_OPEN_MS <= 5 * 60 * 1000, 'while the market is open a leftover copy never lives long');
+  }
+
   console.log('candles checks passed');
-})().catch(e => { console.error(e); process.exit(1); });
+})().catch(e => { process.stderr.write(String(e && e.stack || e) + '\n'); process.exit(1); });

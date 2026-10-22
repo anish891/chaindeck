@@ -29,6 +29,12 @@ async function getBacktest(interval, deps) {
   return p;
 }
 
+/** Freshness facts the page turns into a badge: when we last got data, whether it is a leftover copy, how current the last bar is. */
+function feedOf(base, candles) {
+  const last = candles.length ? candles[candles.length - 1].t : null;
+  return { fetchedAt: base.fetchedAt || null, stale: !!base.stale, lastBarT: last, source: base.source };
+}
+
 const round1 = n => (Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
 
 /**
@@ -41,7 +47,7 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
   const base = await deps.getCandles(interval, { fallbackPoints });
   const candles = base.candles;
   if (!candles.length) {
-    return { interval, source: base.source, volumeSource: base.volumeSource, candles: [], vwap: [], zones: [], patterns: [], signals: [], actionZones: [], profile: null, backtest: null, spot: d ? d.spot : null, updatedAt: Date.now() };
+    return { interval, source: base.source, volumeSource: base.volumeSource, feed: feedOf(base, []), candles: [], vwap: [], zones: [], patterns: [], signals: [], actionZones: [], profile: null, backtest: null, spot: d ? d.spot : null, updatedAt: Date.now() };
   }
 
   const daily = interval === '1d' ? base : await deps.getCandles('1d', {}).catch(() => ({ candles: [] }));
@@ -79,6 +85,7 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
     interval,
     source: base.source,
     volumeSource: base.volumeSource,
+    feed: feedOf(base, candles),
     spot,
     atr: round1(ladder.atr),
     candles,
