@@ -5,6 +5,7 @@ const { getParticipantHistory } = require('../services/participants');
 const chartAnalysis = require('../services/chartAnalysis');
 const forwardLog = require('../services/forwardlog');
 const { withRetry } = require('../services/retry');
+const integrity = require('../services/integrity');
 const { istNow } = require('../services/market');
 const { fetchRawNSEOptionChain } = require('../services/nse');
 const { rateLimit, requireSecret, isValidExpiry, isValidDate, sendError } = require('../security');
@@ -23,11 +24,19 @@ router.get('/option-chain', async (req, res) => {
   const { expiry } = req.query;
   if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    const { raw, allExpiries, targetExpiry, fetchedMs, stale } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
+    const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
     res.set('Cache-Control', READ_CACHE);
-    // feed: when we last got this from NSE and whether it is a leftover copy served after a failed refresh
-    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale } } });
+    // Recompute the headline numbers from the raw payload with separate code and compare (see services/integrity.js).
+    let checks;
+    try {
+      checks = integrity.verifyProcessed(raw, data, targetExpiry);
+    } catch (e) {
+      console.error('integrity verification failed:', e.message);
+      checks = [{ id: 'integrity_engine', group: 'Option chain', label: 'Integrity checks ran', level: 'fail', detail: 'the verification step itself errored' }];
+    }
+    // feed: when we last got this from NSE, whether it is a leftover copy served after a failed refresh, and why
+    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? String(staleReason || '').slice(0, 160) : null }, integrity: { checks } } });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
     return sendError(res, 502, 'Error fetching option chain', err);
@@ -130,7 +139,7 @@ async function cronSnapshot(req, res) {
   if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
     // NSE sometimes rejects a cold request (fast 401/403 or a timeout) and answers a moment later, so try a few times.
-    const { raw, allExpiries, targetExpiry } = await withRetry(
+    const { raw, allExpiries, targetExpiry, stale: cronStale } = await withRetry(
       attempt => {
         if (attempt > 1) console.error(`cron snapshot: retrying NSE fetch (attempt ${attempt})`);
         return fetchRawNSEOptionChain('NIFTY', expiry || null);
@@ -139,7 +148,10 @@ async function cronSnapshot(req, res) {
     );
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
     // Score the chart's signals and zones against what price did next. Best effort: the snapshot above is already saved.
-    const forward = await forwardLog.run(data);
+    // Never record signals from data that is stale or fails its own consistency checks.
+    let healthy = !cronStale;
+    try { healthy = healthy && !integrity.hasFailure(integrity.verifyProcessed(raw, data, targetExpiry)); } catch (e) { healthy = false; }
+    const forward = healthy ? await forwardLog.run(data) : { skipped: 'unhealthy-data' };
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, expiry: data.expiry, dataAsOf: data.dataAsOf, persistent: history.configured, forward });
   } catch (err) {

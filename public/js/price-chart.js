@@ -30,6 +30,7 @@ let profileBars = null;
 let planLines = [];
 let needsFit = true;
 let levelsExpanded = false;
+let signalsPaused = false;
 
 try {
   const saved = localStorage.getItem('chartTf');
@@ -359,6 +360,7 @@ function historyLine(h) {
 function renderSignals() {
   const el = document.getElementById('signalsList');
   if (!el) return;
+  if (signalsPaused) { el.innerHTML = '<div class="empty-note">Signals are paused: the data behind them is stale or failing its checks. Open Data checks in the top bar for details.</div>'; return; }
   if (!data) { el.innerHTML = '<div class="empty-note">Waiting for chart data.</div>'; return; }
   const shown = data.signals.filter(s => s.confirmed);
   const hidden = data.signals.length - shown.length;
@@ -481,6 +483,13 @@ export function setChartTimeframe(next) {
   refreshPriceChart(true);
 }
 
+/** While data is unverified the signals panel says so instead of presenting signals built on it. */
+export function setSignalsPaused(paused) {
+  if (paused === signalsPaused) return;
+  signalsPaused = paused;
+  renderSignals();
+}
+
 export function toggleLevelsExpanded() {
   levelsExpanded = !levelsExpanded;
   renderLadder();
@@ -515,7 +524,8 @@ export function chartScreenshot() {
 /** What the freshness badge needs: the server's feed facts plus when this page last managed to load them. */
 export function chartFeedStatus() {
   if (!data) return null;
-  return { feed: data.feed || null, interval: data.interval, clientFetchedAt: fetchedAt, hasCandles: data.candles.length > 0 };
+  const last = data.candles.length ? data.candles[data.candles.length - 1] : null;
+  return { feed: data.feed || null, interval: data.interval, clientFetchedAt: fetchedAt, hasCandles: data.candles.length > 0, lastClose: last ? last.c : null };
 }
 
 /** Nearest strong zones above and below spot (and all zones), for the at-a-glance cards and the flow panel. null until loaded. */

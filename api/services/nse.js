@@ -1,4 +1,5 @@
 const fetch = require('node-fetch');
+const integrity = require('./integrity');
 
 const NSE_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -162,6 +163,9 @@ async function fetchRawNSEOptionChain(symbol = 'NIFTY', expiryDate = null) {
 
   const p = loadFromNSE(symbol, expiryDate)
     .then(value => {
+      // Reject a structurally broken or non-sensical payload BEFORE it is cached: the last good copy is kept (and flagged).
+      const verdict = integrity.validateRaw(value.raw, hit ? hit.value : null);
+      if (!verdict.ok) throw new Error(`NSE payload rejected: ${verdict.reasons.join('; ')}`);
       const ts = Date.now();
       const stamped = { ...value, fetchedMs: ts, stale: false };
       rawCache.set(key, { value: stamped, ts });
@@ -172,7 +176,7 @@ async function fetchRawNSEOptionChain(symbol = 'NIFTY', expiryDate = null) {
       // Stale-on-error: better old data than a "Disconnected" dashboard
       if (hit && Date.now() - hit.ts < staleLimitMs()) {
         console.error('NSE fetch failed, serving stale data:', err.message);
-        return { ...hit.value, stale: true };
+        return { ...hit.value, stale: true, staleReason: err.message };
       }
       throw err;
     })

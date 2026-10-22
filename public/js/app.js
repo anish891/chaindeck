@@ -8,8 +8,10 @@ import { freshness, candleLagSec } from './freshness.js';
 import { refreshForwardLog } from './forward-log.js';
 import { refreshLevelScorecard } from './level-scorecard.js';
 import { classifyFlow } from './flow.js';
+import { evaluateTrust, trackContent } from './data-checks.js';
+import { renderTrust, toggleTrustDrawer } from './trust-ui.js';
 import { renderFlowPanel, renderGlance } from './flow-panel.js';
-import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, toggleLevelsExpanded, restyleChart, chartScreenshot, currentChartSignals, chartFeedStatus, nearestChartLevels, onChartData } from './price-chart.js';
+import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, toggleLevelsExpanded, restyleChart, chartScreenshot, currentChartSignals, chartFeedStatus, nearestChartLevels, onChartData, setSignalsPaused } from './price-chart.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderParticipantChart } from './charts.js';
 
 let currentData = null;
@@ -22,6 +24,8 @@ let sortDir = -1;
 let selectedExpiry = null;
 let cdRemaining = 5;
 let fetchInProgress = false;
+let contentState = null;   // consecutive identical-snapshot tracker (frozen feed detection)
+let trust = { status: 'ok', blocking: false, reasons: [] };
 
 // Server-side intraday history (survives page refresh / cold starts when storage is configured)
 let intraday = null;
@@ -424,6 +428,7 @@ export async function fetchNow() {
     if (!unchanged) {
       prevData = currentData;
       currentData = data;
+      contentState = trackContent(contentState, data);
       renderAll();
     }
     hideOverlay();
@@ -476,8 +481,32 @@ function updateAge() {
   el.textContent = sec < 90 ? sec + 's ago' : sec < 5400 ? Math.round(sec / 60) + 'm ago' : (sec / 3600).toFixed(1) + 'h ago';
   el.classList.toggle('stale', sec > 120 && isMarketOpen());
   renderFreshness();
+  refreshTrust();
 }
 setInterval(updateAge, 1000);
+
+/** Run every data check and apply the result: top-bar light, banner, unverified tags, and the pause on signals and alerts. */
+function refreshTrust() {
+  const now = Date.now();
+  const cs = chartFeedStatus();
+  const pts = intraday && intraday.points;
+  trust = evaluateTrust({
+    now,
+    marketOpen: isMarketOpen(),
+    chain: currentData ? {
+      d: currentData,
+      ageSec: (now - new Date(currentData.dataAsOf || currentData.fetchedAt).getTime()) / 1000,
+      stale: !!(currentData.feed && currentData.feed.stale),
+      staleReason: currentData.feed && currentData.feed.reason,
+      integrity: currentData.integrity || null
+    } : null,
+    candles: cs ? { ...cs, lastClose: cs.lastClose } : null,
+    saved: intraday ? { points: pts || [], persistent: intraday.persistent !== false } : null,
+    content: contentState
+  });
+  renderTrust(trust);
+  setSignalsPaused(trust.blocking);
+}
 
 const FEED_HELP = {
   chain: 'Option chain from NSE. NSE refreshes about every 30 to 60 seconds. Amber after 90 seconds, red after 3 minutes or when the server is showing a leftover copy because NSE failed.',
@@ -838,7 +867,8 @@ export function renderAll() {
   renderTimeline();
   renderVolPanels();
   renderOiChart_();
-  processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot, chart: currentChartSignals() });
+  // Never alert from data that is stale or failing its own checks: that is how false alarms happen.
+  if (!trust.blocking) processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot, chart: currentChartSignals() });
   fetchSimilarSessions();
   renderTable();
 }
@@ -1791,7 +1821,8 @@ const ACTIONS = {
   onParticipantModeChange,
   setChartTimeframe,
   toggleChartLayer,
-  toggleLevelsExpanded
+  toggleLevelsExpanded,
+  toggleTrustDrawer
 };
 
 function runActions(spec, event) {
@@ -1831,6 +1862,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const syncTopbar = () => tb && document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
   syncTopbar();
   window.addEventListener('resize', syncTopbar);
+  // the top bar changes height when its controls wrap or a label changes (e.g. the data-trust light), which left a gap under it
+  if (tb && typeof ResizeObserver !== 'undefined') new ResizeObserver(syncTopbar).observe(tb);
   const adv = document.getElementById('advancedAnalytics');
   if (adv) {
     try { adv.open = localStorage.getItem('advOpen') === '1'; } catch (e) { /* storage unavailable */ }

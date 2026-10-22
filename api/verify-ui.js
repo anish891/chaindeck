@@ -151,7 +151,7 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
 // ── 6. feed freshness badges ──
 {
   for (const id of ['freshChain', 'freshCandles', 'freshSaved']) assert(new RegExp(`id="${id}"`).test(html), `#${id} badge missing from the key strip`);
-  assert(/renderFreshness\(\);\s*\}/.test(app.slice(app.indexOf('function updateAge'), app.indexOf('function updateAge') + 700)), 'updateAge must refresh the badges every second');
+  assert(/renderFreshness\(\);[\s\S]{0,40}\}/.test(app.slice(app.indexOf('function updateAge'), app.indexOf('function updateAge') + 700)), 'updateAge must refresh the badges every second');
   assert(/stale:\s*!!\(currentData && currentData\.feed/.test(app), 'the NSE badge must reflect the server\'s stale flag');
 }
 
@@ -205,6 +205,22 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   const pos = id => html.indexOf(`id="${id}"`);
   assert(pos('keyStrip') < pos('glanceSection') && pos('glanceSection') < pos('unusualFlowSection') && pos('unusualFlowSection') < pos('priceChartSection') && pos('priceChartSection') < pos('heroRegimeBanner'), 'the first screen leads with the glance cards, flow and chart');
   assert(/data-click="toggleLevelsExpanded"/.test(read('public/js/price-chart.js')) && /toggleLevelsExpanded,?\n/.test(app), 'the ladder expand toggle must be wired to an action');
+}
+
+// ── 12. data trust layer ──
+{
+  const tu = read('public/js/trust-ui.js');
+  assert(/id="trustBtn"/.test(html) && /id="trustBanner"/.test(html) && /data-click="toggleTrustDrawer"/.test(html), 'trust light, banner and drawer trigger missing');
+  assert(!/innerHTML/.test(tu.replace(/\/\/[^\n]*/g, '')), 'trust-ui.js builds DOM with textContent only (check details carry network values)');
+  assert(/toggleTrustDrawer,?\n/.test(app), 'toggleTrustDrawer must be a page action');
+  assert(/function refreshTrust\(/.test(app) && /refreshTrust\(\);\s*\}/.test(app.slice(app.indexOf('function updateAge'), app.indexOf('function updateAge') + 800)), 'the checks must re-run every second with the age tick');
+  assert(/if \(!trust\.blocking\) processAlerts\(/.test(app), 'alerts must pause while data is blocking');
+  assert(/setSignalsPaused\(trust\.blocking\)/.test(app), 'signals must pause while data is blocking');
+  assert(/signalsPaused/.test(read('public/js/price-chart.js')), 'the signals panel must show the paused state');
+  const routes = read('api/routes/index.js');
+  assert(/integrity\.verifyProcessed\(/.test(routes) && /integrity: \{ checks \}/.test(routes), 'the option-chain response must carry the integrity checks');
+  assert(/forwardLog\.run\(data\)/.test(routes) && /healthy/.test(routes), 'the forward log must only record from healthy data');
+  assert(/validateRaw\(/.test(read('api/services/nse.js')), 'NSE payloads must be validated before they are cached');
 }
 
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

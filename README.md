@@ -163,6 +163,30 @@ stands out, which is the current result, no condition changes anything.
 
 ---
 
+## Data trust
+
+A light in the top bar (Verified, warnings or failing) opens a drawer listing every data check. Nothing here can prove
+NSE itself is right; it shows the numbers are fresh, agree with a second source and are internally consistent.
+
+| Check | What it does |
+|---|---|
+| NSE option chain current | Age of the NSE timestamp: amber after 90 seconds, red after 3 minutes (while the market is open) |
+| Leftover copy | Red while trading if NSE did not answer and the last good copy is being shown, with the reason; a warning only after the close |
+| Snapshots changing | Warns if 3 consecutive new NSE snapshots carry identical contents, fails at 5 (a feed that is "refreshing" but frozen) |
+| Candles current, saved snapshots current | Latest candle lag and the per-minute cron job, as in the Feeds chips |
+| Saved history complete | Minutes saved today against minutes since the open (a warning at most; skipped without storage) |
+| NSE spot vs Yahoo | Two independent sources agree within 0.15 percent (warn) or 0.4 percent (fail) |
+| Totals, PCR, max pain, ATM | Recomputed straight from the raw NSE payload with separate code and compared with what the page shows |
+| Put-call parity | Strikes near the money should imply the same forward; outliers point to stale quotes |
+| Basis, IV, day range | Implied future near spot, ATM IV in a plausible band, spot inside the day range |
+
+Before anything is cached, each NSE payload is validated (plausible spot, no negative or non-numeric values, enough rows, no
+jump of more than 8 percent between snapshots, not older than the copy already held). A payload that fails is rejected
+and the last good copy is kept and flagged.
+
+When a blocking check fails, the top bar turns red, a banner explains why, affected cards are outlined as unverified,
+and signals, browser alerts and the live track record all pause until the check clears. Warnings are shown but do not pause anything.
+
 ## Option chain
 
 - ±10 strikes around the ATM strike, with the ATM row highlighted.
