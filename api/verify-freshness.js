@@ -40,5 +40,14 @@ const path = require('path');
   assert.strictEqual(candleLagSec({ lastBarT: t0 }, '1d', t0), null, 'daily candles have no lag measure');
   assert.strictEqual(candleLagSec(null, '5m', t0), null);
 
+  // NSE leftover-copy limit: short while trading, long after the close
+  const { staleLimitMs } = require('./services/nse');
+  const IST = 330 * 60 * 1000;
+  const at = (d, h, m) => Date.UTC(2026, 9, d, h, m) - IST;
+  assert.strictEqual(staleLimitMs(at(12, 11, 0)), 2 * 60 * 1000, 'Monday 11:00 IST, market open');
+  assert.strictEqual(staleLimitMs(at(12, 19, 0)), 6 * 3600 * 1000, 'Monday 19:00 IST, closed');
+  assert.strictEqual(staleLimitMs(at(17, 11, 0)), 6 * 3600 * 1000, 'Saturday');
+  assert.strictEqual(staleLimitMs(at(12, 9, 5)), 6 * 3600 * 1000, 'before the open');
+
   console.log('freshness checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

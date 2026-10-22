@@ -66,14 +66,14 @@ const OUTCOME = { win: 'won', loss: 'stopped out', flat: 'flat', held: 'held', b
 
 export function renderForwardLog(host, log) {
   host.textContent = '';
-  if (!log) { host.append(el('div', 'timeline-empty', 'Loading the live record...')); return; }
+  if (!log) { host.append(el('div', 'empty-note', 'Loading the live record...')); return; }
   if (log.persistent === false) {
-    host.append(el('div', 'timeline-empty', 'The live record needs storage (Upstash) so the per-minute job can save it.'));
+    host.append(el('div', 'empty-note', 'The live record needs storage (Upstash) so the per-minute job can save it.'));
     return;
   }
   const st = log.stats;
   if (!st || (st.signals.recorded === 0 && st.zones.recorded === 0)) {
-    host.append(el('div', 'timeline-empty', 'Nothing recorded yet. The per-minute job saves each confirmed signal and zone during market hours and scores it afterwards.'));
+    host.append(el('div', 'empty-note', 'Nothing recorded yet. The per-minute job saves each confirmed signal and zone during market hours and scores it afterwards.'));
     return;
   }
   const s = st.signals, z = st.zones;

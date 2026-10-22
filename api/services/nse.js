@@ -76,7 +76,17 @@ async function fetchWithTimeout(url, cookies, attempt = 0) {
 // --- Caching layers -------------------------------------------------------
 const EXPIRY_TTL = 60 * 60 * 1000;   // expiry list changes ~daily
 const RAW_TTL = 5000;                // NSE itself only updates every ~30-60s
-const STALE_MAX = 2 * 60 * 1000;     // serve last good data up to 2 min on errors, flagged stale; beyond that fail loudly
+const STALE_MAX_OPEN = 2 * 60 * 1000;      // while the market moves: a leftover copy lives 2 min at most (flagged stale), then fail loudly
+const STALE_MAX_CLOSED = 6 * 3600 * 1000; // nothing changes after the close, so an old copy is still the right picture
+
+/** How long a leftover copy may be served after a failed refresh, depending on whether NSE is trading. */
+function staleLimitMs(nowMs = Date.now()) {
+  const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' })
+    .formatToParts(new Date(nowMs)).reduce((a, x) => { a[x.type] = x.value; return a; }, {});
+  const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
+  const open = !['Sat', 'Sun'].includes(p.weekday) && mins >= 9 * 60 + 10 && mins <= 15 * 60 + 40;
+  return open ? STALE_MAX_OPEN : STALE_MAX_CLOSED;
+}
 
 let expiryCache = { list: null, ts: 0 };
 const rawCache = new Map();          // `${symbol}|${expiry}` -> { value, ts }
@@ -160,7 +170,7 @@ async function fetchRawNSEOptionChain(symbol = 'NIFTY', expiryDate = null) {
     })
     .catch(err => {
       // Stale-on-error: better old data than a "Disconnected" dashboard
-      if (hit && Date.now() - hit.ts < STALE_MAX) {
+      if (hit && Date.now() - hit.ts < staleLimitMs()) {
         console.error('NSE fetch failed, serving stale data:', err.message);
         return { ...hit.value, stale: true };
       }
@@ -173,6 +183,7 @@ async function fetchRawNSEOptionChain(symbol = 'NIFTY', expiryDate = null) {
 }
 
 module.exports = {
+  staleLimitMs,
   NSE_HEADERS,
   getCookies,
   fetchWithTimeout,

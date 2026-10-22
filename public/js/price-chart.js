@@ -29,6 +29,7 @@ let zoneBands = null;
 let profileBars = null;
 let planLines = [];
 let needsFit = true;
+let levelsExpanded = false;
 
 try {
   const saved = localStorage.getItem('chartTf');
@@ -315,19 +316,24 @@ function renderLadder() {
   const el = document.getElementById('levelLadder');
   if (!el) return;
   if (!data || !data.zones.length) {
-    el.innerHTML = '<div class="timeline-empty">Levels appear once option chain and price data have loaded.</div>';
+    el.innerHTML = '<div class="empty-note">Levels appear once option chain and price data have loaded.</div>';
     return;
   }
+  // By default only the three nearest resistances and supports (plus anything at the price): twelve cards buried the page.
+  const res = data.zones.filter(z => z.kind === 'resistance').sort((a, b) => a.mid - b.mid);
+  const sup = data.zones.filter(z => z.kind === 'support').sort((a, b) => b.mid - a.mid);
+  const inside = data.zones.filter(z => z.kind !== 'resistance' && z.kind !== 'support');
+  const shown = levelsExpanded ? data.zones : [...res.slice(0, 3), ...inside, ...sup.slice(0, 3)].sort((a, b) => b.mid - a.mid);
+  const hiddenCount = data.zones.length - shown.length;
+
   const rows = [];
   let spotPlaced = false;
   const spotRow = `<div class="ladder-spot"><span>Spot ${escapeHtml(fmtPrice(data.spot))}</span><span>ATR ${escapeHtml(fmtPrice(data.atr))}</span></div>`;
-  data.zones.forEach(z => {
+  shown.forEach(z => {
     if (!spotPlaced && z.mid < data.spot) { rows.push(spotRow); spotPlaced = true; }
     const kind = z.kind === 'support' ? 'support' : z.kind === 'resistance' ? 'resistance' : 'inside';
     const kindLabel = kind === 'support' ? 'Support' : kind === 'resistance' ? 'Resistance' : 'At price';
-    const status = z.status === 'broken' ? 'Broken'
-      : z.status === 'held' ? (z.held > 0 ? `Held ${z.held}/${z.touches}` : `Tested ${z.touches}x, not held`)
-      : 'Untested';
+    const status = z.status === 'broken' ? 'Broken' : z.status === 'held' ? `Held ${z.held}/${z.touches}` : 'Untested';
     const range = z.high - z.low >= 1 ? `${Math.round(z.low)} to ${Math.round(z.high)}` : `${Math.round(z.mid)}`;
     const why = z.sources.slice(0, 4).map(s => escapeHtml(s.label)).join(', ');
     rows.push(`<div class="ladder-row ${kind}">
@@ -338,10 +344,12 @@ function renderLadder() {
     </div>`);
   });
   if (!spotPlaced) rows.push(spotRow);
+  if (hiddenCount > 0 || levelsExpanded) {
+    rows.push(`<button type="button" class="ladder-toggle" data-click="toggleLevelsExpanded">${levelsExpanded ? 'Show only the nearest levels' : `Show all ${data.zones.length} levels`}</button>`);
+  }
   el.innerHTML = rows.join('');
 }
 
-/** Plain text: the caller escapes it once when building the card. */
 function historyLine(h) {
   if (!h) return 'No backtest available for this pattern yet.';
   const pc = x => Math.round(x * 100);
@@ -351,11 +359,11 @@ function historyLine(h) {
 function renderSignals() {
   const el = document.getElementById('signalsList');
   if (!el) return;
-  if (!data) { el.innerHTML = '<div class="timeline-empty">Waiting for chart data.</div>'; return; }
+  if (!data) { el.innerHTML = '<div class="empty-note">Waiting for chart data.</div>'; return; }
   const shown = data.signals.filter(s => s.confirmed);
   const hidden = data.signals.length - shown.length;
   if (!shown.length) {
-    el.innerHTML = `<div class="timeline-empty">No confirmed reversal signal right now. A signal needs a pattern at a support or resistance zone with a second kind of evidence behind it; most of the time there is none.${hidden ? ` (${hidden} weaker pattern${hidden > 1 ? 's' : ''} hidden.)` : ''}</div>`;
+    el.innerHTML = `<div class="empty-note">No confirmed reversal signal right now. A signal needs a pattern at a support or resistance zone with a second kind of evidence behind it; most of the time there is none.${hidden ? ` (${hidden} weaker pattern${hidden > 1 ? 's' : ''} hidden.)` : ''}</div>`;
     return;
   }
   el.innerHTML = shown.slice(0, 4).map(s => {
@@ -382,10 +390,12 @@ function renderActionZones() {
   const el = document.getElementById('actionZones');
   if (!el) return;
   if (!data || !data.actionZones.length) {
-    el.innerHTML = '<div class="timeline-empty">No zone has two kinds of evidence agreeing right now.</div>';
+    el.innerHTML = '<div class="empty-note">No zone has two kinds of evidence agreeing right now.</div>';
     return;
   }
-  el.innerHTML = data.actionZones.map(z => {
+  const nearest = side => data.actionZones.filter(z => z.side === side).sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct));
+  const zonesShown = levelsExpanded ? data.actionZones : [...nearest('buy').slice(0, 2), ...nearest('sell').slice(0, 2)].sort((a, b) => Math.abs(a.distancePct) - Math.abs(b.distancePct));
+  el.innerHTML = zonesShown.map(z => {
     const side = z.side === 'buy' ? 'bull' : 'bear';
     const range = z.high - z.low >= 1 ? `${Math.round(z.low)} to ${Math.round(z.high)}` : `${Math.round(z.mid)}`;
     return `<div class="action-zone ${side}">
@@ -399,7 +409,7 @@ function renderPatternStats() {
   const el = document.getElementById('patternStats');
   if (!el) return;
   const bt = data && data.backtest;
-  if (!bt) { el.innerHTML = '<div class="timeline-empty">Backtest not available yet.</div>'; return; }
+  if (!bt) { el.innerHTML = '<div class="empty-note">Backtest not available yet.</div>'; return; }
   const pc = x => Math.round(x * 100) + '%';
   const labels = {};
   data.patterns.forEach(p => { labels[p.name] = p.label; });
@@ -445,6 +455,7 @@ export async function refreshPriceChart(force = false) {
     fetchedKey = key;
     if (ensureChart()) draw();
     renderAll();
+    if (dataListener) dataListener();
   } catch (e) {
     console.error('Chart analysis fetch failed:', e);
     const el = document.getElementById('chartNote');
@@ -468,6 +479,12 @@ export function setChartTimeframe(next) {
   }
   renderAll();
   refreshPriceChart(true);
+}
+
+export function toggleLevelsExpanded() {
+  levelsExpanded = !levelsExpanded;
+  renderLadder();
+  renderActionZones();
 }
 
 export function toggleChartLayer(event) {
@@ -500,6 +517,19 @@ export function chartFeedStatus() {
   if (!data) return null;
   return { feed: data.feed || null, interval: data.interval, clientFetchedAt: fetchedAt, hasCandles: data.candles.length > 0 };
 }
+
+/** Nearest strong zones above and below spot (and all zones), for the at-a-glance cards and the flow panel. null until loaded. */
+export function nearestChartLevels() {
+  if (!data || !data.zones || !data.zones.length) return null;
+  const strong = data.zones.filter(z => z.strength >= 40);
+  const above = strong.filter(z => z.kind === 'resistance').sort((a, b) => a.mid - b.mid)[0] || null;
+  const below = strong.filter(z => z.kind === 'support').sort((a, b) => b.mid - a.mid)[0] || null;
+  return { above, below, zones: data.zones };
+}
+
+let dataListener = null;
+/** Called after each successful chart load, so other panels can refresh their use of the levels. */
+export function onChartData(fn) { dataListener = fn; }
 
 /** Best live signal, used by the alert rules. */
 export function currentChartSignals() {

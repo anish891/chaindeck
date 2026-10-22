@@ -2346,7 +2346,7 @@ tbody tr.atm-row td {
 .price-chart { position: relative; width: 100%; height: 440px; border-radius: 8px; overflow: hidden; }
 @media (max-width: 640px) { .price-chart { height: 340px; } }
 
-.level-ladder { display: flex; flex-direction: column; gap: 8px; max-height: 560px; overflow: auto; }
+.level-ladder { display: flex; flex-direction: column; gap: 8px; }
 .ladder-row { border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 8px 10px; background: var(--surface2); }
 .ladder-row.support { border-left-color: var(--bull); }
 .ladder-row.resistance { border-left-color: var(--bear); }
@@ -2401,3 +2401,58 @@ tbody tr.atm-row td {
 .fresh-chip.bad, .fresh-chip.bad .fresh-name { color: var(--bear); }
 .fresh-chip.bad .fresh-dot { background: var(--bear); }
 .fresh-name { font-weight: 500; color: var(--muted); }
+
+/* in-flow empty state for the new panels (.timeline-empty is an absolute overlay meant for chart canvases) */
+.empty-note { padding: 12px 4px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+/* ═════════ At a glance + smart money flow panel ═════════ */
+.glance-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 900px) { .glance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .glance-grid { grid-template-columns: 1fr; } }
+.glance-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; min-width: 0; }
+.glance-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.glance-big { font-family: var(--mono); font-size: 20px; font-weight: 700; margin: 4px 0 6px; overflow-wrap: anywhere; }
+.glance-big.bull, .glance-line.bull { color: var(--bull); }
+.glance-big.bear, .glance-line.bear { color: var(--bear); }
+.glance-line { font-size: 12px; margin-top: 2px; overflow-wrap: anywhere; }
+.glance-line.muted { color: var(--muted); }
+
+.flow-panel { padding: 12px 16px; display: block; }
+.flow-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.flow-verdictbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.flow-verdict { font-weight: 700; font-size: 13px; padding: 3px 12px; border-radius: 999px; background: var(--border2); color: var(--muted); }
+.flow-verdict.bull { background: var(--bull-soft); color: var(--bull); }
+.flow-verdict.bear { background: var(--bear-soft); color: var(--bear); }
+.flow-verdict.mixed { background: var(--warn-soft); color: var(--warn); }
+.flow-headline { font-size: 12px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.flow-meter { position: relative; height: 8px; border-radius: 4px; margin: 12px 7px 3px; background: linear-gradient(90deg, rgba(239, 68, 68, 0.28), rgba(128, 128, 128, 0.18) 50%, rgba(16, 185, 129, 0.28)); }
+.flow-meter-mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--muted); }
+.flow-meter-mark { position: absolute; top: -3px; width: 14px; height: 14px; border-radius: 50%; transform: translateX(-50%); background: var(--muted); border: 2px solid var(--surface); }
+.flow-meter-mark.bull { background: var(--bull); }
+.flow-meter-mark.bear { background: var(--bear); }
+.flow-meter-mark.mixed { background: var(--warn); }
+.flow-meter-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+.flow-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+@media (max-width: 700px) { .flow-cols { grid-template-columns: 1fr; } }
+.flow-col { min-width: 0; border: 1px solid var(--border); border-left-width: 3px; border-radius: 8px; padding: 8px 10px; }
+.flow-col.bull { border-left-color: var(--bull); }
+.flow-col.bear { border-left-color: var(--bear); }
+.flow-col-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+.flow-item { margin-bottom: 8px; }
+.flow-item-top { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.flow-item-what { color: var(--muted); font-size: 12px; }
+.flow-item-sub { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.flow-item-level { font-size: 11px; color: var(--accent); font-weight: 600; }
+.flow-col-empty, .flow-col-more { font-size: 11px; color: var(--muted); }
+.flow-heavy { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: 11px; }
+.flow-heavy-label { color: var(--muted); }
+.flow-chip-lite { padding: 2px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-family: var(--mono); font-weight: 600; }
+.flow-chip-lite.crit { background: var(--bear-soft); color: var(--bear); }
+
+/* sub-stat rows in the metric cards ran into each other at narrower widths */
+.metric-sub-stats { flex-wrap: wrap; gap: 4px 12px; }
+.metric-sub-stats > span { min-width: 0; overflow-wrap: anywhere; }
+
+.ladder-toggle { align-self: flex-start; background: transparent; border: 1px solid var(--border2); color: var(--accent); border-radius: 8px; padding: 5px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.ladder-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pdf-export-report .glance-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }

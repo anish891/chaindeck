@@ -25,8 +25,8 @@ function el(tag, cls, text) {
 
 export function renderLevelScorecard(host, card) {
   host.textContent = '';
-  if (!card) { host.append(el('div', 'timeline-empty', 'Loading the level scorecard...')); return; }
-  if (card.unavailable) { host.append(el('div', 'timeline-empty', 'The scorecard needs candle history and is not available right now.')); return; }
+  if (!card) { host.append(el('div', 'empty-note', 'Loading the level scorecard...')); return; }
+  if (card.unavailable) { host.append(el('div', 'empty-note', 'The scorecard needs candle history and is not available right now.')); return; }
 
   host.append(el('div', 'panel-note', `Measured on ${card.sessions} sessions of 5 minute candles. A touch is price reaching a level after being clearly on one side; a bounce is moving half an ATR away before closing a quarter ATR through it. Arbitrary price points put through the same test bounced ${pc(card.null.bounceRate)} of the time, so a level type only counts as respected if it clearly beats that. Touches cluster, so the ranges are somewhat optimistic.`));
 

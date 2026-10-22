@@ -7,7 +7,9 @@ import { escapeHtml } from './ui-utils.js';
 import { freshness, candleLagSec } from './freshness.js';
 import { refreshForwardLog } from './forward-log.js';
 import { refreshLevelScorecard } from './level-scorecard.js';
-import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, restyleChart, chartScreenshot, currentChartSignals, chartFeedStatus } from './price-chart.js';
+import { classifyFlow } from './flow.js';
+import { renderFlowPanel, renderGlance } from './flow-panel.js';
+import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, toggleLevelsExpanded, restyleChart, chartScreenshot, currentChartSignals, chartFeedStatus, nearestChartLevels, onChartData } from './price-chart.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderParticipantChart } from './charts.js';
 
 let currentData = null;
@@ -951,12 +953,14 @@ function calculateAndRenderRoC(d) {
         spikeAlerts.push({
           type: 'PUT_WRITING',
           strike: s.strike,
+          delta: peDelta,
           summary: `Rapid Put Writing at ${s.strike}: +${fmtK(peDelta)} in ${timeLabel} (Bullish Support)`
         });
       } else if (peDelta <= -20000) {
         spikeAlerts.push({
           type: 'PUT_UNWINDING',
           strike: s.strike,
+          delta: peDelta,
           summary: `Rapid Put Unwinding at ${s.strike}: ${fmtK(peDelta)} in ${timeLabel} (Support Break)`
         });
       }
@@ -965,62 +969,45 @@ function calculateAndRenderRoC(d) {
         spikeAlerts.push({
           type: 'CALL_WRITING',
           strike: s.strike,
+          delta: ceDelta,
           summary: `Rapid Call Writing at ${s.strike}: +${fmtK(ceDelta)} in ${timeLabel} (Bearish Wall)`
         });
       } else if (ceDelta <= -20000) {
         spikeAlerts.push({
           type: 'CALL_COVERING',
           strike: s.strike,
+          delta: ceDelta,
           summary: `Rapid Call Short Covering at ${s.strike}: ${fmtK(ceDelta)} in ${timeLabel} (Short Squeeze)`
         });
       }
     });
   }
 
+  spikeAlerts.window = compSnap ? (snap5m ? '5m' : 'recent') : null; // null: no baseline snapshot yet, so nothing can be measured
   return spikeAlerts;
 }
 
 let lastSpikeAlerts = [];
 
+let lastFlow = null;
+
 function renderFlowFeed(d) {
   const spikeAlerts = calculateAndRenderRoC(d);
   lastSpikeAlerts = spikeAlerts;
+  const levels = nearestChartLevels();
+  lastFlow = classifyFlow({ spikes: spikeAlerts, unusual: d.unusualActivity || [], spot: d.spot, zones: levels ? levels.zones : [] });
 
-  const flowFeed = document.getElementById('flowAlertsFeed');
-  if (flowFeed) {
-    const combinedAlerts = [];
+  const body = document.getElementById('flowBody');
+  if (body) renderFlowPanel(body, lastFlow, { window: spikeAlerts.window, marketOpen: isMarketOpen() });
+  renderGlanceCards();
+}
 
-    // Add 5m institutional spike alerts first
-    spikeAlerts.forEach(s => {
-      const isBull = s.type === 'PUT_WRITING' || s.type === 'CALL_COVERING';
-      const color = isBull ? 'var(--bull)' : 'var(--bear)';
-      const bg = isBull ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)';
-      const border = isBull ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)';
-      const glyph = s.type === 'PUT_UNWINDING' ? 'alert-triangle' : s.type === 'CALL_COVERING' ? 'rocket' : 'zap';
-      combinedAlerts.push(`
-        <span class="flow-chip" style="background: ${bg}; color: ${color}; border: 1px solid ${border}; border-radius: 4px; padding: 2px 8px; white-space: nowrap; font-weight: 600;">
-          ${icon(glyph)}${escapeHtml(s.summary)}
-        </span>
-      `);
-    });
-
-    if (d.unusualActivity && d.unusualActivity.length > 0) {
-      d.unusualActivity.forEach(a => {
-        combinedAlerts.push(`
-          <span class="flow-chip" style="background: rgba(245,158,11,0.15); color: var(--warn); border: 1px solid rgba(245,158,11,0.3); border-radius: 4px; padding: 2px 8px; white-space: nowrap; font-weight: 600;">
-            ${icon(a.intensity === 'CRITICAL' ? 'zap' : 'flame')}${escapeHtml(a.summary)}
-          </span>
-        `);
-      });
-    }
-
-    if (combinedAlerts.length > 0) {
-      flowFeed.innerHTML = combinedAlerts.join('');
-    } else {
-      flowFeed.innerHTML = '<span style="color: var(--muted);">Scanning for 5m OI velocity & volume anomalies...</span>';
-    }
-  }
-
+/** The "At a glance" cards. Re-run when the option chain or the chart's levels change. */
+function renderGlanceCards() {
+  const host = document.getElementById('glanceCards');
+  if (!host || !currentData) return;
+  const lv = nearestChartLevels();
+  renderGlance(host, { d: currentData, flow: lastFlow || classifyFlow({ spot: currentData.spot }), levels: lv ? { above: lv.above, below: lv.below } : null });
 }
 
 export async function fetchSimilarSessions() {
@@ -1803,7 +1790,8 @@ const ACTIONS = {
   toggleGreeksView,
   onParticipantModeChange,
   setChartTimeframe,
-  toggleChartLayer
+  toggleChartLayer,
+  toggleLevelsExpanded
 };
 
 function runActions(spec, event) {
@@ -1830,6 +1818,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAlerts();
   initStrikePanel();
   initExplain();
+  onChartData(() => { if (currentData) renderFlowFeed(currentData); });
   initPriceChart({ getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null });
   window.addEventListener('strike-click', e => openStrike(e.detail));
   document.getElementById('chainBody')?.addEventListener('click', e => {

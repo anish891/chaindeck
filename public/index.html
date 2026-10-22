@@ -73,13 +73,10 @@
   <!-- Sticky key-numbers strip -->
   <div class="keystrip" id="keyStrip">
     <div class="ks-item"><span class="ks-label">Spot</span><span class="ks-val" id="ksSpot">n/a</span></div>
-    <div class="ks-item"><span class="ks-label">ATM</span><span class="ks-val" id="ksAtm">n/a</span></div>
     <div class="ks-item"><span class="ks-label">Day</span><span class="ks-val" id="ksDay">n/a</span></div>
     <div class="ks-item"><span class="ks-label">PCR</span><span class="ks-val" id="ksPcr">n/a</span></div>
     <div class="ks-item"><span class="ks-label">India VIX</span><span class="ks-val" id="ksVix">n/a</span></div>
     <div class="ks-item"><span class="ks-label">Max Pain</span><span class="ks-val" id="ksPain">n/a</span></div>
-    <div class="ks-item"><span class="ks-label">Implied Fut</span><span class="ks-val" id="ksFut">n/a</span></div>
-    <div class="ks-item"><span class="ks-label">Regime</span><span class="ks-val" id="ksRegime">n/a</span></div>
     <div class="ks-item"><span class="ks-label">Data as of</span><span class="ks-val" id="ksAge">n/a</span></div>
     <div class="ks-item"><span class="ks-label">Feeds</span><span class="fresh-chips">
       <span class="fresh-chip idle" id="freshChain"></span>
@@ -88,60 +85,20 @@
     </span></div>
   </div>
 
-  <!-- COMPOSITE REGIME HERO BANNER -->
-  <div id="heroRegimeBanner" class="section hero-banner-container">
-    <div class="hero">
-      <div>
-        <div class="hero-eyebrow">
-          <span class="eyebrow" data-explain="regime">Composite Market Regime</span>
-          <span id="regimeConfidence" class="pill pill-accent">Signal agreement: n/a</span>
-        </div>
-        <div id="regimeTitle" class="hero-title">Analyzing Market Regime...</div>
-        <div id="regimeStrategy" class="hero-sub">Strategy: n/a</div>
-      </div>
-      <span id="tacticalBiasBadge" class="bias-badge">Bias: n/a</span>
-    </div>
+
+  <!-- AT A GLANCE: four plain cards -->
+  <div id="glanceSection" class="section">
+    <div id="glanceCards" class="glance-grid" aria-live="polite"></div>
   </div>
 
-  <!-- INTRADAY TACTICAL TRADE SETUP BANNER -->
-  <div id="tradeSetupBannerSection" class="section">
-    <div class="panel panel-raised">
-      <div class="panel-head">
-        <div class="panel-title">
-          <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
-          <span data-explain="tradeSetup">Live Trade Setup &amp; Tactical Action Plan</span>
-          <span id="setupBiasBadge" class="pill pill-bull">Bias: n/a</span>
-        </div>
-        <span class="panel-note">Auto-synthesized from CPR, GEX Zero-Gamma, PCR RoC &amp; Straddle Bounds</span>
-      </div>
-      <div class="setup-grid">
-        <div class="setup-bullet-card">
-          <div class="setup-label" style="--c: var(--accent)"><span class="dot"></span>Today's Bias</div>
-          <div id="setupTodayBias" class="setup-val">Analyzing…</div>
-        </div>
-        <div class="setup-bullet-card">
-          <div class="setup-label" style="--c: var(--warn)"><span class="dot"></span>Key Target</div>
-          <div id="setupKeyTarget" class="setup-val">Analyzing…</div>
-        </div>
-        <div class="setup-bullet-card">
-          <div class="setup-label" style="--c: var(--bear)"><span class="dot"></span>Invalidation Level</div>
-          <div id="setupInvalidation" class="setup-val">Analyzing…</div>
-        </div>
-        <div class="setup-bullet-card">
-          <div class="setup-label" style="--c: var(--bull)"><span class="dot"></span>Optimal Strategy</div>
-          <div id="setupOptimalStrategy" class="setup-val">Analyzing…</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- UNUSUAL FLOW TICKER -->
+  <!-- SMART MONEY FLOW -->
   <div id="unusualFlowSection" class="section unusual-flow-container">
-    <div class="panel flow-bar">
-      <span class="flow-title" data-explain="smartFlow"><svg class="ico" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Smart Money Flow</span>
-      <div id="flowAlertsFeed" class="flow-feed">
-        <span style="color: var(--muted);">Scanning for strike volume &amp; OI anomalies...</span>
+    <div class="panel flow-panel">
+      <div class="flow-head">
+        <span class="flow-title" data-explain="smartFlow"><svg class="ico" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Smart Money Flow</span>
+        <span class="panel-note">Open interest moves over the last 5 minutes, near spot</span>
       </div>
+      <div id="flowBody"><div class="empty-note">Scanning for OI moves...</div></div>
     </div>
   </div>
 
@@ -217,6 +174,53 @@
         <div id="forwardLog"></div>
       </details>
       <div class="panel-note">Shows evidence consistent with buying or selling pressure, not who actually bought or sold: no order-flow data is available. Volume is the Nifty ETF as a proxy. Not investment advice.</div>
+    </div>
+  </div>
+
+  <!-- COMPOSITE REGIME HERO BANNER -->
+  <div id="heroRegimeBanner" class="section hero-banner-container">
+    <div class="hero">
+      <div>
+        <div class="hero-eyebrow">
+          <span class="eyebrow" data-explain="regime">Composite Market Regime</span>
+          <span id="regimeConfidence" class="pill pill-accent">Signal agreement: n/a</span>
+        </div>
+        <div id="regimeTitle" class="hero-title">Analyzing Market Regime...</div>
+        <div id="regimeStrategy" class="hero-sub">Strategy: n/a</div>
+      </div>
+      <span id="tacticalBiasBadge" class="bias-badge">Bias: n/a</span>
+    </div>
+  </div>
+
+  <!-- INTRADAY TACTICAL TRADE SETUP BANNER -->
+  <div id="tradeSetupBannerSection" class="section">
+    <div class="panel panel-raised">
+      <div class="panel-head">
+        <div class="panel-title">
+          <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+          <span data-explain="tradeSetup">Live Trade Setup &amp; Tactical Action Plan</span>
+          <span id="setupBiasBadge" class="pill pill-bull">Bias: n/a</span>
+        </div>
+        <span class="panel-note">Auto-synthesized from CPR, GEX Zero-Gamma, PCR RoC &amp; Straddle Bounds</span>
+      </div>
+      <div class="setup-grid">
+        <div class="setup-bullet-card">
+          <div class="setup-label" style="--c: var(--accent)"><span class="dot"></span>Today's Bias</div>
+          <div id="setupTodayBias" class="setup-val">Analyzing…</div>
+        </div>
+        <div class="setup-bullet-card">
+          <div class="setup-label" style="--c: var(--warn)"><span class="dot"></span>Key Target</div>
+          <div id="setupKeyTarget" class="setup-val">Analyzing…</div>
+        </div>
+        <div class="setup-bullet-card">
+          <div class="setup-label" style="--c: var(--bear)"><span class="dot"></span>Invalidation Level</div>
+          <div id="setupInvalidation" class="setup-val">Analyzing…</div>
+        </div>
+        <div class="setup-bullet-card">
+          <div class="setup-label" style="--c: var(--bull)"><span class="dot"></span>Optimal Strategy</div>
+          <div id="setupOptimalStrategy" class="setup-val">Analyzing…</div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -479,7 +483,7 @@
             <span class="sub" id="mPCRsub">n/a</span>
           </div>
           <div class="metric-item">
-            <div style="display:flex; align-items:center; gap:6px;">
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px 6px;">
               <span class="label" style="margin-bottom:0;" data-explain="ivSkew">IV Skew (25Δ RR)</span>
               <span id="volRegimeBadge" class="vol-badge" title="Volatility Regime">n/a</span>
             </div>
