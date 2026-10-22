@@ -4,6 +4,7 @@ const history = require('../services/history');
 const { getParticipantHistory } = require('../services/participants');
 const chartAnalysis = require('../services/chartAnalysis');
 const forwardLog = require('../services/forwardlog');
+const { withRetry } = require('../services/retry');
 const { istNow } = require('../services/market');
 const { fetchRawNSEOptionChain } = require('../services/nse');
 const { rateLimit, requireSecret, isValidExpiry, isValidDate, sendError } = require('../security');
@@ -116,7 +117,14 @@ async function cronSnapshot(req, res) {
   const { expiry } = req.query;
   if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
+    // NSE sometimes rejects a cold request (fast 401/403 or a timeout) and answers a moment later, so try a few times.
+    const { raw, allExpiries, targetExpiry } = await withRetry(
+      attempt => {
+        if (attempt > 1) console.error(`cron snapshot: retrying NSE fetch (attempt ${attempt})`);
+        return fetchRawNSEOptionChain('NIFTY', expiry || null);
+      },
+      { attempts: 3, delayMs: 900, budgetMs: 6500, shouldRetry: e => e.code !== 'BAD_EXPIRY' }
+    );
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
     // Score the chart's signals and zones against what price did next. Best effort: the snapshot above is already saved.
     const forward = await forwardLog.run(data);
