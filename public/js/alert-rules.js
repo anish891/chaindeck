@@ -154,12 +154,26 @@ const approachDist = chart => Math.max(chart.spot * 0.0015, (chart.atr || 0) * 0
 const strongSignals = chart => (chart.signals || []).filter(s => s.confirmed && s.grade === 'strong' && s.age <= 1 && s.state !== 'invalidated');
 const nearZones = (chart, spot, minStrength) => (chart.zones || []).filter(z => z.kind !== 'inside' && z.strength >= minStrength && zoneDistance(spot, z) <= approachDist(chart));
 
-/** Silent baseline: whatever is already visible is not news. Also used when the chart timeframe changes. */
+/**
+ * Zones are tracked by position, not by a rounded price key: the ladder is re-clustered on every chart refresh, so a zone's
+ * midpoint wobbles by a few points and a rounded key flips across a boundary, which used to look like a brand new level.
+ * Each tracked zone is { kind, mid, armed }. `armed` means "price has been clearly away from it, so reaching it is news".
+ */
+const matchTol = chart => Math.max(15, (chart.atr || 0) * 0.5);
+function findTracked(list, z, tol) {
+  let best = null;
+  for (const t of list) if (t.kind === z.kind && Math.abs(t.mid - z.mid) <= tol && (!best || Math.abs(t.mid - z.mid) < Math.abs(best.mid - z.mid))) best = t;
+  return best;
+}
+const eligibleZones = (chart, minStrength) => (chart.zones || []).filter(z => z.kind !== 'inside' && z.strength >= minStrength);
+
+/** Silent baseline: whatever is already visible is not news. Also used when the chart timeframe changes or the market reopens. */
 function seedChart(chart, spot, minStrength, asOf) {
   const chartSeen = {};
-  const approach = {};
   strongSignals(chart).forEach(sig => { chartSeen[sig.id] = asOf; });
-  nearZones(chart, spot, minStrength).forEach(z => { approach[zoneKey(z)] = false; });
+  const far = approachDist(chart) * 2;
+  // A zone price is already at or near starts disarmed; one that is clearly away starts armed.
+  const approach = eligibleZones(chart, minStrength).map(z => ({ kind: z.kind, mid: z.mid, armed: zoneDistance(spot, z) > far }));
   return { chartInterval: chart.interval, chartSeen, approach, signalLast: {} };
 }
 
@@ -187,7 +201,7 @@ function seedState(d, ctx, settings, asOf, walls) {
     pending: {},
     momentum: { up: true, down: true },
     vixZone: d.vix && d.vix.percentChange >= r.vix.pct ? 'spike' : 'normal',
-    ...(ctx.chart ? seedChart(ctx.chart, d.spot, r.approach.minStrength, asOf) : { chartInterval: null, chartSeen: {}, approach: {}, signalLast: {} })
+    ...(ctx.chart ? seedChart(ctx.chart, d.spot, r.approach.minStrength, asOf) : { chartInterval: null, chartSeen: {}, approach: [], signalLast: {} })
   };
 }
 
@@ -207,7 +221,7 @@ export function evaluateRules(prev, d, ctx = {}, settings = DEFAULT_SETTINGS) {
   if (reseed) return { events, next: seedState(d, ctx, settings, asOf, walls) };
 
   const now = asOf ?? prev.asOf ?? 0;
-  const next = { ...prev, asOf, spot: d.spot, momentum: { ...prev.momentum }, spikes: { ...prev.spikes }, sides: { ...prev.sides }, pending: { ...prev.pending }, chartSeen: { ...prev.chartSeen }, approach: { ...prev.approach }, signalLast: { ...(prev.signalLast || {}) } };
+  const next = { ...prev, asOf, spot: d.spot, momentum: { ...prev.momentum }, spikes: { ...prev.spikes }, sides: { ...prev.sides }, pending: { ...prev.pending }, chartSeen: { ...prev.chartSeen }, approach: (prev.approach || []).map(t => ({ ...t })), signalLast: { ...(prev.signalLast || {}) } };
 
   // 1. PCR zone (with hysteresis)
   next.pcrZone = confirm(next, 'pcr', nextPcrZone(prev.pcrZone, d.pcr, r.pcr.hi, r.pcr.lo), prev.pcrZone);
@@ -347,7 +361,11 @@ export function evaluateRules(prev, d, ctx = {}, settings = DEFAULT_SETTINGS) {
   // 9. Chart signals: a new strong, multi-evidence reversal signal, announced once per signal
   const chart = ctx.chart;
   if (chart && Array.isArray(chart.zones) && Number.isFinite(chart.spot)) {
-    if (prev.chartInterval !== chart.interval) {
+    if (ctx.marketOpen === false) {
+      // Nothing moves after the close, and the ladder keeps re-clustering on stale candles: say nothing, and re-baseline
+      // quietly when trading resumes instead of announcing whatever changed overnight.
+      next.chartInterval = null;
+    } else if (prev.chartInterval !== chart.interval) {
       Object.assign(next, seedChart(chart, d.spot, r.approach.minStrength, now)); // timeframe changed: re-baseline quietly
     } else {
       if (r.signals.on) {
@@ -368,27 +386,39 @@ export function evaluateRules(prev, d, ctx = {}, settings = DEFAULT_SETTINGS) {
       }
       Object.keys(next.chartSeen).forEach(id => { if (now - next.chartSeen[id] > 2 * 3600e3) delete next.chartSeen[id]; });
 
-      // 10. Approaching a strong level: fires once, re-arms after price moves well away again
-      const near = new Set();
-      nearZones(chart, d.spot, r.approach.minStrength).forEach(z => {
-        const key = zoneKey(z);
-        near.add(key);
-        if (next.approach[key] === false) return;
-        next.approach[key] = false;
-        if (!r.approach.on) return;
-        const gap = Math.round(zoneDistance(d.spot, z));
-        const why = z.sources.slice(0, 3).map(x => x.label).join(', ');
-        events.push({
-          key: `approach:${key}`,
-          severity: 'warn',
-          title: `Spot nearing ${z.kind} zone ${fmt(z.low)}${z.high - z.low >= 1 ? `-${fmt(z.high)}` : ''}`,
-          body: `${gap ? `${gap} pts away` : 'inside the zone'}. Strength ${z.strength}: ${why}.${z.touches ? ` Held ${z.held} of ${z.touches} tests today.` : ''}`
-        });
+      // 10. Approaching a strong level. News only when PRICE MOVES into range of a zone it had been clearly away from:
+      //     a zone that appears or shifts toward a price that has not moved is not an approach, and neither is a level price
+      //     is already sitting at. Fires once, then re-arms after price moves well away again.
+      const tol = matchTol(chart);
+      const dist = approachDist(chart);
+      const tracked = next.approach;
+      const kept = [];
+      eligibleZones(chart, r.approach.minStrength).forEach(z => {
+        let t = findTracked(tracked, z, tol);
+        const distNow = zoneDistance(d.spot, z);
+        const distBeforeMove = Number.isFinite(prev.spot) ? zoneDistance(prev.spot, z) : distNow; // same zone, previous price
+        if (!t) {
+          t = { kind: z.kind, mid: z.mid, armed: distNow > dist * 2 }; // first sighting: quiet if it is already near
+        } else {
+          t.mid = z.mid;
+          if (distNow > dist * 2) t.armed = true; // clearly away: ready to announce the next approach
+          else if (distNow <= dist && t.armed) {
+            t.armed = false;
+            if (r.approach.on && distBeforeMove > dist) { // price itself moved into range (not the zone moving to price)
+              const gap = Math.round(distNow);
+              const why = z.sources.slice(0, 3).map(x => x.label).join(', ');
+              events.push({
+                key: `approach:${z.kind}:${Math.round(z.mid / 10) * 10}`,
+                severity: 'warn',
+                title: `Spot nearing ${z.kind} zone ${fmt(z.low)}${z.high - z.low >= 1 ? `-${fmt(z.high)}` : ''}`,
+                body: `${gap ? `${gap} pts away` : 'inside the zone'}. Strength ${z.strength}: ${why}.${z.touches ? ` Held ${z.held} of ${z.touches} tests today.` : ''}`
+              });
+            }
+          }
+        }
+        kept.push(t);
       });
-      (chart.zones || []).forEach(z => {
-        const key = zoneKey(z);
-        if (next.approach[key] === false && !near.has(key) && zoneDistance(d.spot, z) > approachDist(chart) * 2) delete next.approach[key];
-      });
+      next.approach = kept; // zones that left the ladder are forgotten
     }
   }
 

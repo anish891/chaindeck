@@ -220,7 +220,7 @@ so a value hovering around a threshold does not fire repeatedly.
 | Momentum | Spot moves 0.3% or more within 5 minutes (adjustable) |
 | VIX spike | India VIX is up 5% or more on the day (adjustable) |
 | Reversal signal | A new strong, confirmed pattern signal appears on the chart (once per signal) |
-| Nearing a level | Spot comes within about half an ATR of a zone with strength 70 or more (adjustable), then re-arms after moving away |
+| Nearing a level | Price itself moves to within about half an ATR of a zone with strength 70 or more (adjustable). Zones appearing, shifting or re-clustering around a price that has not moved do not count, nothing fires after the close, and it re-arms after price moves well away |
 
 Each alert type can be switched on or off. Alerts are kept in a log behind the bell icon and can also appear as an
 on-page pop-up, a sound or a desktop notification. You can choose the lowest severity that interrupts you, set a

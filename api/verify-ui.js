@@ -245,4 +245,10 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(!/INTRADAY_REFRESH_MS\b/.test(app), 'no leftover 30 second constant');
 }
 
+// ── 16. alerts about price and levels only run while the market is open ──
+{
+  assert(/chart: currentChartSignals\(\), marketOpen: isMarketOpen\(\)/.test(app), 'the alert engine must be told whether the market is open');
+  assert(/ctx\.marketOpen === false/.test(read('public/js/alert-rules.js')), 'chart alerts must stay silent after the close');
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

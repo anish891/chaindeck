@@ -239,6 +239,65 @@ const path = require('path');
     res = feed(at([22296, 22297, 22298]), withChart([22296, 22297, 22298].map(sp => chart(sp, [], [z]))));
     assert.deepStrictEqual(res.events, [], 'already at the level when the page opened is not news');
 
+    // ── regression: an alert at 22:56 for a level price never moved to ──
+    // The ladder re-clusters on every chart refresh. Zones appearing, shifting or crossing a rounding boundary while price
+    // stands still are NOT an approach, and nothing should alert after the close.
+    {
+      const spot = 22688;
+      const flatSpots = Array(6).fill(spot);
+      const mixed = (zoneMids, strength = 80) => zoneMids.map(m => zone(m, strength, 'support'));
+      const run = zonesPerTick => feed(at(flatSpots), withChart(zonesPerTick.map((zs, i) => chart(flatSpots[i], [], zs))));
+
+      // (a) a strong zone 23 points away APPEARS after the page loaded, price did not move
+      let res = run([[], [], mixed([22638]), mixed([22638]), mixed([22638]), mixed([22638])]);
+      assert.deepStrictEqual(res.events, [], 'a zone that appears near a price that did not move is not news');
+
+      // (b) the zone midpoint wobbles across a 10-point boundary (22634 <-> 22636) while price stands still
+      res = run([mixed([22634]), mixed([22636]), mixed([22634]), mixed([22636]), mixed([22634]), mixed([22636])]);
+      assert.deepStrictEqual(res.events, [], 'jitter in a zone midpoint is not a new level');
+
+      // (c) a distant zone drifts toward a price that has not moved
+      res = run([mixed([22400]), mixed([22450]), mixed([22520]), mixed([22600]), mixed([22640]), mixed([22650])]);
+      assert.deepStrictEqual(res.events, [], 'a zone moving to a still price is not an approach');
+
+      // (c2) a zone drifts slowly (10 points a tick, so it keeps its identity) from far away to within reach of a still price
+      {
+        const mids = Array.from({ length: 19 }, (_, i) => 22480 + i * 10); // ends at 22660
+        const sp = Array(mids.length).fill(spot);
+        res = feed(at(sp), withChart(mids.map((m, i) => chart(sp[i], [], mixed([m])))));
+        assert.deepStrictEqual(res.events, [], 'a tracked zone that drifts to a price that has not moved is not an approach');
+      }
+
+      // (g) a zone first seen within twice the reach starts disarmed: price must first move away before an approach counts
+      {
+        const sp = [22688, 22688, 22660, 22650];
+        res = feed(at(sp), withChart(sp.map((x, i) => chart(x, [], i === 0 ? [] : mixed([22638])))));
+        assert.deepStrictEqual(res.events, [], 'first seen at 45 points, then price edges closer: no alert until it has been clearly away');
+        const sp2 = [22688, 22688, 22800, 22700, 22650]; // now it goes clearly away (162 points), then comes back
+        res = feed(at(sp2), withChart(sp2.map((x, i) => chart(x, [], i === 0 ? [] : mixed([22638])))));
+        assert.strictEqual(res.events.length, 1, 'after moving clearly away, coming back is an approach');
+      }
+
+      // (d) price itself moves from far to within reach: exactly one alert, then quiet
+      const spots = [22400, 22450, 22560, 22640, 22655, 22660];
+      res = feed(at(spots), withChart(spots.map(sp => chart(sp, [], mixed([22638])))));
+      assert.strictEqual(res.events.filter(e => /^approach:/.test(e.key)).length, 1, 'one approach alert when price moves in');
+      assert.ok(/Spot nearing support zone/.test(res.events[0].title));
+
+      // (e) after the close nothing fires, even if price "moves in"; reopening re-baselines quietly
+      const closedSpots = [22400, 22450, 22560, 22640, 22655, 22660];
+      const closedCtx = closedSpots.map(sp => ({ chart: chart(sp, [], mixed([22638])), marketOpen: false }));
+      res = feed(at(closedSpots), closedCtx);
+      assert.deepStrictEqual(res.events, [], 'no chart alerts while the market is closed');
+      const reopen = [...closedCtx, { chart: chart(22660, [], mixed([22638])), marketOpen: true }, { chart: chart(22661, [], mixed([22638])), marketOpen: true }];
+      res = feed(at([...closedSpots, 22660, 22661]), reopen);
+      assert.deepStrictEqual(res.events, [], 'price already at the level when trading resumes is not news');
+
+      // (f) the signals rule is also silent after the close
+      const sigClosed = [chart(spot, [], []), { ...chart(spot, [sig('night1')], []), }, chart(spot, [sig('night1')], [])].map(c => ({ chart: c, marketOpen: false }));
+      assert.deepStrictEqual(feed(at([spot, spot, spot]), sigClosed).events, [], 'no signal alerts after the close');
+    }
+
     // settings merge keeps the new fields
     const ms = mergeSettings({ rules: { approach: { minStrength: 60 } } });
     assert.strictEqual(ms.rules.approach.minStrength, 60);

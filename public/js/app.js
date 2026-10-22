@@ -875,7 +875,7 @@ export function renderAll() {
   renderVolPanels();
   renderOiChart_();
   // Never alert from data that is stale or failing its own checks: that is how false alarms happen.
-  if (!trust.blocking) processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot, chart: currentChartSignals() });
+  if (!trust.blocking) processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot, chart: currentChartSignals(), marketOpen: isMarketOpen() });
   fetchSimilarSessions();
   renderTable();
 }
