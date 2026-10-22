@@ -3,6 +3,7 @@ const router = express.Router();
 const history = require('../services/history');
 const { getParticipantHistory } = require('../services/participants');
 const chartAnalysis = require('../services/chartAnalysis');
+const forwardLog = require('../services/forwardlog');
 const { istNow } = require('../services/market');
 const { fetchRawNSEOptionChain } = require('../services/nse');
 const { rateLimit, requireSecret, isValidExpiry, isValidDate, sendError } = require('../security');
@@ -64,6 +65,18 @@ router.get('/chart-analysis', async (req, res) => {
   }
 });
 
+// Live track record of the chart's signals and zones (recorded by the cron job, scored against later candles).
+router.get('/forward-log', async (req, res) => {
+  try {
+    if (!forwardLog.configured) return res.json({ ok: true, persistent: false });
+    const log = await forwardLog.getLog();
+    res.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
+    res.json({ ok: true, persistent: true, ...log });
+  } catch (err) {
+    return sendError(res, 500, 'Error reading forward log', err);
+  }
+});
+
 // One strike across the day (sampled)
 router.get('/strike-history', async (req, res) => {
   const { expiry, date } = req.query;
@@ -105,8 +118,10 @@ async function cronSnapshot(req, res) {
   try {
     const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
+    // Score the chart's signals and zones against what price did next. Best effort: the snapshot above is already saved.
+    const forward = await forwardLog.run(data);
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, expiry: data.expiry, dataAsOf: data.dataAsOf, persistent: history.configured });
+    res.json({ ok: true, expiry: data.expiry, dataAsOf: data.dataAsOf, persistent: history.configured, forward });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
     return sendError(res, 502, 'Cron snapshot failed', err);

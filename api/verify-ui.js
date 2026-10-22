@@ -155,4 +155,13 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(/stale:\s*!!\(currentData && currentData\.feed/.test(app), 'the NSE badge must reflect the server\'s stale flag');
 }
 
+// ── 7. forward log panel ──
+{
+  const fl = read('public/js/forward-log.js');
+  assert(/id="forwardLog"/.test(html) && html.includes('data-explain="forwardLog"'), 'forward log panel missing');
+  assert(!/innerHTML/.test(fl), 'forward-log.js builds DOM with textContent only (its data comes from storage)');
+  assert(/refreshForwardLog\(\)/.test(app), 'the page must refresh the forward log');
+  assert(/\n  forwardLog: \{\n    en:/.test(read('public/js/explain.js')), 'explain text for forwardLog missing');
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

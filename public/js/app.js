@@ -5,6 +5,7 @@ import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
 import { escapeHtml } from './ui-utils.js';
 import { freshness, candleLagSec } from './freshness.js';
+import { refreshForwardLog } from './forward-log.js';
 import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, restyleChart, chartScreenshot, currentChartSignals, chartFeedStatus } from './price-chart.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderParticipantChart } from './charts.js';
 
@@ -427,6 +428,7 @@ export async function fetchNow() {
     refreshIntraday();
     refreshParticipants();
     refreshPriceChart();
+    refreshForwardLog();
   } catch (e) {
     setLive(false);
     console.error('Fetch failed:', e);

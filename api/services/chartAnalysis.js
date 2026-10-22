@@ -88,6 +88,7 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
     feed: feedOf(base, candles),
     spot,
     atr: round1(ladder.atr),
+    tolerance: round1(ladder.tolerance),
     candles,
     vwap: vwap.map(v => ({ t: v.t, value: round1(v.value) })),
     zones: ladder.zones.map(z => ({ ...z, low: round1(z.low), high: round1(z.high), mid: round1(z.mid), distancePct: Math.round(z.distancePct * 100) / 100 })),

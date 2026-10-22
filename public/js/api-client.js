@@ -46,3 +46,10 @@ export async function fetchChartAnalysis(interval, expiry) {
   if (!json.ok) throw new Error(json.error);
   return json;
 }
+
+export async function fetchForwardLog() {
+  const r = await fetch('/api/forward-log');
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json;
+}
