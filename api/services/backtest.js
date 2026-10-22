@@ -100,4 +100,4 @@ function backtest(candles, interval, patternsOverride = null) {
   return { interval, horizon, sessions, candles: candles.length, minSamples: MIN_SAMPLES, baseline: base, patterns };
 }
 
-module.exports = { HORIZONS, MIN_SAMPLES, wilson, verdict, baselineRates, backtest };
+module.exports = { HORIZONS, MIN_SAMPLES, wilson, verdict, fits, baselineRates, backtest };

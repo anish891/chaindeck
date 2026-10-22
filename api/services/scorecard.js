@@ -20,7 +20,7 @@
 
 const { atr: atrOf, swingPoints, priorRanges, volumeProfile, roundLevels } = require('./levels');
 const { wilson, MIN_SAMPLES } = require('./backtest');
-const { computeCPR } = require('./analytics');
+const { staticLevels } = require('./conditions');
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const istDay = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
@@ -115,20 +115,10 @@ function buildScorecard(candles, daily, params = PARAMS) {
     const prevSession = si > 0 ? sess[si - 1] : null;
     const fixed = (type, price) => { if (price > 0) push(type, scanLevel(candles, atrs, s.from, s.to, () => price, () => true, params)); };
 
-    if (prior) {
-      fixed('prevHigh', prior.prevHigh);
-      fixed('prevLow', prior.prevLow);
-      fixed('prevClose', prior.prevClose);
-      if (prior.week) { fixed('weekHigh', prior.week.high); fixed('weekLow', prior.week.low); }
-      const prevDay = (daily || []).filter(d => istDay(d.t) < s.day).pop();
-      if (prevDay) {
-        const cpr = computeCPR(prevDay.h, prevDay.l, prevDay.c);
-        fixed('cprPivot', cpr.pivot);
-        fixed('cprEdge', cpr.tc); fixed('cprEdge', cpr.bc);
-        fixed('pivotR', cpr.r1); fixed('pivotR', cpr.r2);
-        fixed('pivotS', cpr.s1); fixed('pivotS', cpr.s2);
-      }
-    }
+    const prevDay = (daily || []).filter(d => istDay(d.t) < s.day).pop();
+    const open = candles[s.from].o;
+    // everything knowable before the open (previous day / week, CPR, pivots, round numbers) lives in conditions.staticLevels
+    for (const l of staticLevels({ prior, prevDay, open })) fixed(l.type, l.price);
 
     // prior session's volume profile (needs ETF volume on that session)
     if (prevSession) {
@@ -138,11 +128,6 @@ function buildScorecard(candles, daily, params = PARAMS) {
         (prof.hvn || []).slice(0, 4).forEach(p => fixed('hvn', p));
       }
     }
-
-    // round numbers around the open
-    const open = candles[s.from].o;
-    roundLevels(open, 500).forEach(p => fixed('round', p));
-    roundLevels(open, 100).filter(p => p % 500 !== 0).forEach(p => fixed('round', p));
 
     // running VWAP (needs volume)
     let pv = 0, vol = 0;

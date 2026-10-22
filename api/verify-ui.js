@@ -181,4 +181,12 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(/LAYER_DEFAULTS = \{[^}]*allPatterns:\s*false/.test(chartJs), 'every pattern must be OFF by default');
 }
 
+// ── 10. conditional backtest panel ──
+{
+  const cs = read('public/js/conditional-stats.js');
+  assert(/id="conditionalStats"/.test(html), 'conditional stats container missing');
+  assert(!/innerHTML/.test(cs), 'conditional-stats.js builds DOM with textContent only');
+  assert(/renderConditionalStats\(/.test(read('public/js/price-chart.js')), 'the chart must render the conditional stats');
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

@@ -5,6 +5,7 @@ const patternsSvc = require('./patterns');
 const backtestSvc = require('./backtest');
 const signalsSvc = require('./signals');
 const scorecardSvc = require('./scorecard');
+const conditions = require('./conditions');
 
 const BACKTEST_TTL_MS = 6 * 3600 * 1000;
 const btCache = new Map(); // interval -> { ts, value }
@@ -18,7 +19,15 @@ async function getBacktest(interval, deps) {
     try {
       const hist = await deps.getHistoryCandles(interval);
       if (!hist || hist.length < 100) return hit ? hit.value : null;
-      const value = backtestSvc.backtest(hist, interval);
+      const pats = patternsSvc.detectAll(hist);
+      const value = backtestSvc.backtest(hist, interval, pats);
+      try {
+        const dailyHist = await deps.getHistoryCandles('1d');
+        value.conditional = conditions.conditionalBacktest(hist, dailyHist, interval, pats);
+      } catch (err) {
+        console.error(`conditional backtest ${interval} failed:`, err.message);
+        value.conditional = null;
+      }
       btCache.set(interval, { ts: Date.now(), value });
       return value;
     } catch (err) {
@@ -105,7 +114,10 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
   const patterns = patternsSvc.detectAll(candles);
   const backtest = await getBacktest(interval, deps);
   const strikes = d && d.strikes ? d.strikes : [];
-  const signals = signalsSvc.buildSignals({ candles, patterns, ladder, strikes, backtest, interval });
+  const conditional = backtest && backtest.conditional ? backtest.conditional : null;
+  const liveEnv = conditional ? conditions.buildEnv(candles, daily.candles) : null;
+  const contextFor = conditional ? p => conditions.contextAdjustment(conditional, conditions.contextAt(candles, p.i, p.dir, liveEnv), p.dir) : null;
+  const signals = signalsSvc.buildSignals({ candles, patterns, ladder, strikes, backtest, interval, contextFor });
   const actionZones = signalsSvc.buildActionZones({ candles, ladder, strikes, profile, patterns, interval });
 
   const notable = signalsSvc.selectNotable(patterns, { interval, backtest, signals });
@@ -125,7 +137,7 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
     patterns: patterns.filter(p => p.t >= visibleFrom).map(p => ({ t: p.t, i: p.i, name: p.name, label: p.label, dir: p.dir, kind: p.kind, quality: p.quality, level: p.level ?? null, notable: notable.has(`${p.name}|${p.t}`) })),
     signals,
     actionZones,
-    backtest: backtest ? { interval: backtest.interval, horizon: backtest.horizon, sessions: backtest.sessions, candles: backtest.candles, minSamples: backtest.minSamples, baseline: backtest.baseline, patterns: backtest.patterns } : null,
+    backtest: backtest ? { interval: backtest.interval, horizon: backtest.horizon, sessions: backtest.sessions, candles: backtest.candles, minSamples: backtest.minSamples, baseline: backtest.baseline, patterns: backtest.patterns, conditional: backtest.conditional || null } : null,
     updatedAt: Date.now()
   };
 }

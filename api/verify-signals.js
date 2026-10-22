@@ -159,4 +159,22 @@ const zone = (low, high, strength, kind, sources = [{ label: 'Put OI wall', type
   assert.ok(kept <= 10, `100 candles of back-to-back patterns yield at most 10 arrows, got ${kept}`);
 }
 
+// context from the conditional backtest moves the score only when it is passed in, and explains itself
+{
+  const cs = flat(30);
+  const i = cs.length;
+  cs.push(mk(i, 24296, 24300, 24250, 24298, 3000));
+  const ladder = { spot: 24298, atr: 30, tolerance: 25, zones: [zone(24245, 24260, 80, 'support')] };
+  const pattern = { i, t: cs[i].t, name: 'hammer', label: 'Hammer', dir: 'bull', kind: 'candle', quality: 0.8 };
+  const run = contextFor => S.buildSignals({ candles: cs, patterns: [pattern], ladder, strikes: [], backtest: null, interval: '5m', contextFor })[0];
+  const base = run(null);
+  const worse = run(() => ({ adjust: -10, lines: [{ family: 'context', text: 'midday: hit 41% vs 52%', against: true }] }));
+  const better = run(() => ({ adjust: 6, lines: [{ family: 'context', text: 'first hour: hit 61% vs 48%' }] }));
+  assert.strictEqual(worse.score, base.score - 10);
+  assert.strictEqual(better.score, base.score + 6);
+  assert.ok(worse.evidence.some(e => e.family === 'context' && e.against));
+  assert.ok(!worse.families.includes('context') && !better.families.includes('context'), 'context never counts as a family that confirms a signal');
+  assert.strictEqual(worse.confirmed, base.confirmed);
+}
+
 console.log('signals checks passed');

@@ -5,6 +5,7 @@
 // volume profile are series primitives so they stay locked to the price scale when the user pans or zooms.
 import { fetchChartAnalysis } from './api-client.js';
 import { escapeHtml } from './ui-utils.js';
+import { renderConditionalStats } from './conditional-stats.js';
 
 const REFRESH_MS = 15000;
 const IST_OFFSET_S = 19800;
@@ -422,6 +423,8 @@ function renderAll() {
   renderSignals();
   renderActionZones();
   renderPatternStats();
+  const cond = document.getElementById('conditionalStats');
+  if (cond) renderConditionalStats(cond, data && data.backtest ? data.backtest.conditional : null);
   renderTfButtons();
 }
 

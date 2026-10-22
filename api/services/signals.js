@@ -104,7 +104,7 @@ function selectNotable(patterns, { interval, backtest, signals = [] } = {}) {
  * Build signals from patterns on the most recent candles.
  *  candles, patterns (detectAll output), ladder (buildLadder), strikes (option chain), backtest (backtest() output), interval
  */
-function buildSignals({ candles, patterns, ladder, strikes, backtest, interval }) {
+function buildSignals({ candles, patterns, ladder, strikes, backtest, interval, contextFor = null }) {
   if (!candles || candles.length < 10 || !ladder || !finite(ladder.spot)) return [];
   const maxAge = MAX_AGE[interval] || 4;
   const lastIdx = candles.length - 1;
@@ -169,6 +169,10 @@ function buildSignals({ candles, patterns, ladder, strikes, backtest, interval }
     const stats = backtest && backtest.patterns && backtest.patterns[p.name] ? backtest.patterns[p.name] : null;
     const verdict = stats ? stats.verdict : 'insufficient';
     score += VERDICT_ADJUST[verdict];
+
+    // when in the day / what kind of day / how stacked the levels are: only conditions with a proven record move the score
+    const cx = contextFor ? contextFor(p) : null;
+    if (cx) { score += cx.adjust; evidence.push(...cx.lines); }
 
     // plan: trigger, invalidation and the nearest opposing zone
     const buffer = Math.max(a * 0.1, 1);

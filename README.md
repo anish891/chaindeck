@@ -144,6 +144,15 @@ the pattern's direction. Intraday trades must finish inside the session. Results
 often any candle moved that way), with a 95 percent Wilson confidence interval. A pattern is labelled "edge" only with
 at least 30 samples and a lower bound above the baseline. Most patterns show no clear edge, and the panel says so.
 
+### When do patterns work? (conditional backtest)
+The same pattern history is split by conditions known at the moment the pattern completed: time of day (first hour,
+midday, last hour), the kind of day so far (trending or ranging, judged only from the session up to that candle), and
+level context (stacked levels, one level, open space, using levels that can be rebuilt for any past day). Each
+condition is judged on its own, to avoid false positives from slicing 60 sessions many ways, and is compared with how
+often ANY candle in the same condition moved the same way, so time-of-day drift cannot pass for skill. A condition only
+changes a signal's score (+6 if clearly better than usual, -10 if clearly worse) with at least 30 samples. When nothing
+stands out, which is the current result, no condition changes anything.
+
 ### Advanced analytics (collapsible)
 - **ATM Straddle and Expected Move:** call and put legs, total straddle, change against the previous session,
   decay status, expected move to expiry and per day, and the upper and lower range bounds.

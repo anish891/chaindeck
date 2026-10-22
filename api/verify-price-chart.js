@@ -1,5 +1,5 @@
 // Tests for the price chart's data loading in public/js/price-chart.js. The module runs in Node with a minimal fake
-// DOM; its two imports are replaced with stubs so the chart-analysis request can be controlled from here.
+// DOM; its imports are replaced with stubs so the chart-analysis request can be controlled from here.
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -24,7 +24,8 @@ globalThis.document = {
   const utilStub = toUrl(fs.readFileSync(path.join(__dirname, '../public/js/ui-utils.js'), 'utf8'));
   const src = fs.readFileSync(path.join(__dirname, '../public/js/price-chart.js'), 'utf8')
     .replace("'./api-client.js'", `'${apiStub}'`)
-    .replace("'./ui-utils.js'", `'${utilStub}'`);
+    .replace("'./ui-utils.js'", `'${utilStub}'`)
+    .replace("'./conditional-stats.js'", `'${toUrl(fs.readFileSync(path.join(__dirname, '../public/js/conditional-stats.js'), 'utf8'))}'`);
   const chart = await import(toUrl(src));
   const tick = () => new Promise(r => setImmediate(r));
   const payload = interval => ({ interval, source: 'yahoo', volumeSource: 'none', spot: 1, candles: [], zones: [], signals: [], actionZones: [], patterns: [], backtest: null });
