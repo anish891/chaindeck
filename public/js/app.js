@@ -6,6 +6,7 @@ import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.
 import { escapeHtml } from './ui-utils.js';
 import { freshness, candleLagSec } from './freshness.js';
 import { refreshForwardLog } from './forward-log.js';
+import { refreshLevelScorecard } from './level-scorecard.js';
 import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, restyleChart, chartScreenshot, currentChartSignals, chartFeedStatus } from './price-chart.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderParticipantChart } from './charts.js';
 
@@ -429,6 +430,7 @@ export async function fetchNow() {
     refreshParticipants();
     refreshPriceChart();
     refreshForwardLog();
+    refreshLevelScorecard();
   } catch (e) {
     setLive(false);
     console.error('Fetch failed:', e);

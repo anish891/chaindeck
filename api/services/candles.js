@@ -196,6 +196,20 @@ async function getHistoryCandles(interval, { fetchImpl = fetch } = {}) {
   return r.value;
 }
 
+/** 60 sessions of 5m index candles with ETF volume merged in, for the level scorecard. Cached for hours. */
+async function getHistoryWithVolume({ fetchImpl = fetch } = {}) {
+  const preset = HISTORY_PRESETS['5m'];
+  const r = await cached('historyv|5m', TTL_HISTORY_MS, async () => {
+    const [idx, etf] = await Promise.all([
+      fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
+      fetchYahooCandles(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => [])
+    ]);
+    if (!idx.length) throw new Error('No index candles returned');
+    return mergeVolume(idx, etf, false).candles;
+  }, TTL_HISTORY_MS * 4);
+  return r.value;
+}
+
 function clearCache() {
   cache.clear();
   inflight.clear();
@@ -213,6 +227,7 @@ module.exports = {
   candlesFromSpotPoints,
   getCandles,
   getHistoryCandles,
+  getHistoryWithVolume,
   marketOpenNow,
   STALE_MAX_OPEN_MS,
   cached,

@@ -4,6 +4,7 @@ const levels = require('./levels');
 const patternsSvc = require('./patterns');
 const backtestSvc = require('./backtest');
 const signalsSvc = require('./signals');
+const scorecardSvc = require('./scorecard');
 
 const BACKTEST_TTL_MS = 6 * 3600 * 1000;
 const btCache = new Map(); // interval -> { ts, value }
@@ -35,6 +36,31 @@ function feedOf(base, candles) {
   return { fetchedAt: base.fetchedAt || null, stale: !!base.stale, lastBarT: last, source: base.source };
 }
 
+const SCORECARD_TTL_MS = 6 * 3600 * 1000;
+let scCache = null;
+let scInflight = null;
+
+/** Measured scorecard of level types (cached for hours). null when history is unavailable; callers then use default weights. */
+async function getScorecard(deps) {
+  if (typeof deps.getHistoryWithVolume !== 'function') return null;
+  if (scCache && Date.now() - scCache.ts < SCORECARD_TTL_MS) return scCache.value;
+  if (scInflight) return scInflight;
+  scInflight = (async () => {
+    try {
+      const [c5, daily] = await Promise.all([deps.getHistoryWithVolume(), deps.getHistoryCandles('1d')]);
+      if (!c5 || c5.length < 500) return scCache ? scCache.value : null;
+      const value = scorecardSvc.buildScorecard(c5, daily);
+      value.multipliers = scorecardSvc.weightMultipliers(value);
+      scCache = { ts: Date.now(), value };
+      return value;
+    } catch (err) {
+      console.error('level scorecard failed:', err.message);
+      return scCache ? scCache.value : null;
+    }
+  })().finally(() => { scInflight = null; });
+  return scInflight;
+}
+
 const round1 = n => (Number.isFinite(n) ? Math.round(n * 10) / 10 : null);
 
 /**
@@ -62,8 +88,10 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
   const lastVwap = vwap.length && candlesSvc.istDay(vwap[vwap.length - 1].t) === lastDay ? vwap[vwap.length - 1].value : null;
   const spot = d && Number.isFinite(d.spot) ? d.spot : candles[candles.length - 1].c;
 
+  const card = await getScorecard(deps);
   const ladder = levels.buildLadder({
     spot,
+    weightAdjust: card ? card.multipliers : null,
     walls: d && d.walls,
     maxPain: d && d.maxPain,
     zeroGamma: d && d.gex && d.gex.zeroGammaLevel,
@@ -101,6 +129,6 @@ async function analyze(interval, { d = null, fallbackPoints = null, deps = candl
   };
 }
 
-function clearCache() { btCache.clear(); btInflight.clear(); }
+function clearCache() { btCache.clear(); btInflight.clear(); scCache = null; scInflight = null; }
 
-module.exports = { analyze, clearCache };
+module.exports = { analyze, getScorecard, clearCache };

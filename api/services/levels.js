@@ -156,7 +156,8 @@ function collectLevels(input) {
   const add = (type, price, extra = {}) => {
     if (!finite(price) || price <= 0) return;
     const s = SOURCES[type];
-    out.push({ type, price, weight: s.weight * (extra.scale || 1), family: s.family, label: extra.label || s.label, note: extra.note || null });
+    const measured = (input.weightAdjust && input.weightAdjust[type]) || 1; // from the scorecard; 1 until a type has proven itself either way
+    out.push({ type, price, weight: s.weight * (extra.scale || 1) * measured, family: s.family, label: extra.label || s.label, note: extra.note || null });
   };
 
   const { spot, walls, maxPain, zeroGamma, cpr, prior, candles, profile, vwap } = input;

@@ -164,4 +164,13 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(/\n  forwardLog: \{\n    en:/.test(read('public/js/explain.js')), 'explain text for forwardLog missing');
 }
 
+// ── 8. level scorecard panel ──
+{
+  const sc = read('public/js/level-scorecard.js');
+  assert(/id="levelScorecard"/.test(html) && html.includes('data-explain="levelScorecard"'), 'level scorecard panel missing');
+  assert(!/innerHTML/.test(sc), 'level-scorecard.js builds DOM with textContent only');
+  assert(/refreshLevelScorecard\(\)/.test(app), 'the page must load the level scorecard');
+  assert(/\n  levelScorecard: \{\n    en:/.test(read('public/js/explain.js')), 'explain text for levelScorecard missing');
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

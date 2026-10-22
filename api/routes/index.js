@@ -78,6 +78,18 @@ router.get('/forward-log', async (req, res) => {
   }
 });
 
+// How each kind of support / resistance level actually behaved over the stored history (see services/scorecard.js).
+router.get('/level-scorecard', async (req, res) => {
+  try {
+    const card = await chartAnalysis.getScorecard(require('../services/candles'));
+    if (!card) return res.status(503).json({ ok: false, error: 'Scorecard is not available yet.' });
+    res.set('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
+    res.json({ ok: true, ...card });
+  } catch (err) {
+    return sendError(res, 502, 'Error building level scorecard', err);
+  }
+});
+
 // One strike across the day (sampled)
 router.get('/strike-history', async (req, res) => {
   const { expiry, date } = req.query;

@@ -53,3 +53,10 @@ export async function fetchForwardLog() {
   if (!json.ok) throw new Error(json.error);
   return json;
 }
+
+export async function fetchLevelScorecard() {
+  const r = await fetch('/api/level-scorecard');
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json;
+}

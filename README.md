@@ -129,6 +129,14 @@ selling interest zone.
 - **Buying and selling interest zones** are support and resistance zones where at least two families of evidence agree.
   This is evidence consistent with buying or selling pressure. No data source says who actually bought or sold.
 
+### Level scorecard (measured weights)
+Each kind of level is tested on the last 60 sessions of 5 minute candles. A touch is price reaching a level after being
+clearly on one side. A bounce is moving half an ATR away before closing a quarter ATR through it. Arbitrary price points
+are put through the identical test as a baseline, and a level type is only called "respected" when its bounce rate and
+95 percent range clearly beat that baseline with at least 30 touches. Types that beat it get up to 50 percent more weight
+in the ladder, types that do worse get 40 percent less, and everything else keeps its default weight. Option OI walls,
+max pain and zero gamma cannot be measured this way (no historical option chains) and are tracked in the live record.
+
 ### Pattern reliability (backtest)
 Every detector is run over the last 60 sessions of 5 and 15 minute candles, and five years of daily candles. Entry is the
 open of the candle after the pattern, and a hit means the close, a fixed number of candles later, is beyond the entry in
