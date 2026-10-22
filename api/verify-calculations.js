@@ -152,21 +152,46 @@ assert(callGreeks.theta < 0, `Theta (${callGreeks.theta}) should be negative (ti
 
 console.log('✓ Test 4 Passed: Black-Scholes Option Greeks Engine (Delta, Gamma, Vega, Theta) verified successfully.');
 
-// ── TEST 5: STRADDLE → EXPECTED MOVE ARITHMETIC (0.85x of straddle ≈ 1σ to expiry) ──
-const spot = 24000;
-const ceLtp = 120;
-const peLtp = 100;
-const straddlePrice = ceLtp + peLtp;
-const expectedMove = straddlePrice * 0.85;
-const expectedUpper = spot + expectedMove;
-const expectedLower = spot - expectedMove;
+// ── TEST 5: STRADDLE → EXPECTED MOVE, DERIVED INDEPENDENTLY FROM BLACK-SCHOLES ──
+// Not a re-multiplication of the code's own constant: price a real ATM straddle, then compare the implementation's
+// moves with the true one-standard-deviation move S * sigma * sqrt(T).
+const { expectedMoves } = require('./services/analytics');
+const cdfRef = x => { let n = 40000, a = -12, h = (x - a) / n, s = 0; for (let i = 0; i <= n; i++) { const xi = a + i * h; s += ((i === 0 || i === n) ? 1 : (i % 2 ? 4 : 2)) * Math.exp(-0.5 * xi * xi); } return s * h / 3 / Math.sqrt(2 * Math.PI); };
+const bsPrice = (S, K, T, v, r, call) => { const d1 = (Math.log(S / K) + (r + 0.5 * v * v) * T) / (v * Math.sqrt(T)), d2 = d1 - v * Math.sqrt(T); const C = S * cdfRef(d1) - K * Math.exp(-r * T) * cdfRef(d2); return call ? C : C - S + K * Math.exp(-r * T); };
+for (const [S, v, T] of [[22700, 0.14, 7 / 365], [22700, 0.20, 30 / 365], [24000, 0.12, 2 / 365]]) {
+  const F = S * Math.exp(0.065 * T); // at-the-forward strike, where parity makes the straddle symmetric
+  const straddle = bsPrice(S, F, T, v, 0.065, true) + bsPrice(S, F, T, v, 0.065, false);
+  const sigmaMove = S * v * Math.sqrt(T);
+  const m = expectedMoves(straddle);
+  assert(Math.abs(m.oneSigmaMove / sigmaMove - 1) < 0.02, `1-sigma move ${m.oneSigmaMove.toFixed(1)} should match S*sigma*sqrt(T) ${sigmaMove.toFixed(1)} within 2%`);
+  const sigmas = m.expectedMove / sigmaMove;
+  assert(sigmas > 0.66 && sigmas < 0.70, `0.85 x straddle is ${sigmas.toFixed(3)} sigma (not 1)`);
+  const coverage = cdfRef(sigmas) - cdfRef(-sigmas);
+  assert(coverage > 0.48 && coverage < 0.53, `0.85 x straddle covers about 50% (${(coverage * 100).toFixed(1)}%), not 68%`);
+}
+assert.strictEqual(expectedMoves(220).expectedMove, 187, 'the displayed convention is unchanged');
 
-assert.strictEqual(straddlePrice, 220);
-assert.strictEqual(expectedMove, 187);
-assert.strictEqual(expectedUpper, 24187);
-assert.strictEqual(expectedLower, 23813);
+console.log('✓ Test 5 Passed: expected move derived from Black-Scholes (0.85x straddle = 0.68 sigma = ~50% range; true 1 sigma = 1.25x straddle).');
 
-console.log('✓ Test 5 Passed: ATM Straddle Price & 0.85x Intraday Expected Move formula verified successfully.');
+// ── TEST 4b: GREEKS AGAINST NUMERICAL DERIVATIVES OF AN INDEPENDENT PRICER ──
+{
+  const { calculateOptionGreeks } = require('./services/analytics');
+  for (const [S, K, T, v, call] of [[22700, 22700, 7 / 365, 0.14, true], [22700, 22900, 7 / 365, 0.16, true], [22700, 22500, 30 / 365, 0.18, false], [22700, 22700, 2 / 365, 0.12, false]]) {
+    const r = 0.065, g = calculateOptionGreeks(S, K, T, v, call, r);
+    const P = (s, t, vol) => bsPrice(s, K, t, vol, r, call);
+    const delta = (P(S + 1, T, v) - P(S - 1, T, v)) / 2;
+    const gamma = P(S + 1, T, v) - 2 * P(S, T, v) + P(S - 1, T, v);
+    const vega = (P(S, T, v + 0.0001) - P(S, T, v - 0.0001)) / 0.0002 / 100;
+    const dt = 1e-5;
+    const theta = ((P(S, T - dt, v) - P(S, T + dt, v)) / (2 * dt)) / 365;
+    const tag = `${call ? 'call' : 'put'} K=${K} T=${(T * 365).toFixed(0)}d`;
+    assert(Math.abs(g.delta - delta) < 0.001, `${tag}: delta ${g.delta} vs ${delta.toFixed(4)}`);
+    assert(Math.abs(g.gamma - gamma) < 2e-6, `${tag}: gamma ${g.gamma} vs ${gamma.toFixed(6)}`);
+    assert(Math.abs(g.vega - vega) < 0.02, `${tag}: vega ${g.vega} vs ${vega.toFixed(3)}`);
+    assert(Math.abs(g.theta - theta) < 0.03, `${tag}: theta/day ${g.theta} vs ${theta.toFixed(3)}`);
+  }
+  console.log('✓ Test 4b Passed: delta, gamma, vega and theta match numerical derivatives of an independent Black-Scholes pricer.');
+}
 
 // ── TEST 6: BREEDEN-LITZENBERGER IMPLIED PROBABILITY DISTRIBUTION ──
 const mockStrikesForPDF = [
@@ -267,4 +292,37 @@ console.log('✓ Test 7 Passed: Intraday ML Trend & Breakout Prediction Engine v
   console.log('✓ Test 12 Passed: regime fall-through, max-pain gravity direction, no saturation.');
 }
 
+
+// ── TEST 13: SESSION SIMILARITY (MATH-002) — must discriminate, unlike cosine on the raw mixed-unit vector ──
+{
+  const { computeSessionSimilarities: sim, computeCosineSimilarity: cosine, readableSessions } = require('./services/analytics');
+  const base = [0.9, 1, 0.2, 0.5, 0.04, 0.03];
+  const cases = {
+    identical: [0.9, 1, 0.2, 0.5, 0.04, 0.03],
+    'PCR 0.9 to 1.6': [1.6, 1, 0.2, 0.5, 0.04, 0.03],
+    'OI change 10x': [0.9, 1, 0.2, 0.5, 0.4, 0.3],
+    'GEX regime flipped': [0.9, -1, 0.2, 0.5, 0.04, 0.03],
+    'everything different': [1.6, -1, 0.5, -3, -0.4, 0.5]
+  };
+  const out = Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, sim(base, [v])[0]]));
+  assert(Math.abs(out.identical - 100) < 1e-9, 'identical sessions are 100');
+  // the old measure called these 96.0% and 95.6% similar: effectively no signal
+  assert(cosine(base, cases['PCR 0.9 to 1.6']) > 0.95 && cosine(base, cases['OI change 10x']) > 0.95, 'documents the old behaviour');
+  assert(out['PCR 0.9 to 1.6'] < 60 && out['PCR 0.9 to 1.6'] > 30, `a 2.8-scale PCR change must drop the match from about 100 to the 50s, got ${out['PCR 0.9 to 1.6'].toFixed(1)}`);
+  assert(out['OI change 10x'] < 15, `a 10x OI-change difference must read as clearly different, got ${out['OI change 10x'].toFixed(1)}`);
+  assert(out['GEX regime flipped'] < 80, 'a flipped gamma regime is a real difference');
+  assert(out['everything different'] < 1);
+  // closeness is monotone: a small difference scores higher than a large one
+  assert(sim(base, [[0.95, 1, 0.2, 0.5, 0.04, 0.03]])[0] > sim(base, [[1.2, 1, 0.2, 0.5, 0.04, 0.03]])[0]);
+  // history-derived scales kick in with enough sessions, and bad vectors score 0 instead of throwing
+  const hist = Array.from({ length: 12 }, (_, i) => [0.8 + i * 0.03, 1, 0.2, 0.5, 0.04, 0.03]);
+  const scored = sim(base, [...hist, null, [1, 2], [NaN, 1, 1, 1, 1, 1]]);
+  assert.strictEqual(scored.length, 15); assert.deepStrictEqual(scored.slice(12), [0, 0, 0]);
+  assert.deepStrictEqual(sim(null, [[1]]), [0]);
+  // BUG-004: a corrupt stored vector is skipped, not fatal
+  const good = { date: 'a', feature_vector: JSON.stringify(base) };
+  const rs = readableSessions([good, { date: 'b', feature_vector: '{not json' }, { date: 'c', feature_vector: null }, { date: 'd', feature_vector: base }, null]);
+  assert.deepStrictEqual(rs.map(r => r.sess.date), ['a', 'd']);
+  console.log('✓ Test 13 Passed: session similarity separates different days (old cosine scored them 95%+); corrupt records are skipped.');
+}
 console.log('\n✅ ALL MATHEMATICAL VERIFICATION TESTS PASSED SUCCESSFULLY!\n');

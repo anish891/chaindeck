@@ -1,6 +1,7 @@
 const { getIndexSnapshot, getPivotBasis } = require('./market');
 const history = require('./history');
 const { toTradingTimeIv, expiryCloseMs, ivPercentile } = require('./volatility');
+const calendar = require('./calendar');
 
 // ── Tunables (override via env) ──────────────────────────────────────────
 const RISK_FREE_RATE = parseFloat(process.env.RISK_FREE_RATE) || 0.065;
@@ -140,6 +141,18 @@ function computeCompositeRegime(gexRegime, pcr, cprType, ivSkew, spot, maxPain) 
   return { regimeLabel, tacticalBias, confidenceScore, primaryDrivers: drivers, actionableStrategy };
 }
 
+/**
+ * Moves implied by an ATM straddle.
+ *  - expectedMove: the broker convention, 0.85 x straddle. For a lognormal move this is about 0.68 sigma, so price stays
+ *    inside +/- expectedMove only about 50 percent of the time (it is close to the median absolute move).
+ *  - oneSigmaMove: straddle / sqrt(2/pi) = 1.2533 x straddle. An ATM option is worth about 0.4 x S x sigma x sqrt(T)
+ *    (Brenner-Subrahmanyam), so a straddle is about 0.798 x S x sigma x sqrt(T) and one standard deviation is its inverse.
+ */
+const SQRT_2_OVER_PI = Math.sqrt(2 / Math.PI); // 0.7978845608
+function expectedMoves(straddlePrice) {
+  return { expectedMove: straddlePrice * 0.85, oneSigmaMove: straddlePrice / SQRT_2_OVER_PI };
+}
+
 function normalPdf(x) {
   return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
 }
@@ -228,6 +241,46 @@ function extractFeatureVector(data) {
   const totalPutChgCr = (data.totalPutChgOI || 0) / 10000000;
 
   return [pcr, gexRegimeCode, cprWidthPct, ivSkew, totalCallChgCr, totalPutChgCr];
+}
+
+// Typical spread of each feature in extractFeatureVector's order: PCR, GEX regime (+1/-1), CPR width %, IV skew (vol points),
+// call OI change and put OI change in crores. The raw vector mixes units that differ by two orders of magnitude, so cosine
+// similarity on it is dominated by whichever numbers are largest. Differences are measured in units of these scales instead.
+const FEATURE_SCALES = [0.25, 1, 0.15, 2, 0.05, 0.05];
+const MIN_HISTORY_FOR_STD = 8;
+
+/**
+ * Similarity (0-100) of the current session to each past one: 100 * exp(-d2 / 2), where d2 is the mean squared difference
+ * after dividing each feature by its scale. Scales come from the stored sessions once there are enough of them (never
+ * smaller than a quarter of the default), otherwise the defaults above. Identical sessions score 100; a one-scale
+ * difference on every feature scores about 61.
+ */
+function computeSessionSimilarities(current, pasts) {
+  if (!Array.isArray(current) || !current.length || !Array.isArray(pasts)) return pasts ? pasts.map(() => 0) : [];
+  const n = current.length;
+  const usable = pasts.filter(v => Array.isArray(v) && v.length === n);
+  const scales = FEATURE_SCALES.slice(0, n).map((def, i) => {
+    if (usable.length < MIN_HISTORY_FOR_STD) return def;
+    const col = usable.map(v => v[i]).concat(current[i]);
+    const mean = col.reduce((a, b) => a + b, 0) / col.length;
+    const sd = Math.sqrt(col.reduce((a, b) => a + (b - mean) * (b - mean), 0) / col.length);
+    return Math.max(sd, def * 0.25);
+  });
+  return pasts.map(v => {
+    if (!Array.isArray(v) || v.length !== n || v.some(x => !Number.isFinite(x)) || current.some(x => !Number.isFinite(x))) return 0;
+    let d2 = 0;
+    for (let i = 0; i < n; i++) { const z = (current[i] - v[i]) / scales[i]; d2 += z * z; }
+    return 100 * Math.exp(-(d2 / n) / 2);
+  });
+}
+
+/** Stored sessions whose feature vector can be read (a corrupt record is skipped, never thrown on): [{ sess, vec }]. */
+function readableSessions(pastSessions) {
+  return (pastSessions || []).map(sess => {
+    let vec = sess && sess.feature_vector;
+    if (typeof vec === 'string') { try { vec = JSON.parse(vec); } catch (e) { vec = null; } }
+    return Array.isArray(vec) ? { sess, vec } : null;
+  }).filter(Boolean);
 }
 
 const MIN_SAMPLES = 5;
@@ -493,9 +546,15 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   const atmPELTP = atmPE.lastPrice || 0;
   const straddlePrice = atmCELTP + atmPELTP;
 
-  // 0.85 x straddle ≈ 1-sigma move to expiry. Scale by sqrt(trading days) for a per-day figure.
-  const expectedMove = straddlePrice * 0.85;
-  const tradingDaysLeft = Math.max(1, Math.round(dteDays * 5 / 7));
+  // The "expected move" shown on the page is the common broker convention, 0.85 x straddle. That is about 0.68 sigma
+  // (a range price stays inside about half the time), NOT one standard deviation. See expectedMoves().
+  // Scale by sqrt(trading days) for a per-day figure.
+  const { expectedMove, oneSigmaMove } = expectedMoves(straddlePrice);
+  // Trading days left, from the real calendar (weekends and NSE holidays skipped), measured from when NSE quoted the prices.
+  const expiryMs = expiryCloseMs(targetExpiry);
+  const tradingDaysLeft = expiryMs
+    ? Math.max(1, Math.round(calendar.tradingMinutesBetween(snapMs, expiryMs) / (calendar.CLOSE_MIN - calendar.OPEN_MIN)))
+    : Math.max(1, Math.round(dteDays * 5 / 7));
   const dailyMove = expectedMove / Math.sqrt(tradingDaysLeft);
   const upperRange = spot + expectedMove;
   const lowerRange = spot - expectedMove;
@@ -650,6 +709,10 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
       straddlePrice: Number(straddlePrice.toFixed(2)),
       expectedMove: Number(expectedMove.toFixed(2)),
       expectedMovePct: Number(expectedMovePct.toFixed(2)),
+      expectedMoveCoveragePct: 50,
+      oneSigmaMove: Number(oneSigmaMove.toFixed(2)),
+      oneSigmaLower: Number((spot - oneSigmaMove).toFixed(2)),
+      oneSigmaUpper: Number((spot + oneSigmaMove).toFixed(2)),
       dailyMove: Number(dailyMove.toFixed(1)),
       tradingDaysLeft,
       upperRange: Number(upperRange.toFixed(2)),
@@ -955,6 +1018,10 @@ function getCacheData() {
 }
 
 module.exports = {
+  readableSessions,
+  FEATURE_SCALES,
+  computeSessionSimilarities,
+  expectedMoves,
   computeCPR,
   classifyCPR,
   findZeroGamma,

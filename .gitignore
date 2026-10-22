@@ -7,3 +7,8 @@ node_modules/
 # Not part of the deployment: promo video project and rendered videos (kept locally only)
 promo/
 media/
+
+# Local assistant / editor tooling: never published
+.claude/
+CLAUDE.md
+.claude.json

@@ -1,5 +1,5 @@
 const fetch = require('node-fetch');
-const { istNow } = require('./market');
+const calendar = require('./calendar');
 
 // OHLC candles for the Nifty 50 index from Yahoo Finance, with volume borrowed from the Nifty 50 ETF (NIFTYBEES).
 // The index itself carries no volume, so the ETF's traded volume on the same candle is used as a proxy. It is a proxy:
@@ -120,8 +120,7 @@ const cache = new Map(); // key -> { ts, value }
 const inflight = new Map();
 
 function marketOpenNow(nowMs = Date.now()) {
-  const n = istNow(new Date(nowMs));
-  return n.isWeekday && n.mins >= 9 * 60 + 10 && n.mins <= 15 * 60 + 40;
+  return calendar.isMarketOpenAt(nowMs, { before: 5, after: 10 });
 }
 
 // Resolves { value, ts, stale }. On a failed refresh the previous value is served only while it is younger than

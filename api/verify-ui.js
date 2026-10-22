@@ -223,4 +223,26 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(/validateRaw\(/.test(read('api/services/nse.js')), 'NSE payloads must be validated before they are cached');
 }
 
+// ── 13. holiday-aware market hours ──
+{
+  assert(/fetchCalendar/.test(app) && /nseHolidays\.has\(ymd\)/.test(app), 'the page must treat NSE holidays as closed');
+  assert(/router\.get\('\/calendar'/.test(read('api/routes/index.js')), 'the calendar endpoint must exist');
+  assert(/calendar\.isMarketOpenAt/.test(read('api/services/nse.js')) && /calendar\.isMarketOpenAt/.test(read('api/services/candles.js')), 'server market-hours checks must use the holiday calendar');
+}
+
+// ── 14. honest labels ──
+{
+  assert(!/ML trend engine/i.test(html), 'the scoring formula is hand-weighted, not a trained ML model: do not call it one');
+  assert(/hand-weighted scoring formula, not a trained model/.test(read('public/js/explain.js')), 'the explain text must say the scoring is not a trained model');
+  assert(/about 50% range/.test(html) && /1σ \(about 68%\)/.test(html), 'the expected-move cards must say what coverage the range has');
+  assert(!/one-standard-deviation move to expiry/.test(read('README.md')), 'README must not call 0.85 x straddle a one-sigma move');
+}
+
+// ── 15. Upstash budget: history polling is no faster than the recorder ──
+{
+  assert(/INTRADAY_REFRESH_OPEN_MS = 60000/.test(app) && /INTRADAY_REFRESH_CLOSED_MS/.test(app), 'intraday history polls at most once a minute while open and backs off when closed');
+  assert(/document\.hidden\) return/.test(app.slice(app.indexOf('async function refreshIntraday'), app.indexOf('async function refreshIntraday') + 700)), 'hidden tabs do not poll history');
+  assert(!/INTRADAY_REFRESH_MS\b/.test(app), 'no leftover 30 second constant');
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');

@@ -13,6 +13,7 @@ const { addVolSeries } = require('./volatility');
 
 const DAY_TTL = 14 * 24 * 3600;
 const STRIKES_TTL = 7 * 24 * 3600;
+const CLAIM_PENDING_TTL = 120; // seconds a claim holds before the write has succeeded
 const SESSION_SAVE_FROM_MINS = 15 * 60 + 20; // IST; last write of the day (≈15:30) wins
 
 const lastRecorded = new Map(); // expiry -> asOf this instance already handled (skips network)
@@ -20,6 +21,12 @@ const WINDOWS_MIN = { m5: 5, m15: 15, m30: 30 };
 
 function safeParse(s) {
   try { return JSON.parse(s); } catch (e) { return null; }
+}
+
+/** Points sorted by time with duplicate timestamps removed (two instances can race the same NSE update). */
+function sortedUnique(rows) {
+  const seen = new Set();
+  return rows.map(safeParse).filter(Boolean).sort((a, b) => a.t - b.t).filter(p => (seen.has(p.t) ? false : (seen.add(p.t), true)));
 }
 
 function compactPoint(d, t) {
@@ -95,21 +102,31 @@ async function recordSnapshot(d, vector) {
   const asOf = d.dataAsOf || d.fetchedAt;
   if (!asOf || !d.strikes?.length) return { recorded: false, reason: 'no-data' };
   if (lastRecorded.get(d.expiry) === asOf) return { recorded: false, reason: 'seen' };
-  lastRecorded.set(d.expiry, asOf);
 
-  const claimed = await store.setNx(`oi:seen:${d.expiry}:${asOf}`, '1', 24 * 3600);
+  // The claim is deliberately short-lived until the data is actually written: if the write fails the claim must not
+  // keep this minute from being recorded by a retry (or by another instance).
+  const claimKey = `oi:seen:${d.expiry}:${asOf}`;
+  const claimed = await store.setNx(claimKey, '1', CLAIM_PENDING_TTL);
   if (!claimed) return { recorded: false, reason: 'claimed-elsewhere' };
 
   const t = new Date(asOf).getTime();
   const { ymd, mins, isWeekday } = istNow(new Date(asOf));
   const seriesKey = `oi:s:${ymd}:${d.expiry}`;
 
-  await store.pipeline([
-    ['SET', `oi:k:${d.expiry}:${t}`, JSON.stringify(compactStrikes(d)), 'EX', STRIKES_TTL],
-    ['RPUSH', seriesKey, JSON.stringify(compactPoint(d, t))],
-    ['EXPIRE', seriesKey, DAY_TTL],
-    ['SET', `oi:latest:${d.expiry}`, ymd, 'EX', DAY_TTL]
-  ]);
+  try {
+    await store.pipeline([
+      ['SET', `oi:k:${d.expiry}:${t}`, JSON.stringify(compactStrikes(d)), 'EX', STRIKES_TTL],
+      ['RPUSH', seriesKey, JSON.stringify(compactPoint(d, t))],
+      ['EXPIRE', seriesKey, DAY_TTL],
+      ['SET', `oi:latest:${d.expiry}`, ymd, 'EX', DAY_TTL]
+    ]);
+  } catch (err) {
+    await store.del(claimKey).catch(() => {}); // free the claim so the next attempt can record this snapshot
+    throw err;
+  }
+  lastRecorded.set(d.expiry, asOf); // only now is it safe to skip this snapshot next time
+  store.set(claimKey, '1', 24 * 3600).catch(() => {}); // data is safe: keep the claim for the full day to dedupe other instances
+  store.set('oi:lastsnap', String(t), 3 * 24 * 3600).catch(() => {}); // for the snapshot-age monitor endpoint
 
   if (isWeekday && mins >= SESSION_SAVE_FROM_MINS && vector) {
     await saveSession(buildSessionRecord(d, vector, ymd));
@@ -127,7 +144,7 @@ async function getIntraday(expiry, date = null) {
 
   const rows = await store.lrange(`oi:s:${day}:${expiry}`, 0, -1);
   // Insertion order is arrival order; two instances racing can append slightly out of order, so sort by time.
-  const points = rows.map(safeParse).filter(Boolean).sort((a, b) => a.t - b.t);
+  const points = sortedUnique(rows);
   if (points.length === 0) return { date: day, expiry, points: [], baselines: {} };
 
   const latest = points[points.length - 1];
@@ -170,7 +187,7 @@ async function getStrikeHistory(expiry, strike, date = null, maxSamples = 60) {
   if (!day) return { date: null, expiry, strike, samples: [] };
 
   const rows = await store.lrange(`oi:s:${day}:${expiry}`, 0, -1);
-  const points = rows.map(safeParse).filter(Boolean).sort((a, b) => a.t - b.t);
+  const points = sortedUnique(rows);
   if (points.length === 0) return { date: day, expiry, strike, samples: [] };
 
   const stride = Math.max(1, Math.ceil(points.length / maxSamples));
@@ -187,7 +204,30 @@ async function getStrikeHistory(expiry, strike, date = null, maxSamples = 60) {
   return { date: day, expiry, strike, samples };
 }
 
+/**
+ * Is the per-minute recorder alive? For an uptime monitor (cron-job.org, UptimeRobot) pointed at /api/snapshot-age:
+ * while the market is open the last saved snapshot must be less than `maxAgeSec` old, otherwise it reports unhealthy
+ * (HTTP 503) so the monitor alerts you. Outside market hours it is always healthy.
+ */
+function snapshotHealth(lastMs, nowMs = Date.now(), maxAgeSec = 300) {
+  const calendar = require('./calendar');
+  const marketOpen = calendar.isMarketOpenAt(nowMs, { before: 0, after: 5 });
+  const ageSec = Number.isFinite(lastMs) ? Math.max(0, Math.round((nowMs - lastMs) / 1000)) : null;
+  // The first minutes after the open (or a cold start) have no snapshot yet: allow one full interval before alarming.
+  const sinceOpenOk = marketOpen && calendar.tradingMinutesBetween(nowMs - maxAgeSec * 1000, nowMs) < maxAgeSec / 60 - 0.01;
+  const healthy = !marketOpen || sinceOpenOk || (ageSec !== null && ageSec <= maxAgeSec);
+  return { healthy, marketOpen, ageSec, maxAgeSec };
+}
+
+async function getLastSnapshotMs() {
+  const v = await store.get('oi:lastsnap');
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 module.exports = {
+  snapshotHealth,
+  getLastSnapshotMs,
   backend: store.backend,
   configured: store.configured,
   recordSnapshot,

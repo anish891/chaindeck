@@ -60,3 +60,10 @@ export async function fetchLevelScorecard() {
   if (!json.ok) throw new Error(json.error);
   return json;
 }
+
+export async function fetchCalendar() {
+  const r = await fetch('/api/calendar');
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json.holidays || [];
+}

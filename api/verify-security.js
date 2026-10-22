@@ -58,7 +58,7 @@ const url = (s, p) => `http://127.0.0.1:${s.address().port}${p}`;
   const pinned = {
     'public/vendor/chart.umd.js': 'sha512-ZwR1/gSZM3ai6vCdI+LVF1zSq/5HznD3ZSTk7kajkaj4D292NLuduDCO1c/NT8Id+jE58KYLKT7hXnbtryGmMg==', // chart.js 4.4.1 npm tarball
     'public/vendor/html2canvas.min.js': 'sha512-BNaRQnYJYiPSqHHDb58B0yaPfCu+Wgds8Gp/gU33kqBtgNS4tSPHuGibyoeqMV/TJlSKda6FXzoEyYGjTe+vXA==', // cdnjs SRI, 1.4.1
-    'public/vendor/html2pdf.bundle.min.js': 'sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==', // cdnjs SRI, 0.10.1
+    'public/vendor/html2pdf.bundle.min.js': 'sha512-+9GoO5OUX2MmPRHUH5dnOY+KGReMLcxywEvQxvAI0y5JxXh/lkz99dKj4xdYfODP3dMFsoZRz4CF/vHcaqa2Ag==', // html2pdf.js 0.14.0 npm tarball (jsPDF 4.0.0, DOMPurify 3.3.1 inside); tarball integrity matched the registry
     'public/vendor/lightweight-charts.standalone.production.js': 'sha512-C76k0yV9MsfI42H6hU7QXuhtuj9/1OLOEEUfIRpqlU5u6p8ZrOYxOFQkn3TlcC8JWuU6Maf4yUrDcAgcGjSOVA==' // lightweight-charts 5.2.1 npm tarball (Apache-2.0)
   };
   for (const [f, h] of Object.entries(pinned)) {
@@ -164,6 +164,25 @@ const url = (s, p) => `http://127.0.0.1:${s.address().port}${p}`;
   // ── 10. validators ──
   assert(sec.isValidExpiry('13-Oct-2026') && !sec.isValidExpiry('13-Oct-2026 ') && !sec.isValidExpiry('2026-10-13') && !sec.isValidExpiry(undefined) && !sec.isValidExpiry(['13-Oct-2026']));
   assert(sec.isValidDate('2026-10-09') && !sec.isValidDate('2026-10-9') && !sec.isValidDate(null));
+
+  // ── 11. SEC-003: inputs that reach storage keys must be real and plausible, bounding what anonymous callers can make us read ──
+  {
+    const now = Date.UTC(2026, 9, 24, 6, 0);
+    assert(!sec.isValidDate('2026-02-31') && !sec.isValidDate('2026-13-01') && !sec.isValidDate('2026-00-10') && sec.isValidDate('2028-02-29') && !sec.isValidDate('2027-02-29'), 'impossible calendar dates are rejected');
+    assert(sec.isPlausibleExpiry('29-Oct-2026', now) && sec.isPlausibleExpiry('24-Oct-2026', now) && sec.isPlausibleExpiry('31-Mar-2027', now), 'real nearby expiries pass');
+    assert(!sec.isPlausibleExpiry('29-Oct-2035', now), 'too far ahead');
+    assert(!sec.isPlausibleExpiry('29-Oct-2024', now), 'long expired');
+    assert(!sec.isPlausibleExpiry('31-Feb-2026', now) && !sec.isPlausibleExpiry('29-Xyz-2026', now) && !sec.isPlausibleExpiry('13-Oct-2026 ', now));
+    assert(sec.isRecentDate('2026-10-23', now) && sec.isRecentDate('2026-09-01', now) && sec.isRecentDate('2026-10-25', now));
+    assert(!sec.isRecentDate('2026-01-01', now) && !sec.isRecentDate('2027-01-01', now) && !sec.isRecentDate('2026-02-30', now));
+    const far = await get('/api/intraday?expiry=29-Oct-2035');
+    assert.strictEqual(far.status, 400, 'an implausible expiry is refused before any storage read');
+    const badDate = await get('/api/intraday?expiry=29-Oct-2026&date=2026-02-31');
+    assert.strictEqual(badDate.status, 400);
+    const oldDate = await get('/api/strike-history?expiry=29-Oct-2026&strike=22700&date=2020-01-01');
+    assert.strictEqual(oldDate.status, 400);
+    assert.strictEqual((await get('/api/option-chain?expiry=29-Oct-2099')).status, 400);
+  }
 
   server.close();
   console.log('✓ security OK (headers, strict CSP, CSP-clean page, pinned vendor code, validation, fail-closed auth, rate limit, no leaks)');

@@ -64,5 +64,50 @@ const mk = (minOffset, callOI) => {
   assert.deepStrictEqual((await history.getStrikeHistory('13-Oct-2026', 99999, null, 10)).samples, [], 'strike never stored → no samples');
   assert.deepStrictEqual((await history.getStrikeHistory('01-Jan-2030', 22250)).samples, [], 'unknown expiry → empty');
 
+  // ── BUG-001 regression: a failed write must not mark the snapshot as handled ──
+  {
+    const store = require(root + 'storage');
+    const realPipeline = store.pipeline;
+    const snap = { ...mk(90, 3.9e6), expiry: '14-Oct-2026' };
+    let failing = true;
+    store.pipeline = async (...a) => { if (failing) throw new Error('Upstash down'); return realPipeline(...a); };
+    await assert.rejects(() => history.recordSnapshot(snap, null), /Upstash down/);
+    failing = false;
+    const retry = await history.recordSnapshot(snap, null);
+    assert.strictEqual(retry.recorded, true, 'the retry of a snapshot whose write failed must record it');
+    assert.strictEqual((await history.recordSnapshot(snap, null)).recorded, false, 'and only once');
+    store.pipeline = realPipeline;
+    const got = await history.getIntraday('14-Oct-2026');
+    assert.strictEqual(got.points.length, 1);
+
+    // a failed claim (storage down at the very first call) also leaves the snapshot retryable
+    const realSetNx = store.setNx;
+    const snap2 = { ...mk(91, 3.9e6), expiry: '14-Oct-2026' };
+    store.setNx = async () => { throw new Error('claim failed'); };
+    await assert.rejects(() => history.recordSnapshot(snap2, null), /claim failed/);
+    store.setNx = realSetNx;
+    assert.strictEqual((await history.recordSnapshot(snap2, null)).recorded, true);
+
+    // duplicate timestamps in the stored series (two instances racing) are collapsed on read
+    await store.pipeline([['RPUSH', 'oi:s:2026-10-08:14-Oct-2026', JSON.stringify({ t: got.points[0].t, spot: 1 })]]);
+    assert.strictEqual((await history.getIntraday('14-Oct-2026', '2026-10-08')).points.length, 2, 'duplicate t collapsed');
+    assert.strictEqual(typeof (await store.get('oi:lastsnap')), 'string', 'last snapshot time is recorded for the monitor endpoint');
+  }
+
+  // ARCH-003: snapshot health for an uptime monitor
+  {
+    const IST = 330 * 60000;
+    const at = (d, h, m) => Date.UTC(2026, 9, d, h, m) - IST;
+    const monday = (h, m) => at(26, h, m); // Mon 26 Oct 2026 is a trading day
+    assert.strictEqual(history.snapshotHealth(monday(11, 0) - 60000, monday(11, 0)).healthy, true, 'a minute-old snapshot while open');
+    const stalled = history.snapshotHealth(monday(11, 0) - 10 * 60000, monday(11, 0));
+    assert.strictEqual(stalled.healthy, false); assert.strictEqual(stalled.ageSec, 600);
+    assert.strictEqual(history.snapshotHealth(null, monday(11, 0)).healthy, false, 'no snapshot at all while open');
+    assert.strictEqual(history.snapshotHealth(null, monday(9, 17)).healthy, true, 'two minutes after the open there may be none yet');
+    assert.strictEqual(history.snapshotHealth(monday(11, 0) - 99999999, monday(19, 0)).healthy, true, 'closed: always healthy');
+    assert.strictEqual(history.snapshotHealth(null, at(20, 11, 0)).healthy, true, 'an NSE holiday (Dussehra) is closed');
+    assert.strictEqual(history.snapshotHealth(null, at(24, 11, 0)).healthy, true, 'Saturday');
+  }
+
   console.log('✓ history OK:', out.points.length, 'points; baselines', Object.keys(out.baselines).join(','), '; sessions', sessions.length);
 })().catch(e => { console.error('FAIL', e); process.exit(1); });

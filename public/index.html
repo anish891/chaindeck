@@ -231,7 +231,7 @@
 
   <!-- ADVANCED ANALYTICS (collapsible, state remembered) -->
   <details class="advanced" id="advancedAnalytics">
-    <summary>Advanced analytics <span>Straddle &amp; expected move · Implied probability · ML trend engine</span></summary>
+    <summary>Advanced analytics <span>Straddle &amp; expected move · Implied probability · Trend and breakout scoring</span></summary>
   <!-- ATM STRADDLE & EXPECTED MOVE CALCULATOR CARD -->
   <div id="straddleCalculatorSection" style="padding: 12px 20px 0 20px;">
     <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px;">
@@ -280,7 +280,7 @@
 
         <div style="background: var(--bg); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border);">
           <div style="font-size: 10px; color: var(--muted); text-transform: uppercase; font-weight: 600;">Expected Move
-            to Expiry</div>
+            to Expiry (about 50% range)</div>
           <div id="straddleExpectedMove"
             style="font-size: 16px; font-weight: 700; color: var(--warn); margin-top: 2px;">± n/a pts (n/a)</div>
           <div style="font-size: 10px; color: var(--muted); margin-top: 2px;">
@@ -296,6 +296,9 @@
           <div style="font-size: 10px; color: var(--muted); margin-top: 2px;">
             Lower <span style="color: var(--bull);" id="straddleLowerBound">n/a</span> to Upper <span
               style="color: var(--bear);" id="straddleUpperBound">n/a</span>
+          </div>
+          <div style="font-size: 10px; color: var(--muted); margin-top: 2px;">
+            1σ (about 68%): <span id="straddleSigmaBounds">n/a</span>
           </div>
         </div>
       </div>
@@ -375,7 +378,7 @@
     </div>
   </div>
 
-  <!-- INTRADAY ML TREND & BREAKOUT PREDICTION ENGINE CARD -->
+  <!-- INTRADAY TREND & BREAKOUT SCORING CARD (hand-weighted, not a trained model) -->
   <div id="mlPredictionSection" style="padding: 12px 20px 0 20px;">
     <div style="background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px;">
       <div

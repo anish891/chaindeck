@@ -43,6 +43,22 @@ const byId = checks => Object.fromEntries(checks.map(c => [c.id, c]));
   assert.ok(I.validateRaw(mkRaw({ stamp: '22-Oct-2099 11:00:00' })).reasons.some(r => /future/.test(r)));
   assert.strictEqual(I.parseNseTs('22-Oct-2026 11:30:00'), Date.UTC(2026, 9, 22, 6, 0));
 
+
+  // SEC-002: every numeric field must really be a number (strings would flow into the maths and the page's HTML)
+  assert.ok(I.validateRaw(mkRaw({ mutate: r => { r.records.data[4].strikePrice = '22150"><img src=x onerror=alert(1)>'; } })).reasons.some(r => /invalid strike/.test(r)), 'string strikePrice rejected');
+  assert.ok(I.validateRaw(mkRaw({ mutate: r => { r.records.data[4].CE.impliedVolatility = '<b>14</b>'; } })).reasons.some(r => /non-numeric/.test(r)), 'string IV rejected');
+  assert.ok(I.validateRaw(mkRaw({ mutate: r => { r.records.data[4].CE.lastPrice = -5; } })).reasons.some(r => /negative/.test(r)));
+  assert.ok(I.validateRaw(mkRaw({ mutate: r => { r.records.data[4].strikePrice = 0; } })).reasons.some(r => /invalid strike/.test(r)));
+  assert.ok(I.validateRaw(mkRaw({ mutate: r => { r.records.data[4].expiryDate = '29 Oct <script>'; } })).reasons.some(r => /malformed expiry/.test(r)), 'expiry must look like DD-Mon-YYYY');
+  assert.ok(I.validateRaw(mkRaw({ mutate: r => { r.records.data[4].CE.change = null; r.records.data[5].PE.underlyingValue = undefined; } })).ok, 'null and missing optional fields are fine');
+
+  // SEC-004: public stale reasons are short codes, never raw error text
+  const nse = require('./services/nse');
+  assert.strictEqual(nse.staleReasonCode('NSE payload rejected: spot jumped 12% (secret-host.internal)'), 'payload_rejected');
+  assert.strictEqual(nse.staleReasonCode('The user aborted a request.'), 'timeout');
+  assert.strictEqual(nse.staleReasonCode('connect ECONNREFUSED 10.0.0.5:443'), 'fetch_failed');
+  assert.strictEqual(nse.staleReasonCode(undefined), 'fetch_failed');
+
   // ── verifyProcessed on clean, processed data: everything passes ──
   const raw = mkRaw();
   const data = await analytics.processOptionChainData(raw, [EXPIRY], EXPIRY);

@@ -1,5 +1,6 @@
 const fetch = require('node-fetch');
 const integrity = require('./integrity');
+const calendar = require('./calendar');
 
 const NSE_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -82,11 +83,7 @@ const STALE_MAX_CLOSED = 6 * 3600 * 1000; // nothing changes after the close, so
 
 /** How long a leftover copy may be served after a failed refresh, depending on whether NSE is trading. */
 function staleLimitMs(nowMs = Date.now()) {
-  const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false, weekday: 'short' })
-    .formatToParts(new Date(nowMs)).reduce((a, x) => { a[x.type] = x.value; return a; }, {});
-  const mins = (parseInt(p.hour, 10) % 24) * 60 + parseInt(p.minute, 10);
-  const open = !['Sat', 'Sun'].includes(p.weekday) && mins >= 9 * 60 + 10 && mins <= 15 * 60 + 40;
-  return open ? STALE_MAX_OPEN : STALE_MAX_CLOSED;
+  return calendar.isMarketOpenAt(nowMs, { before: 5, after: 10 }) ? STALE_MAX_OPEN : STALE_MAX_CLOSED;
 }
 
 let expiryCache = { list: null, ts: 0 };
@@ -106,6 +103,13 @@ function getCachedExpiries() {
   return expiryCache.list;
 }
 
+const NSE_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** Epoch ms -> '24-Oct-2026' (the IST calendar day), the format NSE's expiry parameter uses. */
+function formatNseDate(ms) {
+  const d = new Date(ms + 330 * 60 * 1000);
+  return `${String(d.getUTCDate()).padStart(2, '0')}-${NSE_MONTHS[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
+}
+
 function expiryUrl(symbol, expiry) {
   return `https://www.nseindia.com/api/option-chain-v3?type=Indices&symbol=${symbol}&expiry=${encodeURIComponent(expiry)}`;
 }
@@ -121,7 +125,9 @@ async function loadFromNSE(symbol, expiryDate) {
   const known = getCachedExpiries();
   // With a cached expiry list the target is known up front -> single NSE call.
   const targetGuess = expiryDate || (known && known[0]) || null;
-  const bootstrapExpiry = targetGuess || '30-Jun-2026';
+  // Any well-formed date makes NSE return its list of expiries (checked live: past, today and far-future dates all do),
+  // so the probe is today's date instead of a fixed literal that ages into the past.
+  const bootstrapExpiry = targetGuess || formatNseDate(Date.now());
 
   let raw = await fetchWithTimeout(expiryUrl(symbol, bootstrapExpiry), cookies);
   if (!raw?.records?.expiryDates?.length) {
@@ -186,7 +192,43 @@ async function fetchRawNSEOptionChain(symbol = 'NIFTY', expiryDate = null) {
   return p;
 }
 
+/** Short public reason for a leftover copy: the real error text stays in the server log, never in the response. */
+function staleReasonCode(message) {
+  const m = String(message || '');
+  if (/payload rejected/i.test(m)) return 'payload_rejected';
+  if (/abort|timeout|timed out/i.test(m)) return 'timeout';
+  return 'fetch_failed';
+}
+
+const HOLIDAY_TTL_MS = 24 * 3600 * 1000;
+let holidayRefresh = { ts: 0, inflight: null };
+
+/**
+ * Refresh the NSE trading-holiday list from NSE's own holiday master (at most once a day). Never throws: on any failure
+ * the list already in memory (the built-in fallback or the last good fetch) keeps being used.
+ */
+async function refreshHolidays({ force = false, fetcher = fetchWithTimeout, cookiesFn = getCookies } = {}) {
+  if (!force && Date.now() - holidayRefresh.ts < HOLIDAY_TTL_MS) return calendar.snapshot();
+  if (holidayRefresh.inflight) return holidayRefresh.inflight;
+  holidayRefresh.inflight = (async () => {
+    try {
+      const cookies = await cookiesFn();
+      const json = await fetcher('https://www.nseindia.com/api/holiday-master?type=trading', cookies);
+      if (calendar.setHolidaysFromNse(json) > 0) holidayRefresh.ts = Date.now();
+      else holidayRefresh.ts = Date.now() - HOLIDAY_TTL_MS + 30 * 60 * 1000; // odd payload: try again in 30 minutes
+    } catch (err) {
+      console.error('holiday list refresh failed:', err.message);
+      holidayRefresh.ts = Date.now() - HOLIDAY_TTL_MS + 30 * 60 * 1000;
+    }
+    return calendar.snapshot();
+  })().finally(() => { holidayRefresh.inflight = null; });
+  return holidayRefresh.inflight;
+}
+
 module.exports = {
+  formatNseDate,
+  staleReasonCode,
+  refreshHolidays,
   staleLimitMs,
   NSE_HEADERS,
   getCookies,

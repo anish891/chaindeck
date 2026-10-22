@@ -226,61 +226,135 @@ function computeStats(entries) {
 }
 
 // ── persistence and the per-minute tick ──────────────────────────────────
+//
+// Layout (ARCH-001): reading everything every minute does not scale, so entries are split by lifecycle.
+//   fl:open          hash  id -> entry JSON     only entries still being tracked (a handful)
+//   fl:ids:{ymd}     hash  id -> 1              ids recorded that IST day, so a signal that is still visible after it
+//                                               resolved is not recorded again (expires after 4 days)
+//   fl:done:{YYYY-MM} list entry JSON           resolved entries, one list per month (expires after about 13 months)
+// The cron tick reads fl:open and two small id hashes. Only the stats page reads the monthly lists.
+// fl:entries (the first version: one hash of everything) is migrated once, then deleted.
 
-async function loadAll() {
-  const raw = await store.hgetall(KEY);
-  return Object.values(raw).map(v => { try { return JSON.parse(v); } catch (e) { return null; } }).filter(Boolean);
+const LEGACY_KEY = KEY;
+const OPEN_KEY = 'fl:open';
+const MIGRATED_KEY = 'fl:migrated';
+const IDS_TTL = 4 * 24 * 3600;
+const DONE_TTL = 400 * 24 * 3600;
+const STATS_MONTHS = 6;
+
+const parseJson = v => { try { return JSON.parse(v); } catch (e) { return null; } };
+const monthOf = day => String(day || '').slice(0, 7);
+const idsKey = ymd => `fl:ids:${ymd}`;
+const doneKey = month => `fl:done:${month}`;
+const shiftDay = (ymd, delta) => new Date(Date.parse(`${ymd}T00:00:00Z`) + delta * 86400000).toISOString().slice(0, 10);
+
+/** Storage operations the log needs, over any store with hgetall / hset / pipeline / lrange / get / set / del. */
+function makeRepo(st) {
+  return {
+    async loadOpen() {
+      const raw = await st.hgetall(OPEN_KEY);
+      return Object.values(raw).map(parseJson).filter(Boolean);
+    },
+    async loadSeen(ymds) {
+      const seen = new Set();
+      for (const ymd of ymds) Object.keys(await st.hgetall(idsKey(ymd))).forEach(id => seen.add(id));
+      return seen;
+    },
+    async putOpen(entry) {
+      await st.hset(OPEN_KEY, entry.id, JSON.stringify(entry));
+    },
+    async markSeen(ymd, id) {
+      await st.pipeline([['HSET', idsKey(ymd), id, '1'], ['EXPIRE', idsKey(ymd), IDS_TTL]]);
+    },
+    /** Move an entry from the open set to its month's resolved list (one round trip). */
+    async resolve(entry) {
+      const key = doneKey(monthOf(entry.day));
+      await st.pipeline([['HDEL', OPEN_KEY, entry.id], ['RPUSH', key, JSON.stringify(entry)], ['EXPIRE', key, DONE_TTL]]);
+    },
+    async loadResolved(months = STATS_MONTHS, nowMs = Date.now()) {
+      const out = [];
+      const seen = new Set();
+      const d = new Date(nowMs);
+      for (let i = 0; i < months; i++) {
+        const m = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1)).toISOString().slice(0, 7);
+        for (const row of await st.lrange(doneKey(m), 0, -1)) {
+          const e = parseJson(row);
+          if (e && !seen.has(e.id)) { seen.add(e.id); out.push(e); }
+        }
+      }
+      return out;
+    },
+    /** One-time move from the first storage layout. Safe to call repeatedly; returns how many entries moved. */
+    async migrateLegacy(nowMs = Date.now()) {
+      if (await st.get(MIGRATED_KEY)) return 0;
+      const legacy = Object.values(await st.hgetall(LEGACY_KEY)).map(parseJson).filter(Boolean);
+      const today = new Date(nowMs + 330 * 60000).toISOString().slice(0, 10);
+      for (const e of legacy) {
+        if (e.status === 'open') await this.putOpen(e);
+        else {
+          const key = doneKey(monthOf(e.day));
+          await st.pipeline([['RPUSH', key, JSON.stringify(e)], ['EXPIRE', key, DONE_TTL]]);
+        }
+        if (e.day && e.day >= shiftDay(today, -1)) await this.markSeen(e.day, e.id); // recent ids must not be recorded twice
+      }
+      await st.set(MIGRATED_KEY, '1');
+      if (legacy.length) await st.del(LEGACY_KEY);
+      return legacy.length;
+    }
+  };
 }
+
+let defaultRepo = null;
+const getRepo = () => (defaultRepo = defaultRepo || makeRepo(store));
+let migratedOnce = false;
 
 /**
  * Called after each cron snapshot with the analyses for the intervals we track ({ '5m': analysis, '15m': analysis }).
  * Records new confirmed signals and zones, then scores everything still open. Returns counts.
  */
-async function tick(analyses, { now = Date.now(), open = true, load = loadAll, save = (e) => store.hset(KEY, e.id, JSON.stringify(e)) } = {}) {
-  const existing = new Map((await load()).map(e => [e.id, e]));
-  const writes = new Map();
-  let recorded = 0, resolved = 0;
+async function tick(analyses, { now = Date.now(), open = true, repo = getRepo() } = {}) {
+  if (!migratedOnce || repo !== defaultRepo) { await repo.migrateLegacy(now); if (repo === defaultRepo) migratedOnce = true; }
+  const today = new Date(now + 330 * 60000).toISOString().slice(0, 10);
+  const tracked = new Map((await repo.loadOpen()).map(e => [e.id, e]));
+  const seen = await repo.loadSeen([today, shiftDay(today, -1)]);
+  const fresh = new Map(); // newly recorded this tick
+  let recorded = 0, resolved = 0, written = 0;
 
+  const consider = e => {
+    if (!tracked.has(e.id) && !fresh.has(e.id) && !seen.has(e.id)) { fresh.set(e.id, e); recorded += 1; }
+  };
   for (const [interval, a] of Object.entries(analyses)) {
     if (!a || !a.candles || !a.candles.length) continue;
     const lastBar = a.candles[a.candles.length - 1];
-    const fresh = open && a.feed && !a.feed.stale && a.feed.source === 'yahoo' && now - (lastBar.t + BAR_MS[interval]) < 15 * 60000;
-    if (fresh) {
-      for (const sig of a.signals || []) {
-        if (!sig.confirmed || sig.state === 'invalidated') continue;
-        if (now - sig.t > MAX_SIGNAL_AGE_MS) continue;
-        const e = signalEntry(sig, interval, now);
-        if (!existing.has(e.id) && !writes.has(e.id)) { writes.set(e.id, e); recorded += 1; }
-      }
-      if (interval === '5m') { // zones do not depend on the timeframe; record them once
-        for (const z of a.actionZones || []) {
-          const e = zoneEntry(z, interval, lastBar.t, now, a.atr || 0, a.tolerance || Math.max((a.spot || 0) * 0.0012, (a.atr || 0) * 0.25));
-          if (!(e.atr > 0)) continue;
-          if (!existing.has(e.id) && !writes.has(e.id)) { writes.set(e.id, e); recorded += 1; }
-        }
+    const isFresh = open && a.feed && !a.feed.stale && a.feed.source === 'yahoo' && now - (lastBar.t + BAR_MS[interval]) < 15 * 60000;
+    if (!isFresh) continue;
+    for (const sig of a.signals || []) {
+      if (!sig.confirmed || sig.state === 'invalidated') continue;
+      if (now - sig.t > MAX_SIGNAL_AGE_MS) continue;
+      consider(signalEntry(sig, interval, now));
+    }
+    if (interval === '5m') { // zones do not depend on the timeframe; record them once
+      for (const z of a.actionZones || []) {
+        const e = zoneEntry(z, interval, lastBar.t, now, a.atr || 0, a.tolerance || Math.max((a.spot || 0) * 0.0012, (a.atr || 0) * 0.25));
+        if (e.atr > 0) consider(e);
       }
     }
   }
 
-  const all = new Map([...existing, ...writes]);
-  for (const e of all.values()) {
-    if (e.status !== 'open') continue;
+  for (const e of fresh.values()) { await repo.markSeen(e.day, e.id); written += 1; }
+  for (const e of [...tracked.values(), ...fresh.values()]) {
     const a = analyses[e.interval];
-    if (!a || !a.candles || !a.candles.length) continue;
-    const next = resolveEntry(e, a.candles);
-    if (JSON.stringify(next) !== JSON.stringify(e)) {
-      writes.set(e.id, next);
-      if (next.status === 'resolved') resolved += 1;
-    }
+    const next = a && a.candles && a.candles.length ? resolveEntry(e, a.candles) : e;
+    if (next.status === 'resolved') { await repo.resolve(next); resolved += 1; written += 1; }
+    else if (fresh.has(e.id) || JSON.stringify(next) !== JSON.stringify(e)) { await repo.putOpen(next); written += 1; }
   }
-
-  for (const e of writes.values()) await save(e);
-  return { recorded, resolved, written: writes.size };
+  return { recorded, resolved, written };
 }
 
 /** Everything the page needs: stats, still-open entries and the most recent outcomes. */
-async function getLog(load = loadAll) {
-  const entries = await load();
+async function getLog({ repo = getRepo(), now = Date.now() } = {}) {
+  await repo.migrateLegacy(now);
+  const entries = [...await repo.loadOpen(), ...await repo.loadResolved(STATS_MONTHS, now)];
   entries.sort((a, b) => b.t - a.t);
   return {
     since: entries.length ? Math.min(...entries.map(e => e.recordedAt || e.t)) : null,
@@ -312,4 +386,4 @@ async function run(d, { timeoutMs = 4500 } = {}) {
 }
 
 module.exports = {
-  run, KEY, WAIT, HORIZON, WIN_R, MIN_SAMPLES, signalEntry, zoneEntry, resolveSignal, resolveZone, resolveEntry, computeStats, winStats, holdStats, tick, getLog, configured: store.configured };
+  run, makeRepo, OPEN_KEY, KEY, WAIT, HORIZON, WIN_R, MIN_SAMPLES, signalEntry, zoneEntry, resolveSignal, resolveZone, resolveEntry, computeStats, winStats, holdStats, tick, getLog, configured: store.configured };

@@ -1,5 +1,5 @@
 import { initAlerts, processAlerts, toggleAlertsDrawer, alertsEnabled } from './alerts.js';
-import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData, fetchParticipantData } from './api-client.js';
+import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData, fetchParticipantData, fetchCalendar } from './api-client.js';
 import { initExplain } from './explain.js';
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
@@ -34,7 +34,10 @@ let intradayExpiry = null;
 let timelineMetric = 'pcr';
 let oiChartMode = 'oi';
 try { oiChartMode = localStorage.getItem('oiChartMode') || 'oi'; } catch (e) { /* storage unavailable */ }
-const INTRADAY_REFRESH_MS = 30000;
+// The recorder saves one point a minute, so polling faster than that only re-reads the same data (and every poll costs
+// Upstash commands on the free tier). Nothing changes after the close, so it backs off then.
+const INTRADAY_REFRESH_OPEN_MS = 60000;
+const INTRADAY_REFRESH_CLOSED_MS = 10 * 60000;
 
 // NSE participant-wise OI (end of day): fetched on load and every 15 minutes
 let participantDays = null;
@@ -50,7 +53,9 @@ const METRIC_LABELS = {
 async function refreshIntraday(force = false) {
   const expiry = currentData && currentData.expiry;
   if (!expiry) return;
-  const stale = Date.now() - intradayFetchedAt > INTRADAY_REFRESH_MS;
+  if (!force && document.hidden) return; // a background tab does not need fresh history
+  const maxAge = isMarketOpen() ? INTRADAY_REFRESH_OPEN_MS : INTRADAY_REFRESH_CLOSED_MS;
+  const stale = Date.now() - intradayFetchedAt > maxAge;
   if (!force && !stale && intradayExpiry === expiry) return;
   intradayFetchedAt = Date.now();
   intradayExpiry = expiry;
@@ -618,6 +623,8 @@ export function renderAll() {
     if (lowerB) lowerB.textContent = fmt(Math.round(sd.lowerRange));
     const upperB = document.getElementById('straddleUpperBound');
     if (upperB) upperB.textContent = fmt(Math.round(sd.upperRange));
+    const sigmaB = document.getElementById('straddleSigmaBounds');
+    if (sigmaB) sigmaB.textContent = Number.isFinite(sd.oneSigmaLower) ? `${fmt(Math.round(sd.oneSigmaLower))} - ${fmt(Math.round(sd.oneSigmaUpper))}` : 'n/a';
 
     const decayBadge = document.getElementById('straddleDecayBadge');
     if (decayBadge) {
@@ -1293,12 +1300,24 @@ function renderSortIndicator() {
   });
 }
 
+// NSE trading holidays (YYYY-MM-DD), loaded from /api/calendar. Until they arrive, only weekends count as closed.
+let nseHolidays = new Set();
+
 function isMarketOpen() {
-  // NSE cash hours: Mon-Fri 09:15-15:30 IST (with a small buffer)
+  // NSE cash hours: Mon-Fri 09:15-15:30 IST, minus NSE holidays (with a small buffer)
   const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
   const day = ist.getDay();
+  const ymd = `${ist.getFullYear()}-${String(ist.getMonth() + 1).padStart(2, '0')}-${String(ist.getDate()).padStart(2, '0')}`;
   const mins = ist.getHours() * 60 + ist.getMinutes();
-  return day >= 1 && day <= 5 && mins >= 9 * 60 + 10 && mins <= 15 * 60 + 40;
+  return day >= 1 && day <= 5 && !nseHolidays.has(ymd) && mins >= 9 * 60 + 10 && mins <= 15 * 60 + 40;
+}
+
+async function loadCalendar() {
+  try {
+    nseHolidays = new Set(await fetchCalendar());
+  } catch (e) {
+    console.error('Holiday calendar fetch failed (weekends only until it loads):', e);
+  }
 }
 
 function scheduleNext() {
@@ -1849,6 +1868,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initAlerts();
   initStrikePanel();
   initExplain();
+  loadCalendar();
   onChartData(() => { if (currentData) renderFlowFeed(currentData); });
   initPriceChart({ getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null });
   window.addEventListener('strike-click', e => openStrike(e.detail));

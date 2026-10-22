@@ -57,20 +57,29 @@ function validateRaw(raw, prev = null, now = Date.now()) {
   const spot = spotOf(raw);
   if (!finiteNum(spot) || spot < MIN_SPOT || spot > MAX_SPOT) reasons.push(`implausible spot ${spot}`);
 
-  let bad = 0, empty = 0;
+  // Every numeric field the app later uses (and, for the table, writes into HTML) must really be a number: a string here
+  // would flow through the maths and into the page unescaped.
+  const NON_NEGATIVE = new Set(['openInterest', 'totalTradedVolume', 'lastPrice', 'impliedVolatility']);
+  const LEG_FIELDS = ['openInterest', 'totalTradedVolume', 'changeinOpenInterest', 'lastPrice', 'impliedVolatility', 'underlyingValue', 'change'];
+  let bad = 0, empty = 0, badStrike = 0, badExpiry = 0;
   for (const r of rec.data) {
+    if (!finiteNum(r.strikePrice) || r.strikePrice <= 0) badStrike += 1;
+    const ex = r.expiryDate !== undefined ? r.expiryDate : r.expiryDates;
+    if (ex !== undefined && !(typeof ex === 'string' && /^\d{2}-[A-Za-z]{3}-\d{4}$/.test(ex))) badExpiry += 1;
     if (!r.CE && !r.PE) { empty += 1; continue; }
     for (const leg of [r.CE, r.PE]) {
       if (!leg) continue;
-      for (const f of ['openInterest', 'totalTradedVolume', 'changeinOpenInterest', 'lastPrice']) {
+      for (const f of LEG_FIELDS) {
         const v = leg[f];
         if (v === undefined || v === null) continue;
         if (!finiteNum(v)) bad += 1;
-        else if ((f === 'openInterest' || f === 'totalTradedVolume' || f === 'lastPrice') && v < 0) bad += 1;
+        else if (NON_NEGATIVE.has(f) && v < 0) bad += 1;
       }
     }
   }
   if (bad) reasons.push(`${bad} non-numeric or negative values`);
+  if (badStrike) reasons.push(`${badStrike} rows with an invalid strike price`);
+  if (badExpiry) reasons.push(`${badExpiry} rows with a malformed expiry date`);
   if (rec.data.length && empty / rec.data.length > 0.2) reasons.push('many rows with no quotes');
 
   const ts = parseNseTs(rec.timestamp);

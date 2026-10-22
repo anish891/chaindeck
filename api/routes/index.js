@@ -7,12 +7,14 @@ const forwardLog = require('../services/forwardlog');
 const { withRetry } = require('../services/retry');
 const integrity = require('../services/integrity');
 const { istNow } = require('../services/market');
-const { fetchRawNSEOptionChain } = require('../services/nse');
-const { rateLimit, requireSecret, isValidExpiry, isValidDate, sendError } = require('../security');
+const { fetchRawNSEOptionChain, refreshHolidays, staleReasonCode } = require('../services/nse');
+const calendar = require('../services/calendar');
+const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../security');
 const {
   processOptionChainData,
   extractFeatureVector,
-  computeCosineSimilarity,
+  computeSessionSimilarities,
+  readableSessions,
   getCacheData
 } = require('../services/analytics');
 
@@ -21,8 +23,9 @@ const HISTORY_CACHE = 'public, s-maxage=10, stale-while-revalidate=20';
 const strictLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'sensitive' });
 
 router.get('/option-chain', async (req, res) => {
+  refreshHolidays().catch(() => {}); // cheap: at most one NSE call a day, never blocks or throws
   const { expiry } = req.query;
-  if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
+  if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
     const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
@@ -36,7 +39,7 @@ router.get('/option-chain', async (req, res) => {
       checks = [{ id: 'integrity_engine', group: 'Option chain', label: 'Integrity checks ran', level: 'fail', detail: 'the verification step itself errored' }];
     }
     // feed: when we last got this from NSE, whether it is a leftover copy served after a failed refresh, and why
-    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? String(staleReason || '').slice(0, 160) : null }, integrity: { checks } } });
+    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? staleReasonCode(staleReason) : null }, integrity: { checks } } });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
     return sendError(res, 502, 'Error fetching option chain', err);
@@ -46,8 +49,8 @@ router.get('/option-chain', async (req, res) => {
 // Intraday series + baseline strike snapshots (5m / 15m / 30m earlier, and the open)
 router.get('/intraday', async (req, res) => {
   const { expiry, date } = req.query;
-  if (!isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry (DD-Mon-YYYY) is required.' });
-  if (date !== undefined && !isValidDate(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD.' });
+  if (!isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry (DD-Mon-YYYY) is required.' });
+  if (date !== undefined && !isRecentDate(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD.' });
   try {
     const data = await history.getIntraday(expiry, date || null);
     res.set('Cache-Control', HISTORY_CACHE);
@@ -63,7 +66,7 @@ router.get('/chart-analysis', async (req, res) => {
   const interval = req.query.interval || '5m';
   const { expiry } = req.query;
   if (!CHART_INTERVALS.has(interval)) return res.status(400).json({ ok: false, error: 'interval must be 5m, 15m or 1d.' });
-  if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
+  if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
     // Stored spot history is only read if Yahoo is down (it is a fallback; reading it every time cost a storage round trip).
     const fallbackPoints = expiry && interval !== '1d' ? async () => (await history.getIntraday(expiry)).points : null;
@@ -99,14 +102,38 @@ router.get('/level-scorecard', async (req, res) => {
   }
 });
 
+// NSE trading holidays, so the page and the server agree on when the market is closed. Refreshed from NSE at most daily.
+router.get('/calendar', async (req, res) => {
+  try {
+    await refreshHolidays();
+    res.set('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
+    res.json({ ok: true, ...calendar.snapshot() });
+  } catch (err) {
+    return sendError(res, 500, 'Error reading calendar', err);
+  }
+});
+
+// For an uptime monitor: HTTP 503 when the per-minute recorder has stopped during market hours, so a failing cron job
+// raises an alert instead of waiting to be noticed. Reveals only the age of the last snapshot, nothing else.
+router.get('/snapshot-age', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!history.configured) return res.json({ ok: true, persistent: false });
+  try {
+    const health = history.snapshotHealth(await history.getLastSnapshotMs());
+    return res.status(health.healthy ? 200 : 503).json({ ok: health.healthy, persistent: true, ...health });
+  } catch (err) {
+    return sendError(res, 500, 'Error reading snapshot age', err);
+  }
+});
+
 // One strike across the day (sampled)
 router.get('/strike-history', async (req, res) => {
   const { expiry, date } = req.query;
   const strike = Number(req.query.strike);
-  if (!isValidExpiry(expiry) || !Number.isInteger(strike) || strike <= 0 || strike > 1000000) {
+  if (!isPlausibleExpiry(expiry) || !Number.isInteger(strike) || strike <= 0 || strike > 1000000) {
     return res.status(400).json({ ok: false, error: 'expiry (DD-Mon-YYYY) and an integer strike are required.' });
   }
-  if (date !== undefined && !isValidDate(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD.' });
+  if (date !== undefined && !isRecentDate(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD.' });
   try {
     const data = await history.getStrikeHistory(expiry, strike, date || null);
     res.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=60');
@@ -135,8 +162,9 @@ router.get('/storage-status', (req, res) => {
 // Records a snapshot even when nobody has the page open. Point an external pinger at it during market hours
 // with `Authorization: Bearer <CRON_SECRET>` (the secret is never accepted in the URL).
 async function cronSnapshot(req, res) {
+  await refreshHolidays(); // keep the holiday list current even when nobody has the page open
   const { expiry } = req.query;
-  if (expiry !== undefined && !isValidExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
+  if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
     // NSE sometimes rejects a cold request (fast 401/403 or a timeout) and answers a moment later, so try a few times.
     const { raw, allExpiries, targetExpiry, stale: cronStale } = await withRetry(
@@ -202,17 +230,16 @@ router.get('/similar-sessions', async (req, res) => {
       });
     }
 
-    const scored = pastSessions.map(sess => {
-      const vec = typeof sess.feature_vector === 'string' ? JSON.parse(sess.feature_vector) : sess.feature_vector;
-      const sim = computeCosineSimilarity(currentVector, vec);
-      return {
-        date: sess.date,
-        similarityPct: Number((sim * 100).toFixed(1)),
-        closingPcr: sess.closing_pcr,
-        gexRegime: sess.gex_regime,
-        cprWidthType: sess.cpr_width_type
-      };
-    });
+    // BUG-004: one corrupt stored record must not take the whole endpoint down, so unreadable vectors are skipped.
+    const readable = readableSessions(pastSessions);
+    const sims = computeSessionSimilarities(currentVector, readable.map(r => r.vec));
+    const scored = readable.map(({ sess }, i) => ({
+      date: sess.date,
+      similarityPct: Number(sims[i].toFixed(1)),
+      closingPcr: sess.closing_pcr,
+      gexRegime: sess.gex_regime,
+      cprWidthType: sess.cpr_width_type
+    }));
 
     scored.sort((a, b) => b.similarityPct - a.similarityPct);
 

@@ -87,6 +87,14 @@ async function memCmd(args) {
       return e.value.slice(start, stop === -1 ? undefined : stop + 1);
     }
     case 'EXPIRE': memExpire(key, Number(rest[0])); return 1;
+    case 'DEL': { let n = 0; rest.concat(key).forEach(k => { if (mem.delete(k)) n += 1; }); return n; }
+    case 'HDEL': {
+      const e = memGet(key, 'hash');
+      if (!e) return 0;
+      let n = 0;
+      rest.forEach(f => { if (e.value.delete(String(f))) n += 1; });
+      return n;
+    }
     case 'HSET': {
       let e = memGet(key, 'hash');
       if (!e) { e = { type: 'hash', value: new Map(), exp: 0 }; mem.set(key, e); }
@@ -122,6 +130,15 @@ module.exports = {
   },
   async lrange(key, start = 0, stop = -1) {
     return cmd(['LRANGE', key, start, stop]);
+  },
+  async del(key) {
+    return cmd(['DEL', key]);
+  },
+  async hdel(key, field) {
+    return cmd(['HDEL', key, String(field)]);
+  },
+  async expire(key, ttlSec) {
+    return cmd(['EXPIRE', key, ttlSec]);
   },
   async hset(key, field, value) {
     return cmd(['HSET', key, field, String(value)]);

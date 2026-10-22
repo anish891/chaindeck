@@ -46,7 +46,7 @@ z-score). Only back-to-back snapshots are compared, so gaps in the data do not r
 | **Key Levels** | Max pain, the largest call and put OI strikes with their share of total OI, and the top three call and put walls |
 | **Central Pivot Range** | Pivot, top and bottom CPR, CPR width and type (narrow, normal or wide), and R1, R2, S1, S2 from the previous session's real high, low and close |
 | **Gamma Exposure (GEX)** | Net dealer gamma exposure in crores per 1% move, call and put GEX, the gamma regime and the zero-gamma level with its distance from spot |
-| **Sessions That Looked Like Today** | The closest past sessions by PCR, gamma regime, CPR width, IV skew and OI change, with a similarity score |
+| **Sessions That Looked Like Today** | The closest past sessions by PCR, gamma regime, CPR width, IV skew and OI change, with a similarity score (each difference is measured in units of that feature's typical spread, so a large PCR change really lowers the match) |
 
 ---
 
@@ -243,6 +243,17 @@ traders read it, with an English and हिन्दी toggle. The language cho
 
 ---
 
+## Operations
+
+- **Requirements:** Node 22 or newer. `npm test` runs the whole suite (no network or storage needed) and CI runs it on every push (`.github/workflows/ci.yml`).
+- **Per-minute recorder:** point cron-job.org (or similar) at `/api/cron/snapshot` with `Authorization: Bearer <CRON_SECRET>` during market hours.
+- **Is the recorder alive?** `GET /api/snapshot-age` returns HTTP 503 when the last saved snapshot is more than 5 minutes old during market hours, and 200 otherwise. Point an uptime monitor at it to be alerted when the cron job stops. It reveals only that age.
+- **NSE holidays:** the list comes from NSE's holiday master (refreshed at most daily, falling back to a built-in 2026 list), so holidays are treated as closed everywhere: the market-hours checks, time to expiry and the trust light.
+- **Storage:** with Upstash configured, history uses roughly 5 to 7 commands a minute from the recorder, plus about 6 per open dashboard per minute. The free plan allows 500K commands a month, so check usage in the Upstash dashboard if you leave several tabs open all day.
+- **Data sources and use:** option data comes from NSE's public website API and candles from Yahoo Finance's chart endpoint. Both are unofficial and subject to the providers' terms; this project is for personal analysis, is not investment advice, and should not be offered as a paid or public service without licensed data and the appropriate registrations.
+
+---
+
 ## Data and how it is calculated
 
 ### Sources
@@ -264,8 +275,10 @@ minute OI views, rate-of-change figures that survive a page refresh, and the str
 session is saved after the close for "Sessions That Looked Like Today", the volatility regime and the IV percentile.
 
 ### Methods
-- **Expected move:** about 0.85 times the ATM straddle, as a one-standard-deviation move to expiry, scaled by the
-  square root of trading days for a per-day figure.
+- **Expected move:** 0.85 times the ATM straddle (the common broker rule of thumb), scaled by the square root of
+  trading days for a per-day figure. That is about 0.68 standard deviations, so price stays inside it only about half
+  the time. The true one-standard-deviation range is the straddle divided by sqrt(2/pi), about 1.25 times the straddle,
+  and is shown separately as the 1σ range (about two times out of three).
 - **Time to expiry:** measured from when NSE quoted the prices to 15:30 IST on expiry day, so Greeks, GEX, the
   zero-gamma level and the implied distribution stay consistent with the quotes after hours and over weekends.
 - **Implied future:** put-call parity at the ATM strike.

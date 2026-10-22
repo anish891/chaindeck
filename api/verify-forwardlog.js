@@ -122,41 +122,108 @@ const flatBar = (i, p = 24290) => c(i, p, p + 4, p - 4, p);
   function r(n) { return Math.round(n * 100) / 100; }
 }
 
+// ── storage: a fake store that implements exactly what makeRepo uses, and counts reads ──
+function fakeStore() {
+  const hashes = new Map(), lists = new Map(), strings = new Map();
+  const reads = { hgetall: [], lrange: [] };
+  const h = k => hashes.get(k) || hashes.set(k, new Map()).get(k);
+  const exec = ([cmd, key, ...rest]) => {
+    switch (cmd) {
+      case 'HSET': h(key).set(String(rest[0]), String(rest[1])); return 1;
+      case 'HDEL': return hashes.has(key) && h(key).delete(String(rest[0])) ? 1 : 0;
+      case 'RPUSH': { const l = lists.get(key) || lists.set(key, []).get(key); l.push(String(rest[0])); return l.length; }
+      case 'EXPIRE': return 1;
+      default: throw new Error('unsupported ' + cmd);
+    }
+  };
+  return {
+    hashes, lists, strings, reads,
+    async hgetall(k) { reads.hgetall.push(k); return Object.fromEntries(hashes.get(k) || []); },
+    async hset(k, f, v) { return exec(['HSET', k, f, v]); },
+    async lrange(k) { reads.lrange.push(k); return [...(lists.get(k) || [])]; },
+    async pipeline(cmds) { return cmds.map(exec); },
+    async get(k) { return strings.has(k) ? strings.get(k) : null; },
+    async set(k, v) { strings.set(k, String(v)); return 'OK'; },
+    async del(k) { hashes.delete(k); lists.delete(k); strings.delete(k); return 1; }
+  };
+}
+
 // ── tick: records only fresh, confirmed things, once; then scores them ──
 (async () => {
-  const store = new Map();
-  const load = async () => [...store.values()].map(e => JSON.parse(JSON.stringify(e)));
-  const save = async e => { store.set(e.id, e); };
-  const now = t0 + 6 * bar; // 09:45 IST
+  const st = fakeStore();
+  const repo = F.makeRepo(st);
+  const now = t0 + 6 * bar; // 09:45 IST on 2026-10-12
   const candles = [sig0, c(1, 24298, 24305, 24290, 24302), c(2, 24302, 24320, 24300, 24318), c(3, 24318, 24345, 24316, 24340), c(4, 24340, 24344, 24330, 24338), c(5, 24338, 24342, 24330, 24335)];
   const mkSig = (over = {}) => ({ pattern: 'hammer', label: 'Hammer', t: t0, dir: 'bull', score: 80, grade: 'strong', confirmed: true, state: 'waiting', families: ['price', 'level', 'options'], trigger: 24300, invalidation: 24260, target: 24400, history: { verdict: 'none' }, ...over });
   const analysis = (over = {}) => ({ candles, feed: { stale: false, source: 'yahoo' }, spot: 24335, atr: 30, tolerance: 20, signals: [mkSig(), mkSig({ pattern: 'doji', confirmed: false }), mkSig({ pattern: 'old', t: t0 - 3 * 3600000 })], actionZones: [{ side: 'buy', low: 24200, high: 24210, mid: 24205, strength: 70, families: ['level', 'options'] }], zones: [], ...over });
+  const doneEntries = () => [...st.lists.values()].flat().map(JSON.parse);
+  const openEntries = () => [...(st.hashes.get(F.OPEN_KEY) || new Map()).values()].map(JSON.parse);
 
-  let res = await F.tick({ '5m': analysis() }, { now, load, save });
+  let res = await F.tick({ '5m': analysis() }, { now, repo });
   assert.strictEqual(res.recorded, 2, 'one confirmed fresh signal and one zone; unconfirmed and old signals are ignored');
-  assert.strictEqual([...store.values()].filter(e => e.kind === 'signal').length, 1);
-  const sigEntry = [...store.values()].find(e => e.kind === 'signal');
-  assert.strictEqual(sigEntry.status, 'resolved', 'the same tick scores it against the candles already available');
-  assert.strictEqual(sigEntry.outcome, 'win');
+  const sigEntry = doneEntries().find(e => e.kind === 'signal');
+  assert.ok(sigEntry && sigEntry.status === 'resolved' && sigEntry.outcome === 'win', 'scored in the same tick against the candles already available');
   assert.strictEqual(res.resolved, 1);
+  assert.deepStrictEqual(openEntries().map(e => e.kind), ['zone'], 'the signal left the open set; the still-running zone stays');
+  assert.ok(st.lists.has('fl:done:2026-10'), 'resolved entries are filed by month');
 
-  res = await F.tick({ '5m': analysis() }, { now, load, save });
-  assert.strictEqual(res.recorded, 0, 'idempotent: the same signal is never recorded twice');
+  res = await F.tick({ '5m': analysis() }, { now, repo });
+  assert.strictEqual(res.recorded, 0, 'idempotent: a signal that already resolved is not recorded again while it is still on screen');
   assert.strictEqual(res.written, 0, 'and nothing is rewritten when nothing changed');
+  assert.strictEqual(doneEntries().length, 1);
+
+  // an open entry is only rewritten when it changes, and moves to the monthly list the moment it resolves
+  const zoneOpen = openEntries()[0];
+  const tomorrowCandles = [...candles, { t: t0 + 86400000, o: 24300, h: 24310, l: 24290, c: 24300, v: 1 }];
+  res = await F.tick({ '5m': analysis({ candles: tomorrowCandles, actionZones: [] }) }, { now: now + 60000, repo });
+  assert.strictEqual(res.resolved, 1, 'the zone resolves once the next day arrives');
+  assert.strictEqual(openEntries().length, 0);
+  assert.ok(doneEntries().some(e => e.id === zoneOpen.id && e.status === 'resolved'));
 
   // stale or non-Yahoo data never creates entries
-  store.clear();
-  assert.strictEqual((await F.tick({ '5m': analysis({ feed: { stale: true, source: 'yahoo' } }) }, { now, load, save })).recorded, 0);
-  assert.strictEqual((await F.tick({ '5m': analysis({ feed: { stale: false, source: 'stored' } }) }, { now, load, save })).recorded, 0);
-  assert.strictEqual((await F.tick({ '5m': analysis() }, { now, load, save, open: false })).recorded, 0, 'nothing is recorded outside market hours');
-  assert.strictEqual((await F.tick({ '5m': analysis() }, { now: now + 40 * 60000, load, save })).recorded, 0, 'a lagging last bar (over 15 minutes behind) is not fresh');
+  const st2 = fakeStore(), repo2 = F.makeRepo(st2);
+  assert.strictEqual((await F.tick({ '5m': analysis({ feed: { stale: true, source: 'yahoo' } }) }, { now, repo: repo2 })).recorded, 0);
+  assert.strictEqual((await F.tick({ '5m': analysis({ feed: { stale: false, source: 'stored' } }) }, { now, repo: repo2 })).recorded, 0);
+  assert.strictEqual((await F.tick({ '5m': analysis() }, { now, repo: repo2, open: false })).recorded, 0, 'nothing is recorded outside market hours');
+  assert.strictEqual((await F.tick({ '5m': analysis() }, { now: now + 40 * 60000, repo: repo2 })).recorded, 0, 'a lagging last bar (over 15 minutes behind) is not fresh');
 
-  // log summary
-  const seeded = [{ ...sigEntry, id: 'a', t: t0 }, { ...sigEntry, id: 'b', t: t0 + bar, status: 'open', outcome: undefined }];
-  const log = await F.getLog(async () => seeded);
-  assert.strictEqual(log.stats.signals.recorded, 2);
-  assert.strictEqual(log.open.length, 1);
-  assert.strictEqual(log.recent.length, 1);
+  // log summary reads open entries plus the monthly lists
+  const log = await F.getLog({ repo, now });
+  assert.strictEqual(log.stats.signals.recorded, 1);
+  assert.strictEqual(log.stats.zones.recorded, 1);
+  assert.ok(log.recent.some(e => e.kind === 'signal' && e.outcome === 'win'));
+
+  // ── ARCH-001: the per-minute tick does not read history, however much there is ──
+  {
+    const big = fakeStore(), bigRepo = F.makeRepo(big);
+    const old = JSON.stringify({ id: 'x', kind: 'signal', status: 'resolved', outcome: 'win', day: '2026-09-10', t: 1 });
+    big.lists.set('fl:done:2026-09', Array.from({ length: 5000 }, (_, i) => old.replace('"x"', `"x${i}"`)));
+    big.strings.set('fl:migrated', '1');
+    await F.tick({ '5m': analysis() }, { now, repo: bigRepo });
+    assert.deepStrictEqual(big.reads.lrange, [], 'a tick never reads the resolved lists');
+    assert.ok(big.reads.hgetall.every(k => k === F.OPEN_KEY || k.startsWith('fl:ids:')), `tick reads only the open set and id hashes: ${big.reads.hgetall}`);
+    assert.ok(!big.reads.hgetall.includes('fl:entries'), 'the legacy all-entries hash is not read after migration');
+  }
+
+  // ── migration from the first layout (one hash of everything) ──
+  {
+    const m = fakeStore(), mRepo = F.makeRepo(m);
+    const legacy = {
+      a: { id: 'a', kind: 'signal', status: 'resolved', outcome: 'loss', day: '2026-10-12', t: t0, recordedAt: t0, families: ['price', 'level'] },
+      b: { id: 'b', kind: 'zone', status: 'open', day: '2026-10-12', t: t0, interval: '5m', side: 'buy', low: 1, high: 2, mid: 1.5, atr: 5, tol: 1, families: ['level', 'options'] },
+      c: { id: 'c', kind: 'signal', status: 'resolved', outcome: 'win', day: '2026-02-01', t: 5, recordedAt: 5, families: ['price'] }
+    };
+    m.hashes.set('fl:entries', new Map(Object.entries(legacy).map(([k, v]) => [k, JSON.stringify(v)])));
+    const moved = await mRepo.migrateLegacy(now);
+    assert.strictEqual(moved, 3);
+    assert.deepStrictEqual((await mRepo.loadOpen()).map(e => e.id), ['b']);
+    const resolved = await mRepo.loadResolved(6, now);
+    assert.deepStrictEqual(resolved.map(e => e.id).sort(), ['a'], 'months older than the window are filed but outside the 6-month read');
+    assert.ok(m.lists.has('fl:done:2026-02'), 'older entries are still stored, by month');
+    assert.ok((await mRepo.loadSeen(['2026-10-12'])).has('a'), 'recent ids are marked seen so they are not recorded twice');
+    assert.ok(!m.hashes.has('fl:entries'), 'the legacy hash is deleted after a successful migration');
+    assert.strictEqual(await mRepo.migrateLegacy(now), 0, 'and it runs only once');
+  }
 
   console.log('forward log checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

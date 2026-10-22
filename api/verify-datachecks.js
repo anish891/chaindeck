@@ -32,8 +32,8 @@ const path = require('path');
   assert.ok(r.reasons.length && /current/.test(r.reasons[0]));
 
   // leftover copy is blocking and says why
-  r = M.evaluateTrust(base({ chain: { d, ageSec: 30, stale: true, staleReason: 'NSE payload rejected: spot jumped', integrity: serverOk } }));
-  assert.strictEqual(by(r).nse_stale_copy.level, 'fail'); assert.ok(/rejected/.test(by(r).nse_stale_copy.detail)); assert.strictEqual(r.blocking, true);
+  r = M.evaluateTrust(base({ chain: { d, ageSec: 30, stale: true, staleReason: 'payload_rejected', integrity: serverOk } }));
+  assert.strictEqual(by(r).nse_stale_copy.level, 'fail'); assert.ok(/failed validation/.test(by(r).nse_stale_copy.detail)); assert.strictEqual(r.blocking, true);
 
   // after the close a leftover copy is expected: warning only, nothing pauses
   r = M.evaluateTrust(base({ marketOpen: false, chain: { d, ageSec: 30, stale: true, staleReason: 'timeout', integrity: serverOk } }));

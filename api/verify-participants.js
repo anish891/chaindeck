@@ -39,3 +39,32 @@ assert(dates.every(d => ![0, 6].includes(new Date(d + 'T00:00:00Z').getUTCDay())
 assert.strictEqual(dates.length, 15);
 
 console.log('participant OI checks passed');
+
+// BUG-003: malformed numbers fail the file instead of silently becoming 0
+{
+  const bad = csv.replace('291627', 'N/A');
+  assert.strictEqual(parseParticipantCsv(bad), null, 'a non-numeric cell invalidates the file');
+  assert.strictEqual(parseParticipantCsv(csv.replace('291627', '')), null, 'an empty cell invalidates the file');
+  assert.ok(parseParticipantCsv(csv), 'the good file still parses');
+}
+
+// BUG-003: a recent 404 is not remembered forever; an old one is
+(async () => {
+  const { getParticipantHistory, shouldPersistNone } = require('./services/participants');
+  assert.strictEqual(shouldPersistNone('2026-10-22', '2026-10-24'), false, 'two days ago: may just be unpublished or a hiccup');
+  assert.strictEqual(shouldPersistNone('2026-10-20', '2026-10-24'), true, 'four days ago: a holiday');
+  const hash = {};
+  const fakeStore = {
+    hgetall: async () => ({ ...hash }),
+    pipeline: async cmds => { cmds.forEach(([, , d, v]) => { hash[d] = v; }); }
+  };
+  const goodRows = parseParticipantCsv(csv);
+  // 2026-10-23 and 10-22 return 404 (recent); 10-21 and older return data; 10-19 (Mon) is a long-past 404
+  const download = async d => (d >= '2026-10-22' ? { status: 'none' } : d === '2026-10-19' ? { status: 'none' } : { status: 'ok', rows: goodRows });
+  const days = await getParticipantHistory(3, { storeImpl: fakeStore, download, todayYmd: '2026-10-24' });
+  assert.ok(days.length === 3 && days[0].date === '2026-10-21', 'recent 404s are skipped in this response');
+  assert.ok(!('2026-10-23' in hash) && !('2026-10-22' in hash), 'recent 404s are NOT stored');
+  assert.strictEqual(hash['2026-10-19'], 'none', 'a long-past 404 (five days old) is remembered as a holiday');
+  assert.ok(hash['2026-10-21'] && hash['2026-10-21'] !== 'none', 'good days are stored');
+  console.log('participant OI checks passed (fetch rules)');
+})().catch(e => { console.error(e); process.exit(1); });

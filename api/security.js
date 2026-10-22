@@ -110,8 +110,40 @@ function requireSecret(req, res, next) {
 const EXPIRY_RE = /^\d{2}-[A-Za-z]{3}-\d{4}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const DAY_MS = 24 * 3600 * 1000;
+
 const isValidExpiry = s => typeof s === 'string' && s.length === 11 && EXPIRY_RE.test(s);
-const isValidDate = s => typeof s === 'string' && s.length === 10 && DATE_RE.test(s);
+
+/** A real calendar date in YYYY-MM-DD form ('2026-02-31' is rejected, not just badly formatted ones). */
+function isValidDate(s) {
+  if (typeof s !== 'string' || s.length !== 10 || !DATE_RE.test(s)) return false;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+/**
+ * Expiry strings reach storage keys, so beyond the format they must be plausible: a real date inside the window where
+ * option expiries exist (a little in the past for history, about a year ahead). This bounds the key space an anonymous
+ * caller can make the server read.
+ */
+function isPlausibleExpiry(s, now = Date.now()) {
+  if (!isValidExpiry(s)) return false;
+  const m = /^(\d{2})-([A-Za-z]{3})-(\d{4})$/.exec(s);
+  const mi = MONTHS.indexOf(m[2].toLowerCase());
+  if (mi === -1) return false;
+  const t = Date.UTC(Number(m[3]), mi, Number(m[1]));
+  if (new Date(t).getUTCMonth() !== mi) return false; // 31-Feb and friends
+  return t >= now - 45 * DAY_MS && t <= now + 420 * DAY_MS;
+}
+
+/** A real date within the retention window of stored history (about two months back, never in the future). */
+function isRecentDate(s, now = Date.now()) {
+  if (!isValidDate(s)) return false;
+  const t = Date.parse(`${s}T00:00:00Z`);
+  return t >= now - 62 * DAY_MS && t <= now + DAY_MS;
+}
 
 const PUBLIC_ERRORS = {
   400: 'Bad request.',
@@ -136,5 +168,7 @@ module.exports = {
   isProduction,
   isValidExpiry,
   isValidDate,
+  isPlausibleExpiry,
+  isRecentDate,
   sendError
 };

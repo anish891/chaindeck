@@ -1,9 +1,11 @@
+const calendar = require('./calendar');
+
 // Intraday volatility helpers: trading-time IV, realised volatility from the snapshot series,
 // and where today's IV sits against stored session closes.
 //
 // NSE quotes IV on a calendar basis (time to expiry / 365 days). Intraday realised vol only sees
 // minutes when the market is open, so the two are compared on one clock: trading minutes
-// (09:15-15:30 IST, Mon-Fri, 252 days a year). Exchange holidays are not modelled.
+// (09:15-15:30 IST, Mon-Fri excluding NSE holidays, 252 days a year).
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const DAY_MS = 24 * 3600 * 1000;
@@ -26,20 +28,8 @@ function expiryCloseMs(expiry) {
   return Date.UTC(Number(m[3]), month, Number(m[1])) + CLOSE_MIN * 60000 - IST_OFFSET_MS;
 }
 
-/** Minutes of regular NSE session between two instants (weekends skipped, holidays not). */
-function tradingMinutesBetween(fromMs, toMs) {
-  if (!(toMs > fromMs)) return 0;
-  let total = 0;
-  let dayStart = Math.floor((fromMs + IST_OFFSET_MS) / DAY_MS) * DAY_MS - IST_OFFSET_MS; // IST midnight
-  for (; dayStart < toMs; dayStart += DAY_MS) {
-    const dow = new Date(dayStart + IST_OFFSET_MS).getUTCDay();
-    if (dow === 0 || dow === 6) continue;
-    const a = Math.max(dayStart + OPEN_MIN * 60000, fromMs);
-    const b = Math.min(dayStart + CLOSE_MIN * 60000, toMs);
-    if (b > a) total += (b - a) / 60000;
-  }
-  return total;
-}
+/** Minutes of regular NSE session between two instants (weekends and NSE holidays skipped; see calendar.js). */
+const tradingMinutesBetween = calendar.tradingMinutesBetween;
 
 /**
  * Calendar-basis IV (percent) -> trading-time IV (percent): same total variance to expiry,

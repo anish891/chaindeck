@@ -45,10 +45,15 @@ function parseParticipantCsv(text) {
     const who = PARTICIPANTS.find(p => p.toLowerCase() === (cells[0] || '').toLowerCase());
     if (!who) continue;
     const row = {};
+    let bad = false;
     header.forEach((h, i) => {
       const key = COLUMNS[h];
-      if (key) row[key] = Number(cells[i]) || 0;
+      if (!key) return;
+      // A malformed cell makes the whole file unusable. The old code turned it into 0, which silently shows a wrong position.
+      if (!/^-?\d+(\.\d+)?$/.test(cells[i] || '')) { bad = true; return; }
+      row[key] = Number(cells[i]);
     });
+    if (bad) return null;
     out[who] = row;
   }
   return PARTICIPANTS.every(p => out[p]) ? out : null;
@@ -100,15 +105,25 @@ function summarize(row) {
  * The last `count` published trading days, newest first:
  * [{ date, FII: {...}, DII: {...}, Pro: {...}, Client: {...} }]
  */
-async function getParticipantHistory(count = 10) {
-  const { ymd: today } = istNow();
-  const memoKey = `${today}|${count}`;
-  if (memo.value && memo.key === memoKey && Date.now() - memo.ts < MEMO_TTL_MS) return memo.value;
+/**
+ * A 404 for a PAST day is permanent only once enough time has passed that "not published yet" and "CDN hiccup" are ruled
+ * out: NSE publishes the evening of the trading day, so a 404 older than NONE_PERSIST_DAYS means a holiday.
+ */
+const NONE_PERSIST_DAYS = 4;
+function shouldPersistNone(ymd, todayYmd) {
+  const age = (Date.parse(`${todayYmd}T00:00:00Z`) - Date.parse(`${ymd}T00:00:00Z`)) / 86400000;
+  return age >= NONE_PERSIST_DAYS;
+}
 
-  const cached = await store.hgetall(HASH_KEY).catch(() => ({}));
+async function getParticipantHistory(count = 10, { storeImpl = store, download = downloadDay, todayYmd = null } = {}) {
+  const today = todayYmd || istNow().ymd;
+  const memoKey = `${today}|${count}`;
+  if (memo.value && memo.key === memoKey && Date.now() - memo.ts < MEMO_TTL_MS && !todayYmd) return memo.value;
+
+  const cached = await storeImpl.hgetall(HASH_KEY).catch(() => ({}));
   const dates = candidateDates(today);
   const missing = dates.filter(d => !cached[d]);
-  const fetched = await Promise.all(missing.map(async d => [d, await downloadDay(d)]));
+  const fetched = await Promise.all(missing.map(async d => [d, await download(d)]));
 
   const writes = [];
   for (const [d, res] of fetched) {
@@ -116,11 +131,11 @@ async function getParticipantHistory(count = 10) {
       cached[d] = JSON.stringify(res.rows);
       writes.push(['HSET', HASH_KEY, d, cached[d]]);
     } else if (res.status === 'none' && d !== today) {
-      cached[d] = 'none'; // holiday: never published, so stop asking
-      writes.push(['HSET', HASH_KEY, d, 'none']);
+      cached[d] = 'none'; // not published (yet): skip it for this response either way
+      if (shouldPersistNone(d, today)) writes.push(['HSET', HASH_KEY, d, 'none']); // only a long-past 404 is a real holiday
     }
   }
-  if (writes.length) await store.pipeline(writes).catch(err => console.error('participant OI cache write failed:', err.message));
+  if (writes.length) await storeImpl.pipeline(writes).catch(err => console.error('participant OI cache write failed:', err.message));
 
   const days = [];
   for (const d of dates) {
@@ -133,8 +148,8 @@ async function getParticipantHistory(count = 10) {
     days.push(day);
   }
 
-  memo = { ts: Date.now(), key: memoKey, value: days };
+  if (!todayYmd) memo = { ts: Date.now(), key: memoKey, value: days };
   return days;
 }
 
-module.exports = { getParticipantHistory, parseParticipantCsv, candidateDates, summarize, PARTICIPANTS };
+module.exports = { shouldPersistNone, getParticipantHistory, parseParticipantCsv, candidateDates, summarize, PARTICIPANTS };
