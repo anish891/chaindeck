@@ -154,3 +154,19 @@ textarea { resize: vertical; width: 100%; }
   .pt-banner { margin: 12px 16px 0; }
   .pt-field input, .pt-field select { width: 120px; }
 }
+
+/* agent keys */
+.pt-gap { margin-bottom: 10px; line-height: 1.5; }
+.pt-newkey { margin-top: 12px; padding: 12px; border: 1px solid var(--warn); border-radius: var(--radius); display: flex; flex-direction: column; gap: 8px; }
+.pt-newkey code, .pt-newkey pre {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--surface2);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  user-select: all;
+}
+.pt-revoked { opacity: 0.55; }
+.pt-paused { border-color: var(--warn); color: var(--warn); }

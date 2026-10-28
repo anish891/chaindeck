@@ -4,6 +4,9 @@
 //   pt:acct:{id}      string  the whole account state as JSON (small: capped order and trade history)
 //   pt:lock:{id}      string  short-lived lock so a page request and the cron tick never write over each other
 //   pt:settle:{expiry} string settlement price used for that expiry (so every account settles at the same price)
+//   pt:keys           hash    keyId -> agent API key record (only a SHA-256 of the key is stored, never the key)
+//   pt:q:{keyId}:...  string  order counters per key per minute and per day (fixed windows)
+//   pt:idem:{keyId}:{k} string the result of an agent request sent with an Idempotency-Key, kept a day
 //
 // Upstash cost: a write is lock + get + set + hset + del (5 commands). The tick only opens accounts that are active.
 
@@ -17,6 +20,11 @@ const LOCK_TRIES = 20;
 const LOCK_WAIT_MS = 150;
 const SETTLE_AFTER_MS = 15 * 60000; // settle 15 minutes after the expiry close, once the official close is published
 const MAX_ACCOUNTS = 20;
+const AGENT = { ordersPerMinute: 10, ordersPerDay: 300, keysPerAccount: 5 };
+const KEY_RE = /^cdp_([0-9a-f]{8})_([0-9a-f]{48})$/;
+const IDEM_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
+const SCOPES = new Set(['read', 'trade']);
+const sha256hex = s => crypto.createHash('sha256').update(String(s)).digest('hex');
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const istYmd = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
 
@@ -112,7 +120,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 
   async function resetAccount(id) {
     const out = await withAccount(id, state => ({
-      state: engine.newAccount({ id: state.id, name: state.name, nowMs: now(), startingCapital: state.startingCapital, kind: state.kind })
+      state: { ...engine.newAccount({ id: state.id, name: state.name, nowMs: now(), startingCapital: state.startingCapital, kind: state.kind }), agentsPaused: !!state.agentsPaused }
     }));
     return out.state;
   }
@@ -121,6 +129,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     await withAccount(id, () => null);
     await store.del(acctKey(id));
     await store.hdel('pt:index', id);
+    for (const k of await listKeys(id)) if (!k.revokedAt) await revokeKey(id, k.keyId); // a key must never outlive its account
   }
 
   /** Account summary at current prices (read only; no lock). */
@@ -131,14 +140,112 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     return { summary: engine.summarize(state, book, cfg), state };
   }
 
-  async function placeOrder(id, input) {
+  /** Place an order. `agent` ({ keyId, label }) marks it as an agent's: it needs a reason and respects the pause switch. */
+  async function placeOrder(id, input, { agent = null } = {}) {
     const inst = engine.parseInstrument(input && input.instrument);
     const { book, allowed } = await loadBook(inst ? [inst.expiry] : []);
     return withAccount(id, state => {
+      if (agent && state.agentsPaused) return { ok: false, error: { code: 'AGENTS_PAUSED', message: 'The owner has paused agent trading on this account.' }, state };
       const t = now();
-      const out = engine.placeOrder(input, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg });
-      return out.ok ? { ...out, state: engine.recordMarks(out.state, book) } : out;
+      const out = engine.placeOrder({ ...input, source: agent ? 'agent' : input && input.source }, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg });
+      if (!out.ok) return out;
+      const next = engine.recordMarks(out.state, book);
+      if (agent) {
+        // the order and any bracket exits it spawned remember which key placed them
+        for (const o of next.orders) if (o.id === out.order.id || o.parentId === out.order.id) o.agent = { keyId: agent.keyId, label: agent.label };
+      }
+      return { ...out, state: next, order: next.orders.find(o => o.id === out.order.id) || out.order };
     });
+  }
+
+  async function setAgentsPaused(id, paused) {
+    return withAccount(id, state => ({ ok: true, state: { ...state, agentsPaused: !!paused } }));
+  }
+
+  // ── agent API keys ──
+
+  const publicKey = k => ({ keyId: k.keyId, accountId: k.accountId, label: k.label, scope: k.scope, createdAt: k.createdAt, lastUsedAt: k.lastUsedAt || null, revokedAt: k.revokedAt || null });
+
+  async function allKeys() {
+    return Object.values(await store.hgetall('pt:keys')).map(safeParse).filter(Boolean);
+  }
+
+  async function listKeys(accountId) {
+    return (await allKeys()).filter(k => k.accountId === accountId).sort((a, b) => a.createdAt - b.createdAt).map(publicKey);
+  }
+
+  /** New key for an account. The key itself is returned once and only its hash is kept. */
+  async function createKey(accountId, { label, scope = 'trade' } = {}) {
+    await load(accountId);
+    if (typeof label !== 'string' || !label.trim() || label.length > 40) throw codedError('BAD_LABEL', 'Give the key a name of up to 40 characters, for example Claude.');
+    if (!SCOPES.has(scope)) throw codedError('BAD_SCOPE', 'scope must be read or trade.');
+    const live = (await allKeys()).filter(k => k.accountId === accountId && !k.revokedAt);
+    if (live.length >= AGENT.keysPerAccount) throw codedError('TOO_MANY_KEYS', `At most ${AGENT.keysPerAccount} active keys per account. Revoke one first.`);
+    const keyId = crypto.randomBytes(4).toString('hex');
+    const token = `cdp_${keyId}_${crypto.randomBytes(24).toString('hex')}`;
+    const record = { keyId, accountId, label: label.trim(), scope, createdAt: now(), lastUsedAt: null, revokedAt: null, hash: sha256hex(token) };
+    await store.hset('pt:keys', keyId, JSON.stringify(record));
+    return { token, key: publicKey(record) };
+  }
+
+  async function revokeKey(accountId, keyId) {
+    const record = (await allKeys()).find(k => k.keyId === keyId && k.accountId === accountId);
+    if (!record) throw codedError('NOT_FOUND', 'No such key.');
+    if (!record.revokedAt) {
+      record.revokedAt = now();
+      await store.hset('pt:keys', keyId, JSON.stringify(record));
+    }
+    return publicKey(record);
+  }
+
+  /** The key's record for a valid, unrevoked key; null otherwise. Constant-time on the secret part. */
+  async function authenticate(token) {
+    const m = KEY_RE.exec(String(token || ''));
+    if (!m) return null;
+    const record = (await allKeys()).find(k => k.keyId === m[1]);
+    if (!record || record.revokedAt) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(sha256hex(token), 'hex'), Buffer.from(record.hash, 'hex'))) return null;
+    const t = now();
+    if (!record.lastUsedAt || t - record.lastUsedAt > 5 * 60000) { // at most one write per key every 5 minutes
+      record.lastUsedAt = t;
+      await store.hset('pt:keys', record.keyId, JSON.stringify(record)).catch(() => {});
+    }
+    return publicKey(record);
+  }
+
+  /** Count one order attempt against the key's per-minute and per-day allowance. Throws RATE_LIMITED when over. */
+  async function consumeOrderQuota(keyId) {
+    const t = now();
+    const perMinute = await store.incr(`pt:q:${keyId}:m:${Math.floor(t / 60000)}`, 120);
+    if (perMinute > AGENT.ordersPerMinute) throw codedError('RATE_LIMITED', `At most ${AGENT.ordersPerMinute} order requests a minute per key.`);
+    const perDay = await store.incr(`pt:q:${keyId}:d:${istYmd(t)}`, 2 * 86400);
+    if (perDay > AGENT.ordersPerDay) throw codedError('RATE_LIMITED', `At most ${AGENT.ordersPerDay} order requests a day per key.`);
+  }
+
+  /**
+   * Run `fn` at most once per (key, Idempotency-Key): a retried request gets the first answer back instead of placing a
+   * second order. Without an idempotency key it simply runs. Only results that `keep` accepts are remembered (placed
+   * orders): a refused order releases the key, so the same request can be retried once it can succeed.
+   */
+  async function idempotent(keyId, idemKey, fn, { keep = () => true } = {}) {
+    if (idemKey === undefined || idemKey === null || idemKey === '') return fn();
+    if (!IDEM_RE.test(idemKey)) throw codedError('BAD_IDEMPOTENCY_KEY', 'Idempotency-Key: 1 to 64 letters, digits or _ . : -');
+    const k = `pt:idem:${keyId}:${idemKey}`;
+    const claimed = await store.setNx(k, JSON.stringify({ pending: true }), 60);
+    if (!claimed) {
+      const seen = safeParse(await store.get(k));
+      if (!seen || seen.pending) throw codedError('IN_PROGRESS', 'A request with this Idempotency-Key is still being handled.');
+      return { ...seen.result, replayed: true };
+    }
+    try {
+      const result = await fn();
+      if (keep(result)) await store.set(k, JSON.stringify({ result }), 86400);
+      else await store.del(k);
+      return result;
+    } catch (e) {
+      await store.del(k);
+      throw e;
+    }
   }
 
   async function cancelOrder(id, orderId) {
@@ -264,7 +371,10 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     return { accounts: accounts.length, fills, settled, dataOk: !!market && !market.book.stale };
   }
 
-  return { listAccounts, createAccount, resetAccount, deleteAccount, getSummary, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice };
+  return {
+    listAccounts, createAccount, resetAccount, deleteAccount, getSummary, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice,
+    setAgentsPaused, listKeys, createKey, revokeKey, authenticate, consumeOrderQuota, idempotent
+  };
 }
 
 /** The service wired to real storage, NSE and Yahoo. */
@@ -281,4 +391,4 @@ function defaultService() {
   return createService({ store, loadRaw: e => fetchRawNSEOptionChain('NIFTY', e), loadSettle });
 }
 
-module.exports = { createService, defaultService, ID_RE };
+module.exports = { createService, defaultService, ID_RE, AGENT };

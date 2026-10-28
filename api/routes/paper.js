@@ -12,6 +12,11 @@
 //   DELETE /accounts/:id/orders/:orderId cancel
 //   POST   /accounts/:id/reset           start over with the same capital
 //   DELETE /accounts/:id                 remove the account
+//   GET    /accounts/:id/keys            agent API keys (never the keys themselves)
+//   POST   /accounts/:id/keys            { label, scope } -> the new key, shown once
+//   DELETE /accounts/:id/keys/:keyId     revoke
+//   POST   /accounts/:id/agents          { paused } pause or resume agent trading on the account
+//   /v1/...                              the agent API (routes/paperAgent.js), authenticated by agent key instead
 
 const express = require('express');
 const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../security');
@@ -33,8 +38,8 @@ router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }
 router.use(express.json({ limit: '8kb' }));
 
 const STATUS = {
-  NOT_FOUND: 404, BUSY: 409, EXISTS: 409, TOO_MANY_ACCOUNTS: 409,
-  BAD_ID: 400, BAD_CAPITAL: 400, BAD_NAME: 400
+  NOT_FOUND: 404, BUSY: 409, EXISTS: 409, TOO_MANY_ACCOUNTS: 409, TOO_MANY_KEYS: 409,
+  BAD_ID: 400, BAD_CAPITAL: 400, BAD_NAME: 400, BAD_LABEL: 400, BAD_SCOPE: 400
 };
 
 /** Known, user-facing errors keep their message; anything else is logged and hidden. */
@@ -67,6 +72,9 @@ router.delete('/session', (req, res) => {
   res.set('Set-Cookie', paperSignOutCookie());
   res.json({ ok: true, signedIn: false });
 });
+
+// the agent API authenticates with its own keys, so it sits before the owner gate
+router.use('/v1', require('./paperAgent')(svc));
 
 // everything below is owner only
 router.use(requirePaperOwner);
@@ -117,6 +125,7 @@ router.get('/accounts/:id', validId, async (req, res) => {
     const { summary, state } = await svc().getSummary(req.params.id);
     res.json({
       ok: true,
+      agentsPaused: !!state.agentsPaused,
       summary,
       orders: state.orders.slice(-150).reverse(),
       trades: state.trades.slice(-150).reverse(),
@@ -173,6 +182,45 @@ router.delete('/accounts/:id', validId, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     return fail(res, err, 'Error deleting paper account');
+  }
+});
+
+// ── agent keys and the pause switch ──
+
+router.get('/accounts/:id/keys', validId, async (req, res) => {
+  try {
+    res.json({ ok: true, keys: await svc().listKeys(req.params.id) });
+  } catch (err) {
+    return fail(res, err, 'Error listing agent keys');
+  }
+});
+
+router.post('/accounts/:id/keys', validId, async (req, res) => {
+  const b = req.body || {};
+  try {
+    const { token, key } = await svc().createKey(req.params.id, { label: b.label, scope: b.scope || 'trade' });
+    res.status(201).json({ ok: true, token, key });
+  } catch (err) {
+    return fail(res, err, 'Error creating agent key');
+  }
+});
+
+router.delete('/accounts/:id/keys/:keyId', validId, async (req, res) => {
+  if (!/^[0-9a-f]{8}$/.test(req.params.keyId)) return res.status(400).json({ ok: false, error: 'Bad key id.' });
+  try {
+    res.json({ ok: true, key: await svc().revokeKey(req.params.id, req.params.keyId) });
+  } catch (err) {
+    return fail(res, err, 'Error revoking agent key');
+  }
+});
+
+router.post('/accounts/:id/agents', validId, async (req, res) => {
+  if (typeof (req.body || {}).paused !== 'boolean') return res.status(400).json({ ok: false, error: 'paused must be true or false.' });
+  try {
+    await svc().setAgentsPaused(req.params.id, req.body.paused);
+    res.json({ ok: true, paused: req.body.paused });
+  } catch (err) {
+    return fail(res, err, 'Error updating agent switch');
   }
 });
 

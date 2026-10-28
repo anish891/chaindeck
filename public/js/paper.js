@@ -21,6 +21,8 @@ let pollTimer = null;
 let previewTimer = null;
 let charts = { payoff: null, equity: null };
 let confirmArm = null;    // { key, until } for two-step confirm buttons
+let keys = [];            // agent keys for the current account (never the keys themselves)
+let newKey = null;        // { token, prompt } shown once after creating a key
 
 try { accountId = localStorage.getItem('paper_account'); } catch (e) { /* storage unavailable */ }
 try { tab = localStorage.getItem('paper_tab') || 'positions'; } catch (e) { /* ignore */ }
@@ -180,6 +182,7 @@ function stopPolling() {
 function renderAll() {
   renderStatus();
   renderStrip();
+  renderAgentSwitch();
   renderChain();
   renderTicket(false);
   renderBlotter();
@@ -390,6 +393,8 @@ function setTab(t) {
   renderBlotter();
 }
 
+const byText = o => (o.agent ? `${o.agent.label} (agent)` : o.source === 'strategy' ? 'strategy' : 'you');
+
 const statusText = o => {
   const why = { INSUFFICIENT_FUNDS: 'not enough free cash', NOTHING_TO_CLOSE: 'position already closed', OCO_FILLED: 'other leg filled', END_OF_DAY: 'end of day', EXPIRED_CONTRACT: 'contract expired', USER: 'by you' }[o.statusReason];
   return `${o.status.toLowerCase()}${why ? ` (${why})` : ''}`;
@@ -431,11 +436,11 @@ function renderBlotter() {
   if (tab === 'history') {
     const list = account.orders;
     if (!list.length) { el.innerHTML = empty('No orders yet.'); return; }
-    el.innerHTML = `<table class="pt-table"><thead><tr><th>Placed</th><th>Order</th><th>Contract</th><th>Side</th><th class="right">Lots</th><th>Type</th><th class="right">Price</th><th class="right">Filled at</th><th>Status</th><th>Note</th></tr></thead><tbody>${list.map(o => `<tr>
+    el.innerHTML = `<table class="pt-table"><thead><tr><th>Placed</th><th>Order</th><th>Contract</th><th>Side</th><th class="right">Lots</th><th>Type</th><th class="right">Price</th><th class="right">Filled at</th><th>Status</th><th>By</th><th>Note</th></tr></thead><tbody>${list.map(o => `<tr>
       <td>${dayTime(o.placedAt)}</td><td>${escapeHtml(o.id)}</td><td>${escapeHtml(instLabel(o.instrument))}</td>
       <td class="${o.side === 'BUY' ? 'pt-pos' : 'pt-neg'}">${o.side}</td><td class="right">${o.lots}</td><td>${escapeHtml(o.orderType)}</td>
       <td class="right">${px(o.limitPrice || o.triggerPrice)}</td><td class="right">${px(o.fillPrice)}</td>
-      <td>${escapeHtml(statusText(o))}</td><td class="pt-note">${escapeHtml(o.reason || '')}</td>
+      <td>${escapeHtml(statusText(o))}</td><td>${escapeHtml(byText(o))}</td><td class="pt-note">${escapeHtml(o.reason || '')}</td>
     </tr>`).join('')}</tbody></table>`;
     return;
   }
@@ -480,7 +485,7 @@ function arm(key) {
   confirmArm = { key, until: Date.now() + 4000 };
   renderBlotter();
   renderAccountList();
-  setTimeout(() => { if (confirmArm && confirmArm.key === key) { confirmArm = null; renderBlotter(); renderAccountList(); } }, 4000);
+  setTimeout(() => { if (confirmArm && confirmArm.key === key) { confirmArm = null; renderBlotter(); renderAccountList(); renderKeys(); } }, 4000);
 }
 // drawn from the armed state, so a refresh in the middle of confirming keeps the "Confirm" label
 function confirmButton(key, action, label, confirmLabel) {
@@ -580,6 +585,7 @@ function renderEquity() {
 
 function toggleManage() {
   $('ptManage').hidden = !$('ptManage').hidden;
+  if (!$('ptManage').hidden) loadKeys();
 }
 
 function switchAccount() {
@@ -587,6 +593,8 @@ function switchAccount() {
   try { localStorage.setItem('paper_account', accountId); } catch (e) { /* ignore */ }
   account = null;
   ticket = { instrument: null, side: 'BUY' };
+  hideNewKey();
+  if (!$('ptManage').hidden) loadKeys();
   refresh();
 }
 
@@ -629,6 +637,92 @@ async function deleteAccount(id) {
   refresh();
 }
 
+// ── AI agents ──
+
+function renderAgentSwitch() {
+  const btn = $('ptAgentsBtn');
+  const paused = !!(account && account.agentsPaused);
+  btn.textContent = paused ? 'Agent trading: paused' : 'Agent trading: on';
+  btn.classList.toggle('pt-paused', paused);
+  const a = accounts.find(x => x.id === accountId);
+  $('ptAgentAccount').textContent = a ? a.name : 'this account';
+}
+
+async function loadKeys() {
+  if (!accountId) return;
+  const r = await api(`/accounts/${encodeURIComponent(accountId)}/keys`);
+  keys = r.ok ? r.keys : [];
+  renderKeys();
+}
+
+function renderKeys() {
+  const live = keys.filter(k => !k.revokedAt);
+  const shown = [...live, ...keys.filter(k => k.revokedAt).slice(-3)];
+  $('ptKeyList').innerHTML = shown.length ? shown.map(k => `<div class="pt-account-row${k.revokedAt ? ' pt-revoked' : ''}">
+    <span><b>${escapeHtml(k.label)}</b> <span class="pt-muted">cdp_${escapeHtml(k.keyId)}_..., ${k.scope === 'trade' ? 'can trade' : 'read only'}, ${k.revokedAt ? `revoked ${dayTime(k.revokedAt)}` : k.lastUsedAt ? `last used ${dayTime(k.lastUsedAt)}` : 'not used yet'}</span></span>
+    <span>${k.revokedAt ? '' : confirmButton(`revoke|${k.keyId}`, `revokeKey:${k.keyId}`, 'Revoke', 'Confirm revoke')}</span>
+  </div>`).join('') : '<div class="empty-note">No agent keys for this account yet.</div>';
+  const box = $('ptNewKey');
+  box.hidden = !newKey;
+  if (newKey) {
+    $('ptNewKeyToken').textContent = newKey.token;
+    $('ptAgentPrompt').textContent = newKey.prompt;
+  }
+}
+
+function agentPrompt(token) {
+  const base = `${location.origin}/api/paper/v1`;
+  return [
+    'You can trade NIFTY options on my ChainDeck paper trading account. The money is simulated; the prices are real NSE prices.',
+    `API base URL: ${base}`,
+    `Send this header on every request: Authorization: Bearer ${token}`,
+    `Start with GET ${base} for the rules, endpoints and order format, then GET ${base}/account and ${base}/context.`,
+    'Every order must include a "reason" explaining why. Send an Idempotency-Key header with every POST /orders.',
+    'Orders are only accepted 09:15 to 15:30 IST on trading days. If you get AGENTS_PAUSED, stop trading.'
+  ].join('\n');
+}
+
+async function createKey() {
+  $('ptKeyError').textContent = '';
+  const r = await api(`/accounts/${encodeURIComponent(accountId)}/keys`, { method: 'POST', body: { label: $('ptKeyLabel').value.trim(), scope: $('ptKeyScope').value } });
+  if (!r.ok) { $('ptKeyError').textContent = r.error || 'Could not create the key.'; return; }
+  $('ptKeyLabel').value = '';
+  newKey = { token: r.token, prompt: agentPrompt(r.token) };
+  await loadKeys();
+}
+
+async function revokeKey(keyId) {
+  if (!armed(`revoke|${keyId}`)) { arm(`revoke|${keyId}`); renderKeys(); return; }
+  const r = await api(`/accounts/${encodeURIComponent(accountId)}/keys/${encodeURIComponent(keyId)}`, { method: 'DELETE' });
+  if (!r.ok) $('ptKeyError').textContent = r.error || 'Could not revoke the key.';
+  confirmArm = null;
+  await loadKeys();
+}
+
+function hideNewKey() {
+  newKey = null;
+  $('ptNewKey').hidden = true;
+}
+
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) { const old = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = old; }, 1500); }
+  } catch (e) {
+    $('ptKeyError').textContent = 'Copy failed. Select the text and copy it by hand.';
+  }
+}
+function copyKey(e) { if (newKey) copyText(newKey.token, e && e.target); }
+function copyPrompt(e) { if (newKey) copyText(newKey.prompt, e && e.target); }
+
+async function toggleAgents() {
+  if (!account) return;
+  const r = await api(`/accounts/${encodeURIComponent(accountId)}/agents`, { method: 'POST', body: { paused: !account.agentsPaused } });
+  if (!r.ok) { $('ptKeyError').textContent = r.error || 'Could not change the agent switch.'; return; }
+  account.agentsPaused = r.paused;
+  renderAgentSwitch();
+}
+
 // ── wiring (no inline handlers: the CSP forbids them) ──
 
 const ACTIONS = {
@@ -648,7 +742,13 @@ const ACTIONS = {
   setTab,
   exitPosition,
   cancelOrder,
-  renderPayoff
+  renderPayoff,
+  toggleAgents,
+  createKey,
+  revokeKey,
+  copyKey,
+  copyPrompt,
+  hideNewKey
 };
 
 function runActions(spec, event) {

@@ -86,6 +86,12 @@ async function memCmd(args) {
       const [start, stop] = rest.map(Number);
       return e.value.slice(start, stop === -1 ? undefined : stop + 1);
     }
+    case 'INCR': {
+      const e = memGet(key, 'str');
+      const n = (e ? Number(e.value) || 0 : 0) + 1;
+      mem.set(key, { type: 'str', value: String(n), exp: e ? e.exp : 0 });
+      return n;
+    }
     case 'EXPIRE': memExpire(key, Number(rest[0])); return 1;
     case 'DEL': { let n = 0; rest.concat(key).forEach(k => { if (mem.delete(k)) n += 1; }); return n; }
     case 'HDEL': {
@@ -136,6 +142,12 @@ module.exports = {
   },
   async hdel(key, field) {
     return cmd(['HDEL', key, String(field)]);
+  },
+  /** Add one and return the new count; the TTL is set when the key is first created (a fixed window). */
+  async incr(key, ttlSec) {
+    const n = Number(await cmd(['INCR', key]));
+    if (n === 1 && ttlSec) await cmd(['EXPIRE', key, ttlSec]);
+    return n;
   },
   async expire(key, ttlSec) {
     return cmd(['EXPIRE', key, ttlSec]);

@@ -69,7 +69,7 @@
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Accounts</div>
-          <span class="panel-note">Separate accounts keep strategies (or AI agents, later) apart. Each has its own cash and history.</span>
+          <span class="panel-note">Separate accounts keep strategies and AI agents apart. Each has its own cash and history.</span>
         </div>
         <div id="ptAccountList" class="pt-account-list"></div>
         <div class="pt-form-row">
@@ -79,6 +79,33 @@
           <button data-click="createAccount">Create account</button>
         </div>
         <div class="pt-error" id="ptManageError" role="alert"></div>
+
+        <div class="panel-head subhead">
+          <div class="panel-title">AI agents on <span id="ptAgentAccount">this account</span></div>
+          <button data-click="toggleAgents" id="ptAgentsBtn">Agent trading: on</button>
+        </div>
+        <p class="pt-muted pt-gap">Give Claude or another AI a key for this account. It can only see and trade this account, every order must say why, and you can pause it or revoke the key at any time. Keys are shown once; only a fingerprint is stored.</p>
+        <div id="ptKeyList" class="pt-account-list"></div>
+        <div class="pt-form-row">
+          <input id="ptKeyLabel" placeholder="Key name, e.g. Claude" maxlength="40" aria-label="Key name" />
+          <select id="ptKeyScope" aria-label="Key permissions">
+            <option value="trade">Can trade</option>
+            <option value="read">Read only</option>
+          </select>
+          <button data-click="createKey">Create key</button>
+        </div>
+        <div class="pt-error" id="ptKeyError" role="alert"></div>
+        <div class="pt-newkey" id="ptNewKey" hidden>
+          <div class="pt-label">New key (copy it now, it will not be shown again)</div>
+          <code id="ptNewKeyToken"></code>
+          <div class="pt-label">Paste this to your AI agent</div>
+          <pre id="ptAgentPrompt"></pre>
+          <div class="pt-form-row">
+            <button data-click="copyKey">Copy key</button>
+            <button data-click="copyPrompt">Copy instructions</button>
+            <button data-click="hideNewKey">Done</button>
+          </div>
+        </div>
       </div>
     </div>
 
