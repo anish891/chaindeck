@@ -170,3 +170,32 @@ textarea { resize: vertical; width: 100%; }
 }
 .pt-revoked { opacity: 0.55; }
 .pt-paused { border-color: var(--warn); color: var(--warn); }
+
+/* views + strategy lab */
+.pt-views { padding-bottom: 0; }
+.pt-lab-grid { display: grid; grid-template-columns: minmax(200px, 260px) minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (max-width: 900px) { .pt-lab-grid { grid-template-columns: minmax(0, 1fr); } }
+.lab-list { display: flex; flex-direction: column; gap: 4px; }
+.lab-item { text-align: left; background: transparent; border-color: transparent; padding: 7px 8px; }
+.lab-item.active { background: var(--accent-soft); border-color: var(--atm-border); color: var(--accent); }
+.lab-new { margin-top: 8px; border-color: var(--border2); }
+.lab-gap { margin-top: 10px; }
+.lab-editor { display: flex; flex-direction: column; gap: 10px; }
+.lab-editor .panel-head { margin-bottom: 0; }
+.lab-section { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.lab-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.lab-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 600px) { .lab-grid2, .lab-grid3 { grid-template-columns: minmax(0, 1fr); } }
+.lab-editor .pt-field-col input, .lab-editor .pt-field-col select { width: 100%; }
+.lab-days { display: flex; gap: 12px; flex-wrap: wrap; }
+.lab-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.lab-row input[type="number"] { width: 72px; }
+.lab-inline { display: flex; gap: 6px; }
+.lab-inline input { width: 90px; }
+.lab-verdict-row { margin-bottom: 12px; line-height: 1.6; }
+.lab-verdict { font-weight: 700; font-size: 14px; margin-right: 6px; }
+.pt-warnc { color: var(--warn); }
+.lab-cards { margin-bottom: 10px; }
+.lab-cards .glance-big { font-size: 17px; }
+.lab-trades { max-height: 420px; overflow-y: auto; }
+.lab-assumptions { padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }

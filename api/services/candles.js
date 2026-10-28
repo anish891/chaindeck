@@ -8,7 +8,7 @@ const calendar = require('./calendar');
 // Candle shape everywhere: { t: epoch ms (candle open), o, h, l, c, v: number | null }
 
 const YAHOO = 'https://query1.finance.yahoo.com/v8/finance/chart/';
-const SYMBOLS = { index: '^NSEI', etf: 'NIFTYBEES.NS' };
+const SYMBOLS = { index: '^NSEI', etf: 'NIFTYBEES.NS', vix: '^INDIAVIX' };
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 6000;
 
@@ -209,6 +209,26 @@ async function getHistoryWithVolume({ fetchImpl = fetch } = {}) {
   return r.value;
 }
 
+/**
+ * Everything a strategy backtest needs for one interval (5m or 15m): 60 sessions of index candles with the ETF's volume
+ * merged in (for VWAP), and India VIX on the same grid (for option prices). Cached for hours.
+ */
+async function getBacktestData(interval, { fetchImpl = fetch } = {}) {
+  const preset = HISTORY_PRESETS[interval];
+  if (!preset || interval === '1d') throw new Error(`Unsupported interval ${interval}`);
+  const r = await cached(`backtest|${interval}`, TTL_HISTORY_MS, async () => {
+    const [idx, etf, vix] = await Promise.all([
+      fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
+      fetchYahooCandles(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => []),
+      fetchYahooCandles(SYMBOLS.vix, preset.yahooInterval, preset.range, fetchImpl)
+    ]);
+    if (!idx.length) throw new Error('No index candles returned');
+    if (!vix.length) throw new Error('No India VIX candles returned');
+    return { candles: mergeVolume(idx, etf, false).candles, vix: vix.map(c => ({ t: c.t, c: c.c })) };
+  }, TTL_HISTORY_MS * 4);
+  return { ...r.value, fetchedAt: r.ts };
+}
+
 function clearCache() {
   cache.clear();
   inflight.clear();
@@ -227,6 +247,7 @@ module.exports = {
   getCandles,
   getHistoryCandles,
   getHistoryWithVolume,
+  getBacktestData,
   marketOpenNow,
   STALE_MAX_OPEN_MS,
   cached,

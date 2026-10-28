@@ -20,7 +20,7 @@ const LOCK_TRIES = 20;
 const LOCK_WAIT_MS = 150;
 const SETTLE_AFTER_MS = 15 * 60000; // settle 15 minutes after the expiry close, once the official close is published
 const MAX_ACCOUNTS = 20;
-const AGENT = { ordersPerMinute: 10, ordersPerDay: 300, keysPerAccount: 5 };
+const AGENT = { ordersPerMinute: 10, ordersPerDay: 300, keysPerAccount: 5, backtestsPerMinute: 5 };
 const KEY_RE = /^cdp_([0-9a-f]{8})_([0-9a-f]{48})$/;
 const IDEM_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
 const SCOPES = new Set(['read', 'trade']);
@@ -222,6 +222,12 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     if (perDay > AGENT.ordersPerDay) throw codedError('RATE_LIMITED', `At most ${AGENT.ordersPerDay} order requests a day per key.`);
   }
 
+  /** Count one backtest run against the key's per-minute allowance (backtests are CPU work, so they get their own, lower one). */
+  async function consumeBacktestQuota(keyId) {
+    const n = await store.incr(`pt:q:${keyId}:bt:${Math.floor(now() / 60000)}`, 120);
+    if (n > AGENT.backtestsPerMinute) throw codedError('RATE_LIMITED', `At most ${AGENT.backtestsPerMinute} backtests a minute per key.`);
+  }
+
   /**
    * Run `fn` at most once per (key, Idempotency-Key): a retried request gets the first answer back instead of placing a
    * second order. Without an idempotency key it simply runs. Only results that `keep` accepts are remembered (placed
@@ -373,7 +379,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 
   return {
     listAccounts, createAccount, resetAccount, deleteAccount, getSummary, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice,
-    setAgentsPaused, listKeys, createKey, revokeKey, authenticate, consumeOrderQuota, idempotent
+    setAgentsPaused, listKeys, createKey, revokeKey, authenticate, consumeOrderQuota, consumeBacktestQuota, idempotent
   };
 }
 

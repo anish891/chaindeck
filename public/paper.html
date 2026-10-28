@@ -109,6 +109,14 @@
       </div>
     </div>
 
+    <div class="section pt-views">
+      <div class="seg" role="group" aria-label="View">
+        <button class="seg-btn active" id="viewTrade" data-click="setView:trade">Trade</button>
+        <button class="seg-btn" id="viewLab" data-click="setView:lab">Strategy lab</button>
+      </div>
+    </div>
+
+    <div id="ptTradeView">
     <!-- Chain + ticket -->
     <div class="section pt-grid">
       <div class="panel">
@@ -198,6 +206,88 @@
           <span class="panel-note">Closing equity each trading day, plus now</span>
         </div>
         <div class="pt-chart"><canvas id="ptEquityChart"></canvas></div>
+      </div>
+    </div>
+
+    </div>
+
+    <!-- Strategy lab -->
+    <div id="ptLabView" hidden>
+      <div class="section pt-lab-grid">
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Strategies</div></div>
+          <div id="labList" class="lab-list"></div>
+        </div>
+
+        <div class="panel lab-editor">
+          <div class="panel-head">
+            <div class="panel-title">Rules</div>
+            <span class="panel-note">Judged on each candle's close, entered at the next candle's open, closed the same day.</span>
+          </div>
+          <div class="lab-grid2">
+            <label class="pt-field pt-field-col"><span class="pt-label">Name</span><input id="labName" maxlength="40" /></label>
+            <label class="pt-field pt-field-col"><span class="pt-label">Candles</span>
+              <select id="labInterval"><option value="5m">5 minute</option><option value="15m">15 minute</option></select>
+            </label>
+          </div>
+
+          <div class="lab-section">Entry</div>
+          <div class="lab-grid3">
+            <label class="pt-field pt-field-col"><span class="pt-label">Enter from (IST)</span><input id="labFrom" type="time" step="300" /></label>
+            <label class="pt-field pt-field-col"><span class="pt-label">Until</span><input id="labTo" type="time" step="300" /></label>
+            <label class="pt-field pt-field-col"><span class="pt-label">Trades a day (max)</span><input id="labMaxTrades" type="number" min="1" max="5" step="1" /></label>
+          </div>
+          <div class="lab-days" id="labDays"></div>
+          <div class="pt-label">Conditions (all must hold)</div>
+          <div id="labConds"></div>
+          <div class="pt-form-row">
+            <select id="labCondType" aria-label="Condition to add">
+              <option value="gap">Gap at the open</option>
+              <option value="dayMove">Move since the open</option>
+              <option value="orb">Opening range breakout</option>
+              <option value="vwap">Price vs VWAP</option>
+              <option value="prevDay">Price vs previous day</option>
+              <option value="vix">India VIX</option>
+              <option value="signal">Reversal signal</option>
+            </select>
+            <button data-click="labAddCond">Add condition</button>
+          </div>
+
+          <div class="lab-section">Legs (strikes are 50 points apart; ATM is fixed at entry)</div>
+          <div id="labLegs"></div>
+          <div class="pt-form-row"><button id="labAddLeg" data-click="labAddLeg">Add leg</button></div>
+
+          <div class="lab-section">Exits</div>
+          <div class="lab-grid2">
+            <div class="pt-field pt-field-col"><span class="pt-label">Stop loss</span><span id="labStop" class="lab-inline"></span></div>
+            <div class="pt-field pt-field-col"><span class="pt-label">Target</span><span id="labTarget" class="lab-inline"></span></div>
+            <label class="pt-field pt-field-col"><span class="pt-label">Exit by (IST, latest 15:25)</span><input id="labExitAt" type="time" step="300" /></label>
+            <label class="pt-field pt-field-col"><span class="pt-label">Exit if NIFTY moves (points, blank for none)</span><input id="labMovePts" type="number" min="5" step="5" /></label>
+          </div>
+
+          <div class="pt-error" id="labError" role="alert"></div>
+          <div class="pt-form-row">
+            <button class="pt-primary" id="labRun" data-click="labRun">Run backtest</button>
+            <button id="labSave" data-click="labSave">Save strategy</button>
+            <button id="labSaveAs" data-click="labSaveAs" hidden>Save as new</button>
+            <button data-click="labCopyJson">Copy as JSON</button>
+            <button id="labDelete" data-click="labDelete" hidden>Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="labResults" hidden>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Backtest</div></div>
+          <div id="labVerdict" class="lab-verdict-row"></div>
+          <div id="labCards" class="glance-grid lab-cards"></div>
+          <div class="panel-note" id="labBaseline"></div>
+          <div class="pt-chart"><canvas id="labChart"></canvas></div>
+          <div class="lab-section">Trades</div>
+          <div class="table-scroll lab-trades" id="labTrades"></div>
+          <div class="lab-section">How this was tested</div>
+          <ul class="lab-assumptions" id="labAssumptions"></ul>
+        </div>
       </div>
     </div>
 

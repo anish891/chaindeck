@@ -4,6 +4,7 @@
 import { escapeHtml, hmIst } from './ui-utils.js';
 import { setIconText, themeIcon } from './icons.js';
 import { payoffSeries } from './paper-payoff.js';
+import { initLab, openLab, labRedraw, labNew, labPreset, labLoad, labAddCond, labRemoveCond, labAddLeg, labRemoveLeg, labRun, labSave, labSaveAs, labDelete, labCopyJson } from './paper-lab.js';
 
 const $ = id => document.getElementById(id);
 const OPEN_POLL_MS = 5000;
@@ -19,13 +20,15 @@ let tab = 'positions';
 let ticket = { instrument: null, side: 'BUY' };
 let pollTimer = null;
 let previewTimer = null;
-let charts = { payoff: null, equity: null };
+let charts = { payoff: null, equity: null, lab: null };
+let view = 'trade';
 let confirmArm = null;    // { key, until } for two-step confirm buttons
 let keys = [];            // agent keys for the current account (never the keys themselves)
 let newKey = null;        // { token, prompt } shown once after creating a key
 
 try { accountId = localStorage.getItem('paper_account'); } catch (e) { /* storage unavailable */ }
 try { tab = localStorage.getItem('paper_tab') || 'positions'; } catch (e) { /* ignore */ }
+try { view = localStorage.getItem('paper_view') === 'lab' ? 'lab' : 'trade'; } catch (e) { /* ignore */ }
 
 // ── formatting ──
 
@@ -73,6 +76,7 @@ function applyTheme(theme) {
   $('themeSelect').value = theme;
   setIconText($('themeIcon'), themeIcon(theme), '');
   if (account) { renderPayoff(); renderEquity(); }
+  labRedraw();
 }
 function onThemeChange() {
   const v = $('themeSelect').value;
@@ -142,6 +146,7 @@ async function start() {
   $('ptSignOut').hidden = !s.needsSecret;
   $('ptManageBtn').hidden = false;
   await loadAccounts();
+  setView(view);
   await refresh();
 }
 
@@ -581,6 +586,18 @@ function renderEquity() {
   });
 }
 
+// ── views ──
+
+function setView(v) {
+  view = v === 'lab' ? 'lab' : 'trade';
+  try { localStorage.setItem('paper_view', view); } catch (e) { /* ignore */ }
+  $('ptTradeView').hidden = view !== 'trade';
+  $('ptLabView').hidden = view !== 'lab';
+  $('viewTrade').classList.toggle('active', view === 'trade');
+  $('viewLab').classList.toggle('active', view === 'lab');
+  if (view === 'lab') openLab();
+}
+
 // ── accounts ──
 
 function toggleManage() {
@@ -748,7 +765,20 @@ const ACTIONS = {
   revokeKey,
   copyKey,
   copyPrompt,
-  hideNewKey
+  hideNewKey,
+  setView,
+  labNew,
+  labPreset,
+  labLoad,
+  labAddCond,
+  labRemoveCond,
+  labAddLeg,
+  labRemoveLeg,
+  labRun,
+  labSave,
+  labSaveAs,
+  labDelete,
+  labCopyJson
 };
 
 function runActions(spec, event) {
@@ -776,6 +806,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if ($('themeSelect').value === 'system') applyTheme('system'); });
   for (const id of ['tkLots', 'tkLimit', 'tkTrigger', 'tkTarget', 'tkStop']) $(id).addEventListener('input', () => renderTicket(true));
   $('ptSecret').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
+  initLab({ api, inr, drawChart, chartColors, getAccountId: () => accountId });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && account) refresh(); });
 
   const s = await api('/session');

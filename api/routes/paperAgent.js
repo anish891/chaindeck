@@ -20,7 +20,7 @@ const { AGENT } = require('../services/paperAccounts');
 const READS_PER_MINUTE = 120;
 
 const STATUS = {
-  NOT_FOUND: 404, BUSY: 409, IN_PROGRESS: 409, RATE_LIMITED: 429, BAD_IDEMPOTENCY_KEY: 400
+  NOT_FOUND: 404, BUSY: 409, IN_PROGRESS: 409, RATE_LIMITED: 429, BAD_IDEMPOTENCY_KEY: 400, BAD_STRATEGY: 400
 };
 
 /** Small fixed-window limiter keyed by the agent key (per instance; the order quota itself is shared via storage). */
@@ -113,7 +113,22 @@ function docs(agent) {
       'GET /api/paper/v1/trades?limit=50': 'fills and expiry settlements, newest first',
       'POST /api/paper/v1/orders/preview': 'same body as POST /orders; says what would happen, places nothing (trade scope)',
       'POST /api/paper/v1/orders': 'place an order (trade scope)',
-      'DELETE /api/paper/v1/orders/:id': 'cancel a waiting order (trade scope)'
+      'DELETE /api/paper/v1/orders/:id': 'cancel a waiting order (trade scope)',
+      'GET /api/paper/v1/strategies/presets': 'example strategies in the backtest format',
+      'POST /api/paper/v1/backtest': `{ strategy } backtest on about 60 sessions of history, at most ${AGENT.backtestsPerMinute} a minute (any scope)`
+    },
+    strategy: {
+      format: '{ name, interval: 5m|15m, entry: { window: { from: HH:MM, to: HH:MM }, weekdays: [1..5], maxTradesPerDay: 1..5, conditions: [...] }, legs: [ { side, optionType, strikeOffset (strikes from ATM, 50 points each), lots, expiry: weekly|next } ], exits: { stopLoss: { unit: pct|rupees, value } | null, target: same | null, exitAt: HH:MM (by 15:25), indexMovePts: number | null } }',
+      conditions: {
+        gap: '{ type: gap, op: above|below, pct } open against previous close',
+        dayMove: '{ type: dayMove, op: above|below, pct } close against today\'s open',
+        orb: '{ type: orb, minutes: 15|30|60, direction: up|down } close beyond the completed opening range',
+        vwap: '{ type: vwap, position: above|below }',
+        prevDay: '{ type: prevDay, level: high|low|close, position: above|below }',
+        vix: '{ type: vix, op: above|below, value }',
+        signal: '{ type: signal, direction: bull|bear } a notable reversal pattern on that candle'
+      },
+      honesty: 'Option prices in backtests are MODELLED from India VIX (no historical option quotes exist here). A verdict of edge needs 30+ trades, a positive expectancy interval and beating 95% of random-entry runs; most strategies will say insufficient or none.'
     },
     order: {
       instrument: 'NIFTY|03-Nov-2026|25000|CE',
@@ -131,7 +146,7 @@ function docs(agent) {
 }
 
 /** @param svc () => paper service (shared with the owner routes) */
-module.exports = function agentRouter(svc) {
+module.exports = function agentRouter(svc, strategies) {
   const router = express.Router();
   const readLimit = perKeyLimiter(READS_PER_MINUTE);
 
@@ -228,6 +243,19 @@ module.exports = function agentRouter(svc) {
       res.json({ ok: true, trades: state.trades.slice().reverse().slice(0, limitOf(req.query.limit)) });
     } catch (err) {
       return fail(res, err, 'Agent: error reading trades');
+    }
+  });
+
+  router.get('/strategies/presets', (req, res) => res.json({ ok: true, presets: strategies().presets() }));
+
+  // Backtests only read market history, so read-only keys may run them too.
+  router.post('/backtest', async (req, res) => {
+    try {
+      await svc().consumeBacktestQuota(req.agent.keyId);
+      const { summary } = await svc().getSummary(id(req));
+      res.json({ ok: true, report: await strategies().backtest((req.body || {}).strategy, { capital: summary.startingCapital }) });
+    } catch (err) {
+      return fail(res, err, 'Agent: error running backtest');
     }
   });
 

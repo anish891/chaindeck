@@ -16,11 +16,17 @@
 //   POST   /accounts/:id/keys            { label, scope } -> the new key, shown once
 //   DELETE /accounts/:id/keys/:keyId     revoke
 //   POST   /accounts/:id/agents          { paused } pause or resume agent trading on the account
+//   GET    /strategies                   saved strategies and the presets
+//   POST   /strategies                   { strategy } save a new one
+//   PUT    /strategies/:sid              { strategy } replace a saved one
+//   DELETE /strategies/:sid              remove
+//   POST   /backtest                     { strategy, accountId? } backtest on 60 sessions (capital from the account)
 //   /v1/...                              the agent API (routes/paperAgent.js), authenticated by agent key instead
 
 const express = require('express');
 const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../security');
 const { defaultService, ID_RE } = require('../services/paperAccounts');
+const { defaultStrategyService } = require('../services/paperStrategies');
 
 const router = express.Router();
 const signInLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, name: 'paper-signin' });
@@ -28,18 +34,22 @@ const TICK_EVERY_MS = 15 * 1000; // an open page also works resting orders, so f
 
 let service = null;
 const svc = () => service || (service = defaultService());
+let strategyService = null;
+const strategies = () => strategyService || (strategyService = defaultStrategyService());
+const backtestLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'paper-backtest' });
 let lastTick = 0;
 
 /** Test hook: swap in a service built on a fake store and feed. */
 router.setService = s => { service = s; lastTick = 0; };
 router.service = svc;
+router.setStrategyService = s => { strategyService = s; };
 
 router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 router.use(express.json({ limit: '8kb' }));
 
 const STATUS = {
   NOT_FOUND: 404, BUSY: 409, EXISTS: 409, TOO_MANY_ACCOUNTS: 409, TOO_MANY_KEYS: 409,
-  BAD_ID: 400, BAD_CAPITAL: 400, BAD_NAME: 400, BAD_LABEL: 400, BAD_SCOPE: 400
+  BAD_ID: 400, BAD_CAPITAL: 400, BAD_NAME: 400, BAD_LABEL: 400, BAD_SCOPE: 400, BAD_STRATEGY: 400, TOO_MANY_STRATEGIES: 409
 };
 
 /** Known, user-facing errors keep their message; anything else is logged and hidden. */
@@ -74,7 +84,7 @@ router.delete('/session', (req, res) => {
 });
 
 // the agent API authenticates with its own keys, so it sits before the owner gate
-router.use('/v1', require('./paperAgent')(svc));
+router.use('/v1', require('./paperAgent')(svc, strategies));
 
 // everything below is owner only
 router.use(requirePaperOwner);
@@ -221,6 +231,55 @@ router.post('/accounts/:id/agents', validId, async (req, res) => {
     res.json({ ok: true, paused: req.body.paused });
   } catch (err) {
     return fail(res, err, 'Error updating agent switch');
+  }
+});
+
+// ── strategies and backtests ──
+
+router.get('/strategies', async (req, res) => {
+  try {
+    res.json({ ok: true, saved: await strategies().list(), presets: strategies().presets() });
+  } catch (err) {
+    return fail(res, err, 'Error listing strategies');
+  }
+});
+
+router.post('/strategies', async (req, res) => {
+  try {
+    res.status(201).json({ ok: true, saved: await strategies().save((req.body || {}).strategy) });
+  } catch (err) {
+    return fail(res, err, 'Error saving strategy');
+  }
+});
+
+router.put('/strategies/:sid', async (req, res) => {
+  try {
+    res.json({ ok: true, saved: await strategies().save((req.body || {}).strategy, req.params.sid) });
+  } catch (err) {
+    return fail(res, err, 'Error saving strategy');
+  }
+});
+
+router.delete('/strategies/:sid', async (req, res) => {
+  try {
+    await strategies().remove(req.params.sid);
+    res.json({ ok: true });
+  } catch (err) {
+    return fail(res, err, 'Error deleting strategy');
+  }
+});
+
+router.post('/backtest', backtestLimit, async (req, res) => {
+  const b = req.body || {};
+  try {
+    let capital;
+    if (b.accountId !== undefined) {
+      if (!ID_RE.test(String(b.accountId))) return res.status(400).json({ ok: false, error: 'Bad account id.' });
+      capital = (await svc().getSummary(b.accountId)).summary.startingCapital;
+    }
+    res.json({ ok: true, report: await strategies().backtest(b.strategy, { capital }) });
+  } catch (err) {
+    return fail(res, err, 'Error running backtest');
   }
 });
 

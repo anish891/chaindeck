@@ -75,21 +75,27 @@ function feed(expiry) {
   {
     const html = read('public/paper.html');
     const js = read('public/js/paper.js');
+    const lab = read('public/js/paper-lab.js');
     const block = /const ACTIONS = \{([\s\S]*?)\n\};/.exec(js);
     assert(block, 'ACTIONS map in paper.js');
     const known = new Set([...block[1].matchAll(/^\s*([A-Za-z0-9_]+)\s*(?::|,|$)/gm)].map(m => m[1]));
-    const used = new Set([...(html + js).matchAll(/data-(?:click|change)="([^"$]+)/g)].flatMap(m => m[1].split(/\s+/).map(x => x.split(':')[0])));
+    const used = new Set([...(html + js + lab).matchAll(/data-(?:click|change)="([^"$]+)/g)].flatMap(m => m[1].split(/\s+/).map(x => x.split(':')[0])));
     const dead = [...used].filter(n => n && !known.has(n));
     assert.deepStrictEqual(dead, [], `paper page actions with no handler: ${dead.join(', ')}`);
-    for (const name of known) assert(new RegExp(`function\\s+${name}\\b`).test(js), `ACTIONS.${name} is defined in paper.js`);
+    for (const name of known) {
+      const local = new RegExp(`function\\s+${name}\\b`).test(js);
+      const imported = new RegExp(`import\\s*\\{[^}]*\\b${name}\\b[^}]*\\}\\s*from\\s*'./paper-lab.js'`).test(js) && new RegExp(`export\\s+(async\\s+)?function\\s+${name}\\b`).test(lab);
+      assert(local || imported, `ACTIONS.${name} is defined in paper.js or exported by paper-lab.js`);
+    }
+    // a lab button that names an action outside the lab module must still be in ACTIONS (checked above via "used")
     assert.strictEqual((html.match(/\son[a-z]+="/gi) || []).length, 0, 'no inline event handlers');
     assert.strictEqual((html.match(/<script(?![^>]*\bsrc=)[^>]*>/gi) || []).length, 0, 'no inline scripts');
     assert.strictEqual((html.match(/\b(?:src|href)="https?:\/\//gi) || []).length, 0, 'no third-party resources');
     const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]));
-    const missing = [...new Set([...js.matchAll(/\$\('([A-Za-z0-9_]+)'\)/g)].map(m => m[1]))].filter(id => !ids.has(id));
+    const missing = [...new Set([...(js + lab).matchAll(/\$\('([A-Za-z0-9_]+)'\)/g)].map(m => m[1]))].filter(id => !ids.has(id));
     assert.deepStrictEqual(missing, [], `paper.js looks up ids that paper.html does not have: ${missing.join(', ')}`);
     assert(/href="\/paper\.html"/.test(read('public/index.html')), 'the dashboard links to the paper page');
-    for (const f of ['public/paper.html', 'public/js/paper.js', 'public/js/paper-payoff.js', 'public/css/paper.css']) {
+    for (const f of ['public/paper.html', 'public/js/paper.js', 'public/js/paper-lab.js', 'public/js/paper-payoff.js', 'public/css/paper.css']) {
       assert(!/—/.test(read(f)), `${f}: no em dashes`);
       assert(!/\p{Extended_Pictographic}/u.test(read(f).replace(/[©®™]/g, '')), `${f}: no emoji`);
     }
