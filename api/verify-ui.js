@@ -251,4 +251,15 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(/ctx\.marketOpen === false/.test(read('public/js/alert-rules.js')), 'chart alerts must stay silent after the close');
 }
 
+// ── theme: "System" on a light OS must get every variable the explicit light theme sets ──
+{
+  const css = read('public/css/styles.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const varsIn = block => new Set([...block.matchAll(/(--[a-z0-9-]+)\s*:/g)].map(m => m[1]));
+  const lightVars = new Set([...css.matchAll(/(?:^|\n)\[data-theme="light"\]\s*\{([^}]*)\}/g)].flatMap(m => [...varsIn(m[1])]));
+  const systemVars = new Set([...css.matchAll(/@media \(prefers-color-scheme: light\)\s*\{\s*\[data-theme="system"\]\s*\{([^}]*)\}/g)].flatMap(m => [...varsIn(m[1])]));
+  assert(lightVars.size > 10, 'light theme variables found');
+  const missing = [...lightVars].filter(v => !systemVars.has(v));
+  assert.deepStrictEqual(missing, [], `the System theme on a light OS falls back to dark values for: ${missing.join(', ')}`);
+}
+
 console.log('✓ ui wiring OK (every data-click/data-change has a handler; export menu wired; snapshot-safe colours)');
