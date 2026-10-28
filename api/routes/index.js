@@ -9,6 +9,7 @@ const integrity = require('../services/integrity');
 const { istNow } = require('../services/market');
 const { fetchRawNSEOptionChain, refreshHolidays, staleReasonCode } = require('../services/nse');
 const calendar = require('../services/calendar');
+const paperRoutes = require('./paper');
 const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../security');
 const {
   processOptionChainData,
@@ -189,6 +190,24 @@ async function cronSnapshot(req, res) {
 }
 router.get('/cron/snapshot', strictLimit, requireSecret, cronSnapshot);
 router.post('/cron/snapshot', strictLimit, requireSecret, cronSnapshot);
+
+// Paper trading: fill resting orders, expire day orders, settle expiries and record each day's equity. A separate job from
+// the snapshot so a slow paper tick can never cost a saved snapshot. Same secret, same schedule (every minute, 09-15 IST).
+async function cronPaper(req, res) {
+  await refreshHolidays();
+  try {
+    const result = await paperRoutes.service().tick();
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    return sendError(res, 502, 'Paper tick failed', err);
+  }
+}
+router.get('/cron/paper', strictLimit, requireSecret, cronPaper);
+router.post('/cron/paper', strictLimit, requireSecret, cronPaper);
+
+// Paper trading API (owner only, see routes/paper.js)
+router.use('/paper', paperRoutes);
 
 // Writes to storage, so it needs the same secret as the cron endpoint (it used to be open to anyone).
 router.post('/session-summary', strictLimit, requireSecret, async (req, res) => {

@@ -2502,3 +2502,7 @@ body[data-trust="bad"] .glance-grid, body[data-trust="bad"] #metricsRow { opacit
 .trust-row.warn .trust-row-detail { color: var(--warn); }
 .trust-note { margin: 12px 16px 20px; font-size: 11px; color: var(--muted); line-height: 1.5; }
 .pdf-export-report .trust-banner { display: none; }
+
+/* link to the paper trading page */
+.nav-link { display: inline-flex; align-items: center; gap: 5px; color: var(--text); text-decoration: none; font-size: 12px; border: 1px solid var(--border2); border-radius: 6px; padding: 5px 10px; background: var(--surface2); }
+.nav-link:hover { background: var(--hover); }

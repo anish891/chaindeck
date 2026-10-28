@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="system">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChainDeck: Paper Trading</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <link rel="stylesheet" href="/css/paper.css" />
+  <script src="/vendor/chart.umd.js"></script>
+</head>
+
+<body class="paper-page">
+
+  <div class="topbar">
+    <a href="/" class="logo">Chain<span>Deck</span></a>
+    <span class="pt-badge">Paper trading</span>
+    <div class="live-dot" id="ptDot"></div>
+    <div class="status-text" id="ptStatus">Connecting…</div>
+
+    <div class="topbar-right">
+      <label class="interval-label" for="ptAccountSelect">Account</label>
+      <select id="ptAccountSelect" data-change="switchAccount" disabled></select>
+      <button data-click="toggleManage" id="ptManageBtn" hidden>Accounts</button>
+      <a class="pt-link" href="/">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg> Dashboard
+      </a>
+      <label class="interval-label" for="themeSelect">Theme</label>
+      <span class="theme-ico" id="themeIcon" aria-hidden="true"></span>
+      <select id="themeSelect" data-change="onThemeChange" title="Select Theme">
+        <option value="system">System</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+      <button data-click="signOut" id="ptSignOut" hidden>Sign out</button>
+    </div>
+  </div>
+
+  <!-- Sign in (owner only) -->
+  <main id="ptLogin" class="pt-login" hidden>
+    <div class="panel pt-login-card">
+      <div class="panel-title">Paper trading</div>
+      <p class="pt-muted">This page is for the owner only. Enter the paper trading secret to continue.</p>
+      <input type="password" id="ptSecret" autocomplete="current-password" placeholder="Secret" aria-label="Paper trading secret" />
+      <button class="pt-primary" data-click="signIn">Sign in</button>
+      <div class="pt-error" id="ptLoginError" role="alert"></div>
+    </div>
+  </main>
+
+  <main id="ptApp" hidden>
+    <!-- Account strip -->
+    <div class="keystrip" id="ptStrip">
+      <div class="ks-item"><span class="ks-label">Equity</span><span class="ks-val" id="psEquity">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">Today</span><span class="ks-val" id="psDay">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">Total P&amp;L</span><span class="ks-val" id="psTotal">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">Unrealised</span><span class="ks-val" id="psUnreal">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">Realised</span><span class="ks-val" id="psReal">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">Charges</span><span class="ks-val" id="psCharges">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">Margin used</span><span class="ks-val" id="psMargin">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">Free cash</span><span class="ks-val" id="psFree">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">NIFTY</span><span class="ks-val" id="psSpot">n/a</span></div>
+      <div class="ks-item"><span class="ks-label">Prices as of</span><span class="ks-val" id="psAsOf">n/a</span></div>
+    </div>
+
+    <div class="pt-banner" id="ptBanner" role="status" hidden></div>
+
+    <!-- Account management -->
+    <div class="section" id="ptManage" hidden>
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Accounts</div>
+          <span class="panel-note">Separate accounts keep strategies (or AI agents, later) apart. Each has its own cash and history.</span>
+        </div>
+        <div id="ptAccountList" class="pt-account-list"></div>
+        <div class="pt-form-row">
+          <input id="ptNewId" placeholder="id, e.g. scalping" maxlength="24" aria-label="New account id" />
+          <input id="ptNewName" placeholder="Name" maxlength="40" aria-label="New account name" />
+          <input id="ptNewCap" type="number" min="10000" step="10000" value="100000" aria-label="Starting capital" />
+          <button data-click="createAccount">Create account</button>
+        </div>
+        <div class="pt-error" id="ptManageError" role="alert"></div>
+      </div>
+    </div>
+
+    <!-- Chain + ticket -->
+    <div class="section pt-grid">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Option chain</div>
+          <div class="seg" id="ptExpirySeg" role="group" aria-label="Expiry"></div>
+        </div>
+        <div class="table-scroll">
+          <table class="pt-table pt-chain">
+            <thead>
+              <tr>
+                <th class="right pt-book">Bid / Ask</th><th class="right">LTP</th><th class="center">Calls</th>
+                <th class="center">Strike</th>
+                <th class="center">Puts</th><th class="right">LTP</th><th class="right pt-book">Bid / Ask</th>
+              </tr>
+            </thead>
+            <tbody id="ptChainBody"><tr><td colspan="7" class="empty-note">Loading the option chain…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="panel-note">Prices from NSE, refreshed about once a minute. B buys, S sells. Lot size <span id="ptLot">n/a</span>.</div>
+      </div>
+
+      <div class="panel pt-ticket">
+        <div class="panel-head">
+          <div class="panel-title">Order ticket</div>
+        </div>
+        <div class="pt-ticket-inst" id="tkInst">Pick a strike from the chain.</div>
+        <div class="pt-field">
+          <span class="pt-label">Side</span>
+          <div class="seg" role="group" aria-label="Side">
+            <button class="seg-btn" id="tkBuy" data-click="setSide:BUY">Buy</button>
+            <button class="seg-btn" id="tkSell" data-click="setSide:SELL">Sell</button>
+          </div>
+        </div>
+        <label class="pt-field"><span class="pt-label">Lots</span><input id="tkLots" type="number" min="1" max="20" step="1" value="1" /></label>
+        <label class="pt-field"><span class="pt-label">Order type</span>
+          <select id="tkType" data-change="ticketChanged">
+            <option value="MARKET">Market</option>
+            <option value="LIMIT">Limit</option>
+            <option value="SL">Stop limit (SL)</option>
+            <option value="SL-M">Stop market (SL-M)</option>
+          </select>
+        </label>
+        <label class="pt-field" id="tkLimitRow" hidden><span class="pt-label">Limit price</span><input id="tkLimit" type="number" min="0.05" step="0.05" /></label>
+        <label class="pt-field" id="tkTriggerRow" hidden><span class="pt-label">Trigger price</span><input id="tkTrigger" type="number" min="0.05" step="0.05" /></label>
+        <label class="pt-check"><input type="checkbox" id="tkBracket" data-change="ticketChanged" /> Add target and stop loss</label>
+        <div id="tkBracketRows" hidden>
+          <label class="pt-field"><span class="pt-label">Target</span><input id="tkTarget" type="number" min="0.05" step="0.05" /></label>
+          <label class="pt-field"><span class="pt-label">Stop loss</span><input id="tkStop" type="number" min="0.05" step="0.05" /></label>
+        </div>
+        <label class="pt-field pt-field-col"><span class="pt-label">Note (why this trade)</span><textarea id="tkNote" rows="2" maxlength="500" placeholder="Optional, kept in the journal"></textarea></label>
+        <div class="pt-preview" id="tkPreview" aria-live="polite"></div>
+        <button class="pt-primary" id="tkPlace" data-click="placeOrder" disabled>Place order</button>
+        <div class="pt-result" id="tkResult" role="status"></div>
+        <div class="panel-note">Orders are DAY orders: anything unfilled is cancelled at 15:30. Waiting orders fill only on a newer NSE snapshot. Margin is an estimate, not SPAN.</div>
+      </div>
+    </div>
+
+    <!-- Positions / orders / trades -->
+    <div class="section">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="seg" role="group" aria-label="Blotter">
+            <button class="seg-btn active" data-click="setTab:positions" id="tabPositions">Positions</button>
+            <button class="seg-btn" data-click="setTab:open" id="tabOpen">Open orders</button>
+            <button class="seg-btn" data-click="setTab:history" id="tabHistory">Order history</button>
+            <button class="seg-btn" data-click="setTab:trades" id="tabTrades">Trades</button>
+          </div>
+        </div>
+        <div class="table-scroll" id="ptBlotter"></div>
+      </div>
+    </div>
+
+    <!-- Payoff + equity -->
+    <div class="section pt-grid pt-grid-even">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Payoff</div>
+          <select id="ptPayoffExpiry" data-change="renderPayoff" aria-label="Expiry for the payoff chart"></select>
+        </div>
+        <div class="pt-chart"><canvas id="ptPayoffChart"></canvas></div>
+        <div class="panel-note" id="ptPayoffNote">Open a position to see its payoff.</div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Equity</div>
+          <span class="panel-note">Closing equity each trading day, plus now</span>
+        </div>
+        <div class="pt-chart"><canvas id="ptEquityChart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="section pt-foot">
+      <div class="panel-note">Paper trading with simulated money on real NSE prices. Fills, charges and margin are approximations of what a broker would do. For practice and testing only, not investment advice.</div>
+    </div>
+  </main>
+
+  <script type="module" src="/js/paper.js"></script>
+</body>
+
+</html>

@@ -105,6 +105,68 @@ function requireSecret(req, res, next) {
   return next();
 }
 
+// ── Paper trading owner session ──────────────────────────────────────────
+//
+// Paper trading is owner-only. The owner signs in once with PAPER_SECRET and gets a signed, HttpOnly, SameSite=Strict
+// cookie (30 days), so the secret itself never sits in page storage where a script could read it. Scripts may instead send
+// `Authorization: Bearer <PAPER_SECRET>`. Changing PAPER_SECRET signs every browser out. Without PAPER_SECRET the
+// feature is off in production (503) and open in local development, like the cron secret.
+
+const PAPER_COOKIE = 'cd_paper';
+const PAPER_SESSION_MS = 30 * 24 * 3600 * 1000;
+const paperSecret = () => (process.env.PAPER_SECRET || '').trim();
+const safeEqual = (a, b) => crypto.timingSafeEqual(sha256(a), sha256(b));
+const signSession = (secret, exp) => crypto.createHmac('sha256', secret).update(`paper-session|${exp}`).digest('hex');
+
+function readCookie(req, name) {
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return '';
+}
+
+/** Is this request from the owner? */
+function isPaperOwner(req, now = Date.now()) {
+  const secret = paperSecret();
+  if (!secret) return !isProduction();
+  const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '');
+  if (bearer) return safeEqual(bearer[1].trim(), secret);
+  const m = /^(\d{13})\.([0-9a-f]{64})$/.exec(readCookie(req, PAPER_COOKIE));
+  if (!m || Number(m[1]) < now) return false;
+  return safeEqual(m[2], signSession(secret, m[1]));
+}
+
+function paperCookie(value, maxAgeSec) {
+  return `${PAPER_COOKIE}=${value}; Path=/api/paper; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSec}${isProduction() ? '; Secure' : ''}`;
+}
+
+/** Check a submitted secret; on success returns the Set-Cookie header value, otherwise null. */
+function paperSignIn(given, now = Date.now()) {
+  const secret = paperSecret();
+  if (!secret || typeof given !== 'string' || !safeEqual(given.trim(), secret)) return null;
+  const exp = now + PAPER_SESSION_MS;
+  return paperCookie(`${exp}.${signSession(secret, String(exp))}`, Math.floor(PAPER_SESSION_MS / 1000));
+}
+
+const paperSignOutCookie = () => paperCookie('', 0);
+
+/**
+ * Owner-only gate for /api/paper. Writes must also be JSON: a cross-site form cannot send that without a CORS preflight,
+ * which this origin never grants (SameSite=Strict already keeps the cookie off cross-site requests; this is a second lock).
+ */
+function requirePaperOwner(req, res, next) {
+  if (!paperSecret() && isProduction()) {
+    return res.status(503).json({ ok: false, error: 'Paper trading is disabled until PAPER_SECRET is configured.' });
+  }
+  if (!isPaperOwner(req)) return res.status(401).json({ ok: false, error: 'Sign in to use paper trading.', code: 'SIGNED_OUT' });
+  // only POST can be sent cross-site without a preflight; DELETE / PUT / PATCH already need one
+  if (['POST', 'PUT', 'PATCH'].includes(req.method) && !/^application\/json\b/i.test(req.headers['content-type'] || '')) {
+    return res.status(415).json({ ok: false, error: 'Send JSON.' });
+  }
+  return next();
+}
+
 // ── Validation & errors ──────────────────────────────────────────────────
 
 const EXPIRY_RE = /^\d{2}-[A-Za-z]{3}-\d{4}$/;
@@ -164,6 +226,11 @@ module.exports = {
   securityHeaders,
   rateLimit,
   requireSecret,
+  isPaperOwner,
+  paperSignIn,
+  paperSignOutCookie,
+  requirePaperOwner,
+  paperSecret,
   clientIp,
   isProduction,
   isValidExpiry,

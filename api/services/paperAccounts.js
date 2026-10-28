@@ -145,6 +145,59 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     return withAccount(id, state => engine.cancelOrder(orderId, state, now()));
   }
 
+  /** What placing this order would do (fill price, charges, free cash after), without saving anything. */
+  async function previewOrder(id, input) {
+    const state = await load(id);
+    const inst = engine.parseInstrument(input && input.instrument);
+    const { book, allowed } = await loadBook(inst ? [inst.expiry] : []);
+    const t = now();
+    const before = engine.summarize(state, book, cfg);
+    const out = engine.placeOrder(input, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg });
+    if (!out.ok) return { ok: false, error: out.error, availableBefore: before.available };
+    const after = engine.summarize(out.state, book, cfg);
+    return {
+      ok: true,
+      resting: !out.trade,
+      fill: out.trade ? { price: out.trade.price, qty: out.trade.qty, charges: out.trade.charges } : null,
+      availableBefore: before.available,
+      availableAfter: after.available,
+      marginAfter: after.margin
+    };
+  }
+
+  /** Option chain for the order ticket: the tradable expiries and strikes around the money for one of them. */
+  async function market(expiry, { width = 12 } = {}) {
+    let m = await loadBook(expiry ? [expiry] : []);
+    const exp = expiry && m.allowed.includes(expiry) ? expiry : m.allowed[0];
+    if (exp && !m.book.expiries.includes(exp)) m = await loadBook([exp]);
+    const t = now();
+    const { book } = m;
+    const byStrike = new Map();
+    for (const [key, q] of Object.entries(book.quotes)) {
+      const inst = engine.parseInstrument(key);
+      if (!inst || inst.expiry !== exp) continue;
+      const row = byStrike.get(inst.strike) || { strike: inst.strike, CE: null, PE: null };
+      row[inst.optionType] = { ltp: q.ltp, bid: q.bid, ask: q.ask, iv: q.iv, oi: q.oi };
+      byStrike.set(inst.strike, row);
+    }
+    const rows = [...byStrike.values()].sort((a, b) => a.strike - b.strike);
+    let atm = 0;
+    rows.forEach((r, i) => { if (Math.abs(r.strike - book.spot) < Math.abs(rows[atm].strike - book.spot)) atm = i; });
+    const strikes = rows.slice(Math.max(0, atm - width), atm + width + 1);
+    const marketOpen = isMarketOpen(t);
+    return {
+      asOf: book.asOf,
+      spot: book.spot,
+      marketOpen,
+      health: engine.bookHealth(book, t, { marketOpen, cfg }),
+      expiries: m.allowed,
+      expiry: exp || null,
+      lotSize: cfg.lotSize,
+      atmStrike: rows[atm] ? rows[atm].strike : null,
+      strikes
+    };
+  }
+
   // ── settlement ──
 
   /** One settlement price per expiry, shared by every account. */
@@ -211,7 +264,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     return { accounts: accounts.length, fills, settled, dataOk: !!market && !market.book.stale };
   }
 
-  return { listAccounts, createAccount, resetAccount, deleteAccount, getSummary, placeOrder, cancelOrder, tick, loadBook, settlementPrice };
+  return { listAccounts, createAccount, resetAccount, deleteAccount, getSummary, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice };
 }
 
 /** The service wired to real storage, NSE and Yahoo. */
