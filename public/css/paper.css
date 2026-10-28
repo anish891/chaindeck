@@ -199,3 +199,15 @@ textarea { resize: vertical; width: 100%; }
 .lab-cards .glance-big { font-size: 17px; }
 .lab-trades { max-height: 420px; overflow-y: auto; }
 .lab-assumptions { padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+
+/* live strategies + performance */
+.lab-deploy { margin-top: 6px; padding: 10px 12px; border: 1px dashed var(--border2); border-radius: var(--radius); display: flex; flex-direction: column; gap: 8px; }
+.dep { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
+.dep-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dep-status { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; border-radius: 999px; padding: 2px 8px; border: 1px solid var(--border2); color: var(--muted); }
+.dep-status.active { color: var(--bull); border-color: var(--bull); }
+.dep-status.paused, .dep-status.stopping { color: var(--warn); border-color: var(--warn); }
+.dep-stats { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; }
+.dep-stats b { font-family: var(--mono); }
+.dep-log { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.dep-buttons { display: inline-flex; gap: 6px; flex-wrap: wrap; }

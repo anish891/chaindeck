@@ -4,13 +4,15 @@
 import { escapeHtml } from './ui-utils.js';
 
 const $ = id => document.getElementById(id);
-let deps = null;       // { api, inr, drawChart, chartColors, getAccountId }
+let deps = null;       // { api, inr, drawChart, chartColors, getAccountId, getAccounts }
 let saved = [];
 let presets = [];
 let current = null;    // { id: string | null, strategy }
 let report = null;
 let running = false;
 let armedDelete = 0;
+let deployments = [];
+let armedStop = { id: null, until: 0 };
 
 const CONDITION_LABELS = {
   gap: 'Gap at the open',
@@ -109,6 +111,16 @@ function renderEditor() {
   $('labSave').textContent = current.id ? 'Save' : 'Save strategy';
   $('labSaveAs').hidden = !current.id;
   $('labError').textContent = '';
+  renderDeployBox();
+}
+
+function renderDeployBox() {
+  $('labDeployBox').hidden = !current.id;
+  const accts = deps.getAccounts();
+  const busy = new Set(deployments.filter(d => d.status !== 'stopped').map(d => d.accountId));
+  $('labDeployAccount').innerHTML = accts.map(a => `<option value="${escapeHtml(a.id)}"${busy.has(a.id) ? ' disabled' : ''}>${escapeHtml(a.name)}${busy.has(a.id) ? ' (strategy running)' : ''}</option>`).join('');
+  const free = accts.find(a => !busy.has(a.id));
+  if (free) $('labDeployAccount').value = free.id;
 }
 
 /** The form, read back into a strategy object. */
@@ -227,6 +239,7 @@ export function initLab(d) {
 
 export function openLab() {
   if (!presets.length) loadLists();
+  loadDeployments();
 }
 
 export function labRedraw() {
@@ -338,4 +351,93 @@ export async function labCopyJson(e) {
   } catch (err) {
     $('labError').textContent = 'Copy failed.';
   }
+}
+
+// ── live strategies ──
+
+async function loadDeployments() {
+  const r = await deps.api('/deployments');
+  if (!r.ok) return;
+  deployments = r.deployments;
+  renderDeployments();
+  if (current) renderDeployBox();
+}
+
+const timeOf = t => new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+
+function renderDeployments() {
+  const { inr } = deps;
+  const box = $('labDeployments');
+  if (!deployments.length) { box.innerHTML = '<div class="empty-note">Nothing deployed. Save a strategy, then use Deploy under its rules.</div>'; return; }
+  box.innerHTML = deployments.slice().reverse().map(d => {
+    const r = d.report;
+    const stopping = armedStop.id === d.id && Date.now() < armedStop.until;
+    const buttons = d.status === 'stopped'
+      ? `<button class="pt-small" data-click="labDeployDelete:${escapeHtml(d.id)}">Delete</button>`
+      : [
+        d.status === 'active' ? `<button class="pt-small" data-click="labDeployStatus:${escapeHtml(d.id)}|paused">Pause</button>` : '',
+        d.status === 'paused' ? `<button class="pt-small" data-click="labDeployStatus:${escapeHtml(d.id)}|active">Resume</button>` : '',
+        d.status !== 'stopping' ? `<button class="pt-small${stopping ? ' pt-armed' : ''}" data-click="labDeployStatus:${escapeHtml(d.id)}|stopped">${stopping ? 'Confirm stop' : 'Stop'}</button>` : ''
+      ].join('');
+    const open = d.open
+      ? `<div class="pt-muted">Open since ${timeOf(d.open.entryT)} at NIFTY ${escapeHtml(d.open.entrySpot)}: ${d.open.legs.map(l => `${escapeHtml(l.side)} ${escapeHtml(l.strike)} ${escapeHtml(l.optionType)} @ ${l.entry.toFixed(2)}`).join(', ')}${d.open.stopRs !== null ? `, stop ${inr(-d.open.stopRs)}` : ''}${d.open.targetRs !== null ? `, target ${inr(d.open.targetRs)}` : ''}</div>`
+      : '';
+    const gap = r.model.meanGapPct === null ? 'n/a' : `${r.model.meanGapPct > 0 ? '+' : ''}${r.model.meanGapPct}% (avg size ${r.model.meanAbsGapPct}%)`;
+    const recent = (d.trades || []).slice(-8).reverse();
+    const table = recent.length ? `<div class="table-scroll"><table class="pt-table"><thead><tr><th>Day</th><th>In</th><th>Out</th><th>Exit</th><th class="right">Net (real)</th><th class="right">Model P&amp;L</th></tr></thead><tbody>${recent.map(t => `<tr>
+        <td>${escapeHtml(t.day)}</td><td>${timeOf(t.entryT)}</td><td>${timeOf(t.exitT)}</td><td>${escapeHtml(t.reason)}</td>
+        <td class="right ${t.net > 0 ? 'pt-pos' : t.net < 0 ? 'pt-neg' : ''}">${inr(t.net, true)}</td>
+        <td class="right pt-muted">${t.modelNet === null ? 'n/a' : inr(t.modelNet, true)}</td>
+      </tr>`).join('')}</tbody></table></div>` : '';
+    const logLines = (d.log || []).slice(-4).reverse().map(l => `<div>${timeOf(l.at)} ${escapeHtml(l.text)}</div>`).join('');
+    return `<div class="dep">
+      <div class="dep-head">
+        <span><b>${escapeHtml(d.strategy.name)}</b> <span class="pt-muted">on ${escapeHtml(d.accountName)}, ${escapeHtml(d.strategy.interval)}</span> <span class="dep-status ${escapeHtml(d.status)}">${escapeHtml(d.status)}</span></span>
+        <span class="dep-buttons">${buttons}</span>
+      </div>
+      <div class="dep-stats">
+        <span>Trades <b>${r.trades}</b></span>
+        <span>Win rate <b>${r.trades ? `${Math.round(r.winRate * 100)}%` : 'n/a'}</b></span>
+        <span>Average <b>${r.trades ? inr(r.expectancy, true) : 'n/a'}</b></span>
+        <span>Total <b class="${r.totalNet > 0 ? 'pt-pos' : r.totalNet < 0 ? 'pt-neg' : ''}">${inr(r.totalNet, true)}</b></span>
+        <span>Today <b>${d.day ? d.tradesToday : 0}/${d.strategy.entry.maxTradesPerDay}</b></span>
+        <span title="${escapeHtml(r.model.note)}">Model gap <b>${gap}</b></span>
+      </div>
+      ${open}${table}
+      <div class="dep-log">${logLines}</div>
+    </div>`;
+  }).join('');
+}
+
+export async function labDeploy() {
+  if (!current || !current.id) return;
+  $('labDeployError').textContent = '';
+  const r = await deps.api('/deployments', { method: 'POST', body: { strategyId: current.id, accountId: $('labDeployAccount').value } });
+  if (!r.ok) { $('labError').textContent = r.error || 'Could not deploy.'; return; }
+  await loadDeployments();
+}
+
+export async function labDeployStatus(arg) {
+  const [id, status] = String(arg).split('|');
+  if (status === 'stopped' && !(armedStop.id === id && Date.now() < armedStop.until)) {
+    armedStop = { id, until: Date.now() + 4000 };
+    renderDeployments();
+    setTimeout(() => { if (armedStop.id === id && Date.now() >= armedStop.until) renderDeployments(); }, 4100);
+    return;
+  }
+  armedStop = { id: null, until: 0 };
+  const r = await deps.api(`/deployments/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status } });
+  if (!r.ok) $('labDeployError').textContent = r.error || 'Could not change it.';
+  await loadDeployments();
+}
+
+export async function labDeployDelete(id) {
+  const r = await deps.api(`/deployments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!r.ok) $('labDeployError').textContent = r.error || 'Could not delete it.';
+  await loadDeployments();
+}
+
+/** Called by the page's refresh loop while the lab is open, so live positions and results stay current. */
+export function labRefreshLive() {
+  return loadDeployments();
 }

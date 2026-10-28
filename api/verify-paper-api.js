@@ -75,7 +75,7 @@ function feed(expiry) {
   {
     const html = read('public/paper.html');
     const js = read('public/js/paper.js');
-    const lab = read('public/js/paper-lab.js');
+    const lab = read('public/js/paper-lab.js') + read('public/js/paper-perf.js');
     const block = /const ACTIONS = \{([\s\S]*?)\n\};/.exec(js);
     assert(block, 'ACTIONS map in paper.js');
     const known = new Set([...block[1].matchAll(/^\s*([A-Za-z0-9_]+)\s*(?::|,|$)/gm)].map(m => m[1]));
@@ -95,7 +95,7 @@ function feed(expiry) {
     const missing = [...new Set([...(js + lab).matchAll(/\$\('([A-Za-z0-9_]+)'\)/g)].map(m => m[1]))].filter(id => !ids.has(id));
     assert.deepStrictEqual(missing, [], `paper.js looks up ids that paper.html does not have: ${missing.join(', ')}`);
     assert(/href="\/paper\.html"/.test(read('public/index.html')), 'the dashboard links to the paper page');
-    for (const f of ['public/paper.html', 'public/js/paper.js', 'public/js/paper-lab.js', 'public/js/paper-payoff.js', 'public/css/paper.css']) {
+    for (const f of ['public/paper.html', 'public/js/paper.js', 'public/js/paper-lab.js', 'public/js/paper-perf.js', 'public/js/paper-payoff.js', 'public/css/paper.css']) {
       assert(!/—/.test(read(f)), `${f}: no em dashes`);
       assert(!/\p{Extended_Pictographic}/u.test(read(f).replace(/[©®™]/g, '')), `${f}: no emoji`);
     }

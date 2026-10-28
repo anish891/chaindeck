@@ -140,8 +140,11 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     return { summary: engine.summarize(state, book, cfg), state };
   }
 
-  /** Place an order. `agent` ({ keyId, label }) marks it as an agent's: it needs a reason and respects the pause switch. */
-  async function placeOrder(id, input, { agent = null } = {}) {
+  /**
+   * Place an order. `agent` ({ keyId, label }) marks it as an agent's: it needs a reason and respects the pause switch.
+   * `strategy` ({ deploymentId, name }) marks it as a live strategy's.
+   */
+  async function placeOrder(id, input, { agent = null, strategy = null } = {}) {
     const inst = engine.parseInstrument(input && input.instrument);
     const { book, allowed } = await loadBook(inst ? [inst.expiry] : []);
     return withAccount(id, state => {
@@ -153,6 +156,9 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
       if (agent) {
         // the order and any bracket exits it spawned remember which key placed them
         for (const o of next.orders) if (o.id === out.order.id || o.parentId === out.order.id) o.agent = { keyId: agent.keyId, label: agent.label };
+      }
+      if (strategy) {
+        for (const o of next.orders) if (o.id === out.order.id) o.strategy = { deploymentId: strategy.deploymentId, name: strategy.name };
       }
       return { ...out, state: next, order: next.orders.find(o => o.id === out.order.id) || out.order };
     });
@@ -331,6 +337,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
    */
   async function tick() {
     const t = now();
+    await store.set('pt:lasttick', String(t), 600);
     const accounts = (await listAccounts()).filter(a => a.active);
     if (!accounts.length) return { accounts: 0, fills: 0, settled: 0 };
     const states = await Promise.all(accounts.map(a => load(a.id).catch(() => null)));
@@ -345,8 +352,16 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 
     const marketOpen = isMarketOpen(t);
     const afterClose = t >= engine.sessionCloseMs(t) && calendar.isTradingDay(t);
+    // Only lock and rewrite an account that has something to do this minute: live orders to work or expire, a contract to
+    // settle, or today's closing equity still to record. Holding positions alone needs nothing until the close.
+    const needsWork = st => st && (
+      st.orders.some(engine.isLive) ||
+      Object.values(st.positions).some(p => due.includes(p.expiry)) ||
+      (afterClose && (!st.curve.length || st.curve[st.curve.length - 1].ymd !== istYmd(t)))
+    );
     let fills = 0, settled = 0;
-    for (const a of accounts) {
+    for (const [n, a] of accounts.entries()) {
+      if (!needsWork(states[n])) continue;
       try {
         await withAccount(a.id, state => {
           let s = state;
@@ -361,14 +376,14 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
             const st = engine.settleExpiry(s, e, prices[e], t, { cfg });
             if (st.changed) { s = st.state; changed = true; settled += st.trades.length; }
           }
-          if (market) s = engine.recordMarks(s, market.book);
           // one equity point per trading day, written from the close onward
           const last = s.curve[s.curve.length - 1];
           if (afterClose && (!last || last.ymd !== istYmd(t) || changed)) {
             s = engine.recordEquity(s, engine.summarize(s, market && market.book, cfg).equity, t);
             changed = true;
           }
-          return changed || s !== state ? { state: s } : null;
+          // marks ride along with a real change; on their own they are not worth a write every minute
+          return changed ? { state: market ? engine.recordMarks(s, market.book) : s } : null;
         });
       } catch (e) {
         console.error(`paper tick: account ${a.id} failed:`, e.message);
@@ -377,8 +392,13 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     return { accounts: accounts.length, fills, settled, dataOk: !!market && !market.book.stale };
   }
 
+  /** When any tick last ran (the cron job's, or a page's), in epoch ms; 0 if not within the last 10 minutes. */
+  async function lastTickAt() {
+    return Number(await store.get('pt:lasttick')) || 0;
+  }
+
   return {
-    listAccounts, createAccount, resetAccount, deleteAccount, getSummary, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice,
+    lastTickAt, listAccounts, createAccount, resetAccount, deleteAccount, getSummary, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice,
     setAgentsPaused, listKeys, createKey, revokeKey, authenticate, consumeOrderQuota, consumeBacktestQuota, idempotent
   };
 }

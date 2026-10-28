@@ -21,21 +21,39 @@
 //   PUT    /strategies/:sid              { strategy } replace a saved one
 //   DELETE /strategies/:sid              remove
 //   POST   /backtest                     { strategy, accountId? } backtest on 60 sessions (capital from the account)
+//   GET    /deployments                  live strategies with their live results
+//   POST   /deployments                  { strategyId, accountId } deploy a saved strategy
+//   POST   /deployments/:did/status      { status: active | paused | stopped }
+//   DELETE /deployments/:did             remove a stopped deployment
+//   GET    /accounts/:id/analytics       performance, split by who traded and by tag
+//   GET    /compare                      every account side by side
+//   GET    /accounts/:id/export?kind=    trades or orders as CSV
 //   /v1/...                              the agent API (routes/paperAgent.js), authenticated by agent key instead
 
 const express = require('express');
 const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../security');
 const { defaultService, ID_RE } = require('../services/paperAccounts');
 const { defaultStrategyService } = require('../services/paperStrategies');
+const { createLiveService } = require('../services/strategyLive');
+const analytics = require('../services/paperAnalytics');
 
 const router = express.Router();
 const signInLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, name: 'paper-signin' });
-const TICK_EVERY_MS = 15 * 1000; // an open page also works resting orders, so fills do not wait for the cron job
+// An open page works resting orders itself only when the cron job seems to be missing (no tick for 90 seconds), so the
+// two never duplicate each other's storage traffic.
+const TICK_EVERY_MS = 60 * 1000;
+const CRON_GRACE_MS = 90 * 1000;
 
 let service = null;
 const svc = () => service || (service = defaultService());
 let strategyService = null;
 const strategies = () => strategyService || (strategyService = defaultStrategyService());
+let liveService = null;
+const live = () => liveService || (liveService = createLiveService({
+  store: require('../services/storage'),
+  accounts: svc(),
+  loadLive: interval => require('../services/candles').getLiveData(interval)
+}));
 const backtestLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'paper-backtest' });
 let lastTick = 0;
 
@@ -43,13 +61,16 @@ let lastTick = 0;
 router.setService = s => { service = s; lastTick = 0; };
 router.service = svc;
 router.setStrategyService = s => { strategyService = s; };
+router.setLiveService = s => { liveService = s; };
+router.live = live;
 
 router.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 router.use(express.json({ limit: '8kb' }));
 
 const STATUS = {
   NOT_FOUND: 404, BUSY: 409, EXISTS: 409, TOO_MANY_ACCOUNTS: 409, TOO_MANY_KEYS: 409,
-  BAD_ID: 400, BAD_CAPITAL: 400, BAD_NAME: 400, BAD_LABEL: 400, BAD_SCOPE: 400, BAD_STRATEGY: 400, TOO_MANY_STRATEGIES: 409
+  BAD_ID: 400, BAD_CAPITAL: 400, BAD_NAME: 400, BAD_LABEL: 400, BAD_SCOPE: 400, BAD_STRATEGY: 400, TOO_MANY_STRATEGIES: 409,
+  TOO_MANY_DEPLOYMENTS: 409, ACCOUNT_IN_USE: 409, BAD_STATUS: 400, STOPPED: 409, NOT_STOPPED: 409
 };
 
 /** Known, user-facing errors keep their message; anything else is logged and hidden. */
@@ -130,7 +151,8 @@ router.get('/accounts/:id', validId, async (req, res) => {
   try {
     if (Date.now() - lastTick > TICK_EVERY_MS) {
       lastTick = Date.now();
-      await svc().tick().catch(e => console.error('paper tick from page failed:', e.message));
+      const last = await svc().lastTickAt().catch(() => 0);
+      if (Date.now() - last > CRON_GRACE_MS) await svc().tick().catch(e => console.error('paper tick from page failed:', e.message));
     }
     const { summary, state } = await svc().getSummary(req.params.id);
     res.json({
@@ -280,6 +302,103 @@ router.post('/backtest', backtestLimit, async (req, res) => {
     res.json({ ok: true, report: await strategies().backtest(b.strategy, { capital }) });
   } catch (err) {
     return fail(res, err, 'Error running backtest');
+  }
+});
+
+// ── live strategies ──
+
+const DID_RE = /^d-[0-9a-f]{8}$/;
+
+async function withReports(list) {
+  const names = new Map((await svc().listAccounts()).map(a => [a.id, a.name]));
+  const out = [];
+  for (const d of list) {
+    let capital = 100000;
+    try { capital = (await svc().getSummary(d.accountId)).summary.startingCapital; } catch (e) { /* account removed */ }
+    out.push({ ...d, accountName: names.get(d.accountId) || `${d.accountId} (deleted)`, report: live().report(d, capital) });
+  }
+  return out;
+}
+
+router.get('/deployments', async (req, res) => {
+  try {
+    res.json({ ok: true, deployments: await withReports(await live().list()) });
+  } catch (err) {
+    return fail(res, err, 'Error listing deployments');
+  }
+});
+
+router.post('/deployments', async (req, res) => {
+  const b = req.body || {};
+  if (!ID_RE.test(String(b.accountId || ''))) return res.status(400).json({ ok: false, error: 'Pick an account.' });
+  try {
+    const row = (await strategies().list()).find(r => r.id === b.strategyId);
+    if (!row) return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Save the strategy before deploying it.' });
+    const d = await live().deploy({ strategy: row.strategy, strategyId: row.id, accountId: b.accountId });
+    res.status(201).json({ ok: true, deployment: d });
+  } catch (err) {
+    return fail(res, err, 'Error deploying strategy');
+  }
+});
+
+router.post('/deployments/:did/status', async (req, res) => {
+  if (!DID_RE.test(req.params.did)) return res.status(400).json({ ok: false, error: 'Bad deployment id.' });
+  try {
+    res.json({ ok: true, deployment: await live().setStatus(req.params.did, (req.body || {}).status) });
+  } catch (err) {
+    return fail(res, err, 'Error changing deployment');
+  }
+});
+
+router.delete('/deployments/:did', async (req, res) => {
+  if (!DID_RE.test(req.params.did)) return res.status(400).json({ ok: false, error: 'Bad deployment id.' });
+  try {
+    await live().remove(req.params.did);
+    res.json({ ok: true });
+  } catch (err) {
+    return fail(res, err, 'Error deleting deployment');
+  }
+});
+
+// ── analytics and export ──
+
+router.get('/accounts/:id/analytics', validId, async (req, res) => {
+  try {
+    const { summary, state } = await svc().getSummary(req.params.id);
+    res.json({ ok: true, analytics: analytics.accountAnalytics(state, summary) });
+  } catch (err) {
+    return fail(res, err, 'Error building analytics');
+  }
+});
+
+router.get('/compare', async (req, res) => {
+  try {
+    const rows = [];
+    for (const a of await svc().listAccounts()) {
+      const { summary, state } = await svc().getSummary(a.id);
+      const x = analytics.accountAnalytics(state, summary);
+      rows.push({
+        id: x.id, name: x.name, startingCapital: x.startingCapital, equity: x.equity, returnPct: x.returnPct, realized: x.realized,
+        unrealized: x.unrealized, charges: x.charges, closes: x.closes, winRate: x.winRate, profitFactor: x.profitFactor,
+        maxDrawdownPct: x.maxDrawdownPct, traders: x.byWho.map(b => b.label)
+      });
+    }
+    res.json({ ok: true, accounts: rows });
+  } catch (err) {
+    return fail(res, err, 'Error comparing accounts');
+  }
+});
+
+router.get('/accounts/:id/export', validId, async (req, res) => {
+  const kind = req.query.kind;
+  if (!['trades', 'orders'].includes(kind)) return res.status(400).json({ ok: false, error: 'kind must be trades or orders.' });
+  try {
+    const { state } = await svc().getSummary(req.params.id);
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="chaindeck-paper-${state.id}-${kind}.csv"`);
+    res.send(kind === 'trades' ? analytics.tradesCsv(state) : analytics.ordersCsv(state));
+  } catch (err) {
+    return fail(res, err, 'Error exporting');
   }
 });
 

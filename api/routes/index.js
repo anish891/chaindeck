@@ -191,14 +191,18 @@ async function cronSnapshot(req, res) {
 router.get('/cron/snapshot', strictLimit, requireSecret, cronSnapshot);
 router.post('/cron/snapshot', strictLimit, requireSecret, cronSnapshot);
 
-// Paper trading: fill resting orders, expire day orders, settle expiries and record each day's equity. A separate job from
-// the snapshot so a slow paper tick can never cost a saved snapshot. Same secret, same schedule (every minute, 09-15 IST).
+// Paper trading: fill resting orders, expire day orders, settle expiries, record each day's equity, then run deployed
+// strategies. A separate job from the snapshot so a slow paper tick can never cost a saved snapshot. Same secret, same
+// schedule (every minute, 09-15 IST).
 async function cronPaper(req, res) {
   await refreshHolidays();
   try {
     const result = await paperRoutes.service().tick();
+    // live strategies after the fills: a failure here must not hide the account tick's result
+    let strategies;
+    try { strategies = await paperRoutes.live().tick(); } catch (e) { console.error('live strategies tick failed:', e.message); strategies = { error: true }; }
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, ...result });
+    res.json({ ok: true, ...result, strategies });
   } catch (err) {
     return sendError(res, 502, 'Paper tick failed', err);
   }

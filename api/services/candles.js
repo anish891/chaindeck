@@ -229,6 +229,21 @@ async function getBacktestData(interval, { fetchImpl = fetch } = {}) {
   return { ...r.value, fetchedAt: r.ts };
 }
 
+/**
+ * What a live (deployed) strategy needs right now: the chart's recent candles for the interval (with ETF volume) and
+ * India VIX on the same grid, both refreshed every 20 seconds while the market is open.
+ */
+async function getLiveData(interval, { fetchImpl = fetch } = {}) {
+  const preset = PRESETS[interval];
+  if (!preset || interval === '1d') throw new Error(`Unsupported interval ${interval}`);
+  const ttl = marketOpenNow() ? TTL_OPEN_MS : TTL_CLOSED_MS;
+  const [chart, vix] = await Promise.all([
+    getCandles(interval, { fetchImpl }),
+    cached(`livevix|${interval}`, ttl, () => fetchYahooCandles(SYMBOLS.vix, preset.yahooInterval, '5d', fetchImpl), STALE_MAX_OPEN_MS)
+  ]);
+  return { candles: chart.candles, vix: vix.value.map(c => ({ t: c.t, c: c.c })), stale: !!(chart.stale || vix.stale), source: chart.source };
+}
+
 function clearCache() {
   cache.clear();
   inflight.clear();
@@ -248,6 +263,7 @@ module.exports = {
   getHistoryCandles,
   getHistoryWithVolume,
   getBacktestData,
+  getLiveData,
   marketOpenNow,
   STALE_MAX_OPEN_MS,
   cached,

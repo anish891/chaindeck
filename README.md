@@ -243,6 +243,61 @@ traders read it, with an English and हिन्दी toggle. The language cho
 
 ---
 
+## Paper trading
+
+A separate page (`/paper.html`, linked from the top bar) for practising NIFTY option trades with simulated money on
+real NSE prices, testing strategies, and letting AI agents trade. It is owner only: sign in once with `PAPER_SECRET`.
+
+### Trade
+- **Accounts:** up to 20, each with its own cash (₹1,00,000 by default), history and equity curve. Reset or delete any time.
+- **Instruments:** NIFTY options in the nearest four expiries. Lot size 65.
+- **Orders:** market, limit, stop limit (SL) and stop market (SL-M), with an optional target and stop that become
+  exits cancelling each other once the entry fills. A preview shows the fill price, charges and free cash before you place it.
+- **Fills:** market buys pay the ask and sells receive the bid (last price plus or minus 1% when the book is empty).
+  Waiting orders fill only on a newer NSE snapshot than the one they were placed against, never on the quote just seen.
+  Stops trigger on the last traded price. All orders are day orders, cancelled at 15:30; positions carry overnight.
+- **Charges:** brokerage ₹20 an order, STT 0.15% of premium on sells and of intrinsic value on exercise, NSE
+  transaction charge, SEBI fee, stamp duty and GST (rates as of 2026, in `api/services/paperCosts.js`).
+- **Margin:** an estimate, not SPAN. A naked short option needs about 9% of spot (less for out of the money), and a
+  spread needs only its maximum loss. With ₹1,00,000 you can buy options and trade spreads, not sell naked.
+- **Expiry:** open options cash-settle at intrinsic value against the NIFTY close, 15 minutes after the expiry close.
+- **Paused trading:** orders are refused outside 09:15 to 15:30 IST, when NSE serves a leftover copy, or when the
+  latest snapshot is more than 3 minutes old.
+- **Views:** positions, open orders, order history (with who placed each order and why), trades, a payoff chart (at
+  expiry and today) and the equity curve.
+
+### Strategy lab
+- **Rules, not code:** an entry window, weekdays, trades a day, conditions (gap, move since the open, opening range
+  breakout, price against VWAP or the previous day, India VIX, reversal signals), up to four legs set as strikes from
+  ATM, and exits (stop and target as a share of premium or in rupees, an exit time, an index move).
+- **Backtest:** about 60 sessions of 5 or 15 minute candles. Option prices are **modelled** (Black-Scholes with India
+  VIX, a simple skew, and time decay counted in trading minutes), because no historical option quotes are available.
+  Conditions are judged on a candle's close and the trade enters at the next open; a stop and a target hit in the same
+  candle count as a stop; nothing is held overnight; fills pay a modelled spread plus the real charges.
+- **Honest verdict:** "looks like an edge" needs 30 trades, a positive average trade with 95% confidence, and beating
+  95% of runs that use the same legs and exits from random entry times. Most strategies show "not enough trades" or
+  "no clear edge", and the page says so.
+- **Live:** deploy a saved strategy to an account (one strategy per account). Each minute the paper cron job checks
+  it against the latest closed candle and trades through the same engine at real prices. Each live fill also records
+  what the backtest model would have priced it at, so you can see how far backtests are from reality.
+
+### Performance
+Every account side by side (return, drawdown, win rate, profit factor, charges), and one account split by who traded
+(you, each agent, each strategy, expiry settlement) and by tag. Trades and orders download as CSV (cells that a
+spreadsheet would treat as formulas are neutralised).
+
+### AI agents
+- Create a key for one account under Accounts. It is shown once (only a SHA-256 fingerprint is stored), can be read
+  only or allowed to trade, and can be revoked. The page gives instructions to paste into Claude or any other agent.
+- The API lives at `/api/paper/v1` with `Authorization: Bearer cdp_...`. `GET /api/paper/v1` describes the rules,
+  endpoints, order format and strategy format. Agents can read the account, the option chain, the dashboard's market
+  readings (`/v1/context`), positions, orders, trades and analytics, place and cancel orders, and run backtests.
+- Every agent order must carry a reason, shown in the order history. Limits per key: 10 order requests a minute and
+  300 a day, 5 backtests a minute, 120 requests a minute overall. An `Idempotency-Key` header makes a retried order
+  safe. You can pause agent trading on an account at any time; you can still trade it yourself.
+
+---
+
 ## Operations
 
 - **Requirements:** Node 22 or newer. `npm test` runs the whole suite (no network or storage needed) and CI runs it on every push (`.github/workflows/ci.yml`).
@@ -250,6 +305,16 @@ traders read it, with an English and हिन्दी toggle. The language cho
 - **Is the recorder alive?** `GET /api/snapshot-age` returns HTTP 503 when the last saved snapshot is more than 5 minutes old during market hours, and 200 otherwise. Point an uptime monitor at it to be alerted when the cron job stops. It reveals only that age.
 - **NSE holidays:** the list comes from NSE's holiday master (refreshed at most daily, falling back to a built-in 2026 list), so holidays are treated as closed everywhere: the market-hours checks, time to expiry and the trust light.
 - **Storage:** with Upstash configured, history uses roughly 5 to 7 commands a minute from the recorder, plus about 6 per open dashboard per minute. The free plan allows 500K commands a month, so check usage in the Upstash dashboard if you leave several tabs open all day.
+- **Paper trading setup:** set `PAPER_SECRET` (a long random value, e.g. `openssl rand -hex 32`) in the Vercel
+  environment; without it the paper pages and agent API answer 503 in production. Add a second cron-job.org job for
+  `/api/cron/paper` on the same schedule and with the same `Authorization: Bearer <CRON_SECRET>` header: it fills waiting
+  orders, cancels day orders at the close, settles expiries, records each day's closing equity and runs deployed
+  strategies. If it stops, an open paper page takes over working orders after 90 seconds, but live strategies only run
+  from the cron job.
+- **Paper trading storage:** each cron minute costs about 3 Upstash commands with nothing active, plus about 6 for each
+  account with waiting orders and 4 for each running strategy (a typical setup of two accounts and one strategy is about
+  100K commands a month). A paper page left open adds about 5 a minute. Accounts that only hold positions are not
+  rewritten during the session.
 - **Data sources and use:** option data comes from NSE's public website API and candles from Yahoo Finance's chart endpoint. Both are unofficial and subject to the providers' terms; this project is for personal analysis, is not investment advice, and should not be offered as a paid or public service without licensed data and the appropriate registrations.
 
 ---

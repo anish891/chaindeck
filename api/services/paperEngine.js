@@ -323,7 +323,7 @@ function validateOrderInput(input, cfg = DEFAULTS) {
       side: o.side, orderType, lots: o.lots,
       limitPrice: needLimit ? o.limitPrice : null,
       triggerPrice: needTrigger ? o.triggerPrice : null,
-      source, reason: typeof o.reason === 'string' ? o.reason.trim() : '', tag: o.tag || null, bracket
+      source, reason: typeof o.reason === 'string' ? o.reason.trim() : '', tag: (o.tag && o.tag.trim()) || null, bracket
     }
   };
 }

@@ -4,10 +4,11 @@
 import { escapeHtml, hmIst } from './ui-utils.js';
 import { setIconText, themeIcon } from './icons.js';
 import { payoffSeries } from './paper-payoff.js';
-import { initLab, openLab, labRedraw, labNew, labPreset, labLoad, labAddCond, labRemoveCond, labAddLeg, labRemoveLeg, labRun, labSave, labSaveAs, labDelete, labCopyJson } from './paper-lab.js';
+import { initLab, openLab, labRedraw, labNew, labPreset, labLoad, labAddCond, labRemoveCond, labAddLeg, labRemoveLeg, labRun, labSave, labSaveAs, labDelete, labCopyJson, labDeploy, labDeployStatus, labDeployDelete, labRefreshLive } from './paper-lab.js';
+import { initPerf, loadPerf } from './paper-perf.js';
 
 const $ = id => document.getElementById(id);
-const OPEN_POLL_MS = 5000;
+const OPEN_POLL_MS = 15000; // NSE refreshes about once a minute; faster polling only spends storage commands
 const CLOSED_POLL_MS = 60000;
 const PREVIEW_DELAY_MS = 350;
 
@@ -28,7 +29,7 @@ let newKey = null;        // { token, prompt } shown once after creating a key
 
 try { accountId = localStorage.getItem('paper_account'); } catch (e) { /* storage unavailable */ }
 try { tab = localStorage.getItem('paper_tab') || 'positions'; } catch (e) { /* ignore */ }
-try { view = localStorage.getItem('paper_view') === 'lab' ? 'lab' : 'trade'; } catch (e) { /* ignore */ }
+try { view = ['lab', 'perf'].includes(localStorage.getItem('paper_view')) ? localStorage.getItem('paper_view') : 'trade'; } catch (e) { /* ignore */ }
 
 // ── formatting ──
 
@@ -175,6 +176,7 @@ async function refresh() {
   }
   if (a.ok) account = a;
   renderAll();
+  if (view === 'lab' && market && market.marketOpen) labRefreshLive(); // live positions move only while trading
   const open = market && market.marketOpen;
   pollTimer = setTimeout(refresh, open ? OPEN_POLL_MS : CLOSED_POLL_MS);
 }
@@ -589,13 +591,16 @@ function renderEquity() {
 // ── views ──
 
 function setView(v) {
-  view = v === 'lab' ? 'lab' : 'trade';
+  view = ['lab', 'perf'].includes(v) ? v : 'trade';
   try { localStorage.setItem('paper_view', view); } catch (e) { /* ignore */ }
   $('ptTradeView').hidden = view !== 'trade';
   $('ptLabView').hidden = view !== 'lab';
+  $('ptPerfView').hidden = view !== 'perf';
   $('viewTrade').classList.toggle('active', view === 'trade');
   $('viewLab').classList.toggle('active', view === 'lab');
+  $('viewPerf').classList.toggle('active', view === 'perf');
   if (view === 'lab') openLab();
+  if (view === 'perf') loadPerf();
 }
 
 // ── accounts ──
@@ -612,6 +617,7 @@ function switchAccount() {
   ticket = { instrument: null, side: 'BUY' };
   hideNewKey();
   if (!$('ptManage').hidden) loadKeys();
+  if (view === 'perf') loadPerf();
   refresh();
 }
 
@@ -778,7 +784,10 @@ const ACTIONS = {
   labSave,
   labSaveAs,
   labDelete,
-  labCopyJson
+  labCopyJson,
+  labDeploy,
+  labDeployStatus,
+  labDeployDelete
 };
 
 function runActions(spec, event) {
@@ -806,7 +815,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if ($('themeSelect').value === 'system') applyTheme('system'); });
   for (const id of ['tkLots', 'tkLimit', 'tkTrigger', 'tkTarget', 'tkStop']) $(id).addEventListener('input', () => renderTicket(true));
   $('ptSecret').addEventListener('keydown', e => { if (e.key === 'Enter') signIn(); });
-  initLab({ api, inr, drawChart, chartColors, getAccountId: () => accountId });
+  initLab({ api, inr, drawChart, chartColors, getAccountId: () => accountId, getAccounts: () => accounts });
+  initPerf({ api, inr, getAccountId: () => accountId });
   document.addEventListener('visibilitychange', () => { if (!document.hidden && account) refresh(); });
 
   const s = await api('/session');

@@ -113,6 +113,7 @@
       <div class="seg" role="group" aria-label="View">
         <button class="seg-btn active" id="viewTrade" data-click="setView:trade">Trade</button>
         <button class="seg-btn" id="viewLab" data-click="setView:lab">Strategy lab</button>
+        <button class="seg-btn" id="viewPerf" data-click="setView:perf">Performance</button>
       </div>
     </div>
 
@@ -273,6 +274,14 @@
             <button data-click="labCopyJson">Copy as JSON</button>
             <button id="labDelete" data-click="labDelete" hidden>Delete</button>
           </div>
+          <div class="lab-deploy" id="labDeployBox" hidden>
+            <div class="pt-label">Run it live on a paper account: real NSE prices, checked every minute by the paper cron job</div>
+            <div class="pt-form-row">
+              <select id="labDeployAccount" aria-label="Account to run the strategy on"></select>
+              <button data-click="labDeploy">Deploy</button>
+            </div>
+            <div class="pt-muted">One strategy per account keeps results apart: create a fresh account under Accounts first.</div>
+          </div>
         </div>
       </div>
 
@@ -287,6 +296,47 @@
           <div class="table-scroll lab-trades" id="labTrades"></div>
           <div class="lab-section">How this was tested</div>
           <ul class="lab-assumptions" id="labAssumptions"></ul>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Live strategies</div>
+            <span class="panel-note">Forward tests on real prices. Model gap compares each real fill with the backtest's modelled price.</span>
+          </div>
+          <div id="labDeployments"></div>
+          <div class="pt-error" id="labDeployError" role="alert"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Performance -->
+    <div id="ptPerfView" hidden>
+      <div class="section">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">All accounts</div>
+            <span class="panel-note">Equity at current prices. Return and drawdown are against each account's starting capital.</span>
+          </div>
+          <div class="table-scroll" id="perfCompare"></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">This account: <span id="perfName">n/a</span></div>
+            <span class="pt-form-row">
+              <a class="pt-link" id="perfCsvTrades" href="#" download>Trades CSV</a>
+              <a class="pt-link" id="perfCsvOrders" href="#" download>Orders CSV</a>
+            </span>
+          </div>
+          <div id="perfCards" class="glance-grid lab-cards"></div>
+          <div class="lab-section">By who traded</div>
+          <div class="table-scroll" id="perfWho"></div>
+          <div class="lab-section">By tag</div>
+          <div class="table-scroll" id="perfTags"></div>
+          <div class="panel-note" id="perfNote"></div>
         </div>
       </div>
     </div>

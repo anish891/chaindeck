@@ -112,6 +112,8 @@ const identity = (state, b) => {
   assert.strictEqual(code({ ...buy, orderType: 'LIMIT', limitPrice: 100.03 }, ctx(b)), 'BAD_PRICE', 'off the 0.05 grid');
   assert.strictEqual(code({ ...buy, source: 'agent' }, ctx(b)), 'REASON_REQUIRED');
   assert(E.placeOrder({ ...buy, source: 'agent', reason: 'testing' }, fresh(), ctx(b)).ok);
+  assert.strictEqual(E.placeOrder({ ...buy, tag: '   =cmd' }, fresh(), ctx(b)).order.tag, '=cmd', 'tags are trimmed, so the CSV formula guard sees the =');
+  assert.strictEqual(E.placeOrder({ ...buy, tag: '   ' }, fresh(), ctx(b)).order.tag, null);
   assert.strictEqual(code({ ...buy, orderType: 'SL-M', triggerPrice: 95 }, ctx(b)), 'TRIGGER_CROSSED', 'buy stop below LTP');
   assert.strictEqual(code({ ...buy, lots: 20 }, ctx(b)), 'INSUFFICIENT_FUNDS', '20 lots x 100 is more than 1 lakh');
   assert.strictEqual(code({ instrument: K(25000, 'PE'), side: 'SELL', lots: 1 }, ctx(b)), 'INSUFFICIENT_FUNDS', 'a naked short lot needs more than 1 lakh of margin');
@@ -268,6 +270,13 @@ function fakeStore() {
   assert.strictEqual(summary.positions.length, 1);
   assert.strictEqual(summary.positions[0].avgPrice, 84.5);
   assert.strictEqual(summary.positions[0].mark, 84);
+  assert.strictEqual(Number(store._map.get('pt:lasttick')), clock, 'the tick records when it ran');
+
+  // holding a position with no live orders: nothing to do mid-session, so no lock and no write
+  const quietCopy = store._map.get('pt:acct:main');
+  clock = T0 + 120e3;
+  await svc.tick();
+  assert.strictEqual(store._map.get('pt:acct:main'), quietCopy, 'a position-only account is not rewritten every minute');
 
   // errors come back as results and the stored account is unchanged: selling 5 lots closes 1 and opens 4 naked shorts
   const storedBefore = store._map.get('pt:acct:main');

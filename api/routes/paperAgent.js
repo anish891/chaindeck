@@ -16,6 +16,7 @@ const { fetchRawNSEOptionChain } = require('../services/nse');
 const { processOptionChainData } = require('../services/analytics');
 const integrity = require('../services/integrity');
 const { AGENT } = require('../services/paperAccounts');
+const { accountAnalytics } = require('../services/paperAnalytics');
 
 const READS_PER_MINUTE = 120;
 
@@ -114,6 +115,7 @@ function docs(agent) {
       'POST /api/paper/v1/orders/preview': 'same body as POST /orders; says what would happen, places nothing (trade scope)',
       'POST /api/paper/v1/orders': 'place an order (trade scope)',
       'DELETE /api/paper/v1/orders/:id': 'cancel a waiting order (trade scope)',
+      'GET /api/paper/v1/analytics': 'your account performance: return, drawdown, win rate, and results split by who traded and by tag',
       'GET /api/paper/v1/strategies/presets': 'example strategies in the backtest format',
       'POST /api/paper/v1/backtest': `{ strategy } backtest on about 60 sessions of history, at most ${AGENT.backtestsPerMinute} a minute (any scope)`
     },
@@ -243,6 +245,15 @@ module.exports = function agentRouter(svc, strategies) {
       res.json({ ok: true, trades: state.trades.slice().reverse().slice(0, limitOf(req.query.limit)) });
     } catch (err) {
       return fail(res, err, 'Agent: error reading trades');
+    }
+  });
+
+  router.get('/analytics', async (req, res) => {
+    try {
+      const { summary, state } = await svc().getSummary(id(req));
+      res.json({ ok: true, analytics: accountAnalytics(state, summary) });
+    } catch (err) {
+      return fail(res, err, 'Agent: error building analytics');
     }
   });
 

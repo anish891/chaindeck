@@ -444,4 +444,4 @@ function runBacktest(strategy, { candles, vix }, opts = {}) {
   };
 }
 
-module.exports = { bsPrice, sigmaFor, effectiveT, modelPrice, weeklyExpiries, prepare, conditionsHold, simulateTrade, entryCandidates, runBacktest, MIN_SAMPLES };
+module.exports = { stats, istMins, istDow, BAR_MIN, bsPrice, sigmaFor, effectiveT, modelPrice, weeklyExpiries, prepare, conditionsHold, simulateTrade, entryCandidates, runBacktest, MIN_SAMPLES };
