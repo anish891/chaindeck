@@ -2518,3 +2518,5 @@ body[data-trust="bad"] .glance-grid, body[data-trust="bad"] #metricsRow { opacit
 /* link to the paper trading page */
 .nav-link { display: inline-flex; align-items: center; gap: 5px; color: var(--text); text-decoration: none; font-size: 12px; border: 1px solid var(--border2); border-radius: 6px; padding: 5px 10px; background: var(--surface2); }
 .nav-link:hover { background: var(--hover); }
+button.nav-link { font: inherit; font-size: 12px; cursor: pointer; }
+.nav-link[hidden] { display: none; } /* the display rule above would otherwise win over the hidden attribute */

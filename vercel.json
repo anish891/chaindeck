@@ -25,6 +25,17 @@
       "continue": true
     },
     {
+      "src": "/paper.html",
+      "status": 308,
+      "headers": {
+        "Location": "/paper"
+      }
+    },
+    {
+      "src": "/paper/?",
+      "dest": "/public/paper/index.html"
+    },
+    {
       "src": "/api/(.*)",
       "dest": "/api/index.js"
     },
