@@ -10,7 +10,7 @@ export { agentPrompt } from './components/AccountsPanel';
 export { previousClose } from './components/Strip';
 export { App } from './App';
 export { Chain } from './components/Chain';
-export { Ticket } from './components/Ticket';
+export { OrderSheet } from './components/OrderSheet';
 export { Blotter } from './components/Blotter';
 export { Strip } from './components/Strip';
 export { PayoffPanel, EquityPanel } from './components/ChartPanels';

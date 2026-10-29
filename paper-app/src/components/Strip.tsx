@@ -20,13 +20,8 @@ export function Strip({ account, market }: { account: AccountDetail | null; mark
   const stale = !!market && !market.health.ok && market.health.reason !== 'MARKET_CLOSED';
   return (
     <div className="keystrip">
-      <Item label="Equity" value={inr(s.equity)} />
       <Item label="Today" value={inr(day, true)} cls={pnlClass(day)} />
       <Item label="Total P&L" value={`${inr(total, true)} (${((total / s.startingCapital) * 100).toFixed(2)}%)`} cls={pnlClass(total)} />
-      <Item label="Unrealised" value={inr(s.unrealized, true)} cls={pnlClass(s.unrealized)} />
-      <Item label="Realised" value={inr(s.realized, true)} cls={pnlClass(s.realized)} />
-      <Item label="Charges" value={inr(s.charges)} />
-      <Item label="Margin used" value={inr(s.margin)} />
       <Item label="Free cash" value={inr(s.available)} cls={s.available < 0 ? 'pt-neg' : ''} />
       <Item label="NIFTY" value={market && market.spot ? market.spot.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : 'n/a'} />
       <Item label="Prices as of" value={market && market.asOf ? dayTime(market.asOf) : 'n/a'} cls={stale ? 'stale' : ''} />

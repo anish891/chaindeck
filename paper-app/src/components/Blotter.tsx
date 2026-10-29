@@ -5,8 +5,8 @@ import { useConfirm } from '../hooks';
 import { ConfirmButton } from './ConfirmButton';
 import type { AccountDetail } from '../types';
 
-export type BlotterTab = 'positions' | 'open' | 'history' | 'trades';
-export const BLOTTER_TABS: [BlotterTab, string][] = [['positions', 'Positions'], ['open', 'Open orders'], ['history', 'Order history'], ['trades', 'Trades']];
+export type BlotterTab = 'positions' | 'orders' | 'trades';
+export const BLOTTER_TABS: [BlotterTab, string][] = [['positions', 'Positions'], ['orders', 'Orders'], ['trades', 'Trades']];
 
 interface Props {
   account: AccountDetail | null;
@@ -49,8 +49,10 @@ export function Blotter({ account, accountId, lotSize, tab, onTab, onChanged }: 
     if (tab === 'positions') {
       if (!s.positions.length) return <Empty text="No open positions." />;
       return (
+        <>
+        <div className="pt-total">Total P&amp;L <b className={pnlClass(s.unrealized)}>{inr(s.unrealized, true)}</b></div>
         <table className="pt-table">
-          <thead><tr><th>Contract</th><th className="right">Lots (qty)</th><th className="right">Avg</th><th className="right">LTP</th><th className="right">P&amp;L</th><th className="right">Booked</th><th /></tr></thead>
+          <thead><tr><th>Contract</th><th className="right">Lots (qty)</th><th className="right">Avg</th><th className="right">LTP</th><th className="right">P&amp;L</th><th /></tr></thead>
           <tbody>
             {s.positions.map(p => (
               <tr key={p.instrument}>
@@ -59,16 +61,30 @@ export function Blotter({ account, accountId, lotSize, tab, onTab, onChanged }: 
                 <td className="right">{px(p.avgPrice)}</td>
                 <td className="right">{px(p.mark)}</td>
                 <td className={`right ${pnlClass(p.unrealized)}`}>{inr(p.unrealized, true)}</td>
-                <td className={`right ${pnlClass(p.realized)}`}>{inr(p.realized, true)}</td>
                 <td className="right"><ConfirmButton armed={confirm.isArmed(`exit|${p.instrument}`)} label="Exit" confirmLabel="Confirm exit" onClick={() => exitPosition(p.instrument, p.qty)} /></td>
               </tr>
             ))}
           </tbody>
         </table>
+        </>
       );
     }
-    if (tab === 'open') {
-      if (!s.openOrders.length) return <Empty text="No open orders." />;
+    if (tab === 'orders') {
+      return (
+        <>
+          {s.openOrders.length > 0 && <div className="pt-total">Waiting to fill</div>}
+          {s.openOrders.length > 0 && openOrders()}
+          {account.orders.length > 0 && <div className="pt-total">History</div>}
+          {account.orders.length ? history() : s.openOrders.length ? null : <Empty text="No orders yet." />}
+        </>
+      );
+    }
+    return trades();
+  }
+
+  function openOrders() {
+    const s = account!.summary;
+    {
       return (
         <table className="pt-table">
           <thead><tr><th>Placed</th><th>Order</th><th>Contract</th><th>Side</th><th className="right">Lots</th><th>Type</th><th className="right">Limit</th><th className="right">Trigger</th><th>Status</th><th /></tr></thead>
@@ -89,13 +105,15 @@ export function Blotter({ account, accountId, lotSize, tab, onTab, onChanged }: 
         </table>
       );
     }
-    if (tab === 'history') {
-      if (!account.orders.length) return <Empty text="No orders yet." />;
+  }
+
+  function history() {
+    {
       return (
         <table className="pt-table">
           <thead><tr><th>Placed</th><th>Order</th><th>Contract</th><th>Side</th><th className="right">Lots</th><th>Type</th><th className="right">Price</th><th className="right">Filled at</th><th>Status</th><th>By</th><th>Note</th></tr></thead>
           <tbody>
-            {account.orders.map(o => (
+            {account!.orders.map(o => (
               <tr key={o.id}>
                 <td>{dayTime(o.placedAt)}</td><td>{o.id}</td><td>{instLabel(o.instrument)}</td>
                 <td className={o.side === 'BUY' ? 'pt-pos' : 'pt-neg'}>{o.side}</td><td className="right">{o.lots}</td><td>{o.orderType}</td>
@@ -107,12 +125,15 @@ export function Blotter({ account, accountId, lotSize, tab, onTab, onChanged }: 
         </table>
       );
     }
-    if (!account.trades.length) return <Empty text="No trades yet." />;
+  }
+
+  function trades() {
+    if (!account!.trades.length) return <Empty text="No trades yet." />;
     return (
       <table className="pt-table">
         <thead><tr><th>Time</th><th>Contract</th><th>Side</th><th className="right">Qty</th><th className="right">Price</th><th className="right">Charges</th><th className="right">Booked P&amp;L</th><th>Kind</th></tr></thead>
         <tbody>
-          {account.trades.map((t, i) => (
+          {account!.trades.map((t, i) => (
             <tr key={`${t.at}-${i}`}>
               <td>{dayTime(t.at)}</td><td>{instLabel(t.instrument)}</td><td className={t.side === 'BUY' ? 'pt-pos' : 'pt-neg'}>{t.side}</td>
               <td className="right">{t.qty}</td><td className="right">{t.price.toFixed(2)}</td><td className="right">{inr(t.charges)}</td>

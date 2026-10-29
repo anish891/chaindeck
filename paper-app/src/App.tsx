@@ -7,7 +7,7 @@ import { Login } from './components/Login';
 import { TopBar } from './components/TopBar';
 import { Strip } from './components/Strip';
 import { Chain } from './components/Chain';
-import { Ticket } from './components/Ticket';
+import { OrderSheet } from './components/OrderSheet';
 import { Blotter, BLOTTER_TABS } from './components/Blotter';
 import type { BlotterTab } from './components/Blotter';
 import { PayoffPanel, EquityPanel } from './components/ChartPanels';
@@ -25,6 +25,7 @@ const CLOSED_POLL_MS = 60000;
 
 const savedView = (): View => { const v = readPref('paper_view'); return v === 'lab' || v === 'perf' ? v : 'trade'; };
 const savedTab = (): BlotterTab => { const v = readPref('paper_tab'); return BLOTTER_TABS.some(([id]) => id === v) ? (v as BlotterTab) : 'positions'; };
+const NOTICE_MS = 6000;
 
 export function App() {
   const [boot, setBoot] = useState<Boot>('loading');
@@ -82,6 +83,8 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
   const [tab, setTab] = useState<BlotterTab>(savedTab);
   const [manage, setManage] = useState(false);
   const [selection, setSelection] = useState<Selection>({ instrument: null, side: 'BUY', nonce: 0 });
+  const [notice, setNotice] = useState('');
+  const [payoff, setPayoff] = useState(false);
   const [reload, setReload] = useState(0);
   const bump = useCallback(() => setReload(n => n + 1), []);
 
@@ -144,6 +147,13 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
   const h = market && market.health;
   const statusText = !marketLoaded ? 'Connecting…' : !market ? 'No market data' : h && h.ok ? 'Trading open' : h && h.reason === 'MARKET_CLOSED' ? 'Market closed' : 'Trading paused';
   const showBanner = !!h && !h.ok && h.reason !== 'MARKET_CLOSED';
+  const closeSheet = useCallback(() => setSelection(s => ({ ...s, instrument: null })), []);
+  const placed = (text: string) => { closeSheet(); setNotice(text); bump(); };
+  useEffect(() => {
+    if (!notice) return undefined;
+    const id = setTimeout(() => setNotice(''), NOTICE_MS);
+    return () => clearTimeout(id);
+  }, [notice]);
   const held = new Set(account ? account.summary.positions.map(p => p.instrument) : []);
 
   return (
@@ -177,21 +187,24 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
         </div>
 
         <div hidden={view !== 'trade'}>
-          <div className="section pt-grid">
-            <Chain market={market} held={held} selection={selection} onPick={pick} onExpiry={setExpiry} />
-            <Ticket accountId={accountId} market={market} selection={selection} onSide={side => setSelection(s => ({ ...s, side }))} onPlaced={bump} />
+          {notice && <div className="pt-toast" role="status">{notice}</div>}
+          <div className="section">
+            <Chain market={market} held={held} onPick={pick} onExpiry={setExpiry} />
           </div>
           <div className="section">
             <Blotter account={account} accountId={accountId} lotSize={(market && market.lotSize) || 65} tab={tab} onTab={chooseTab} onChanged={bump} />
           </div>
-          <div className="section pt-grid pt-grid-even">
-            <PayoffPanel account={account} market={market} />
-            <EquityPanel account={account} />
-          </div>
+          {tab === 'positions' && account && account.summary.positions.length > 0 && (
+            <div className="section">
+              <button type="button" className="pt-more" aria-expanded={payoff} onClick={() => setPayoff(p => !p)}>{payoff ? 'Hide payoff graph' : 'Show payoff graph'}</button>
+              {payoff && <PayoffPanel account={account} market={market} />}
+            </div>
+          )}
+          <OrderSheet accountId={accountId} market={market} selection={selection} onSide={side => setSelection(s => ({ ...s, side }))} onClose={closeSheet} onPlaced={placed} />
         </div>
 
         {visited.lab && <div hidden={view !== 'lab'}><Lab accounts={accounts} accountId={accountId} marketOpen={!!(market && market.marketOpen)} active={view === 'lab'} /></div>}
-        {visited.perf && <div hidden={view !== 'perf'}><Perf accountId={accountId} active={view === 'perf'} /></div>}
+        {visited.perf && <div hidden={view !== 'perf'}><div className="section"><EquityPanel account={account} /></div><Perf accountId={accountId} active={view === 'perf'} /></div>}
 
         <div className="section pt-foot">
           <div className="panel-note">Paper trading with simulated money on real NSE prices. Fills, charges and margin are approximations of what a broker would do. For practice and testing only, not investment advice.</div>

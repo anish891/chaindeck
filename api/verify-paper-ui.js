@@ -143,8 +143,9 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
 
   {
     const strip = html(U.Strip, { account, market });
-    assert(strip.includes('₹1,01,300.00') && strip.includes('22,712'), 'equity and NIFTY are shown');
+    assert(strip.includes('₹73,000.00') && strip.includes('22,712'), 'free cash and NIFTY are shown');
     assert(strip.includes('+₹1,300.00 (1.30%)'), 'total and percentage against starting capital');
+    assert(!strip.includes('Charges') && !strip.includes('Realised') && !strip.includes('Margin used'), 'the strip keeps only what a trader checks at a glance');
     assert.strictEqual(html(U.Strip, { account: null, market }), '<div class="keystrip"></div>');
     assert.strictEqual(U.previousClose(account, Date.UTC(2026, 9, 28, 6, 0)), 101000, "the previous close is the last recorded day before today");
     assert.strictEqual(U.previousClose({ ...account, curve: [] }), 100000, 'a new account falls back to its starting capital');
@@ -153,37 +154,45 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
   }
   {
     const held = new Set([pos.instrument]);
-    const chain = html(U.Chain, { market, held, selection: { instrument: pos.instrument, side: 'SELL', nonce: 1 }, onPick: noop, onExpiry: noop });
+    const chain = html(U.Chain, { market, held, onPick: noop, onExpiry: noop });
     assert(chain.includes('03 Nov') && chain.includes('10 Nov') && /seg-btn active[^>]*>03 Nov/.test(chain), 'expiry buttons, the current one active');
-    assert((chain.match(/<tr class="pt-atm"/g) || []).length === 1 && /pt-atm"><td[^>]*>[^<]*<\/td>.*?22700/.test(chain.replace(/\n/g, '')), 'exactly the ATM row is marked');
-    assert(chain.includes('class="pt-bs held"'), 'a held contract is dotted');
-    assert(/class="pt-s on"[^>]*title="Sell 22700 CE"/.test(chain) && !/class="pt-b on"/.test(chain), 'the picked side is highlighted, and only that one');
-    assert(chain.includes('aria-label="Buy 22650 PE"'), 'buttons are labelled for screen readers');
-    assert(chain.includes('Lot size 65'));
+    assert((chain.match(/<tr class="pt-atm"/g) || []).length === 1 && /pt-atm"><td[^>]*>.*?22700/.test(chain.replace(/\n/g, '')), 'exactly the ATM row is marked');
+    assert((chain.match(/pt-px held/g) || []).length === 1 && chain.includes('aria-label="Trade 22700 CE (you hold this)"'), 'only the held contract is dotted');
+    assert(chain.includes('aria-label="Trade 22650 PE"'), 'every price is a labelled button');
+    assert(/>100\.00<\/button>/.test(chain), 'the price itself is the button');
+    assert(!chain.includes('Bid / Ask') && !/>B<\/button>/.test(chain), 'the chain is just calls, strike and puts');
+    assert(chain.includes('Lot size 65') && chain.includes('Tap a price to buy or sell'));
     assert(chain.includes('pt-itm'), 'in-the-money cells are shaded');
-    assert(html(U.Chain, { market: null, held, selection: { instrument: null, side: 'BUY', nonce: 0 }, onPick: noop, onExpiry: noop }).includes('Option chain unavailable'));
-    assert(html(U.Chain, { market: { ...market, strikes: [] }, held, selection: { instrument: null, side: 'BUY', nonce: 0 }, onPick: noop, onExpiry: noop }).includes('No strikes for this expiry'));
+    assert(html(U.Chain, { market: null, held, onPick: noop, onExpiry: noop }).includes('Option chain unavailable'));
+    assert(html(U.Chain, { market: { ...market, strikes: [] }, held, onPick: noop, onExpiry: noop }).includes('No strikes for this expiry'));
   }
   {
-    const empty = html(U.Ticket, { accountId: 'main', market, selection: { instrument: null, side: 'BUY', nonce: 0 }, onSide: noop, onPlaced: noop });
-    assert(empty.includes('Pick a strike from the chain.') && /<button[^>]*disabled[^>]*>Place order/.test(empty), 'no order can be placed before a strike is picked');
-    const picked = html(U.Ticket, { accountId: 'main', market, selection: { instrument: pos.instrument, side: 'SELL', nonce: 1 }, onSide: noop, onPlaced: noop });
-    assert(picked.includes('NIFTY 03 Nov 22700 CE') && picked.includes('LTP 100.00') && picked.includes('Sell 1 lot (65 qty)') && picked.includes('pt-primary pt-sell'));
-    assert(!picked.includes('Limit price') && !picked.includes('Trigger price'), 'a market order shows no price fields');
+    const sheet = sel => html(U.OrderSheet, { accountId: 'main', market, selection: sel, onSide: noop, onClose: noop, onPlaced: noop });
+    assert.strictEqual(sheet({ instrument: null, side: 'BUY', nonce: 0 }), '', 'no sheet before a price is tapped');
+    const picked = sheet({ instrument: pos.instrument, side: 'SELL', nonce: 1 });
+    assert(picked.includes('role="dialog"') && picked.includes('NIFTY 03 Nov 22700 CE') && picked.includes('Price 100.00') && picked.includes('Sell 1 lot') && picked.includes('pt-primary pt-wide pt-sell'));
+    assert(/pt-side pt-side-sell on/.test(picked) && !/pt-side-buy on/.test(picked), 'the chosen side is highlighted, and only that one');
+    assert(picked.includes('(65 qty)') && picked.includes('aria-label="One lot more"'), 'lots have a stepper and show the quantity');
+    assert(!picked.includes('Limit price') && !picked.includes('Trigger price') && !picked.includes('Target price'), 'the first screen has no price fields and no advanced options');
+    assert(picked.includes('More options') && !picked.includes('Stop limit'), 'stop orders, target and note stay behind More options');
+    assert(sheet({ instrument: pos.instrument, side: 'BUY', nonce: 1 }).includes('Buy 1 lot') && sheet({ instrument: pos.instrument, side: 'BUY', nonce: 1 }).includes('pt-buy'));
   }
   {
     const hostile = { ...account, orders: [order({ id: 'O9', reason: '<img src=x onerror=alert(1)>', agent: { keyId: 'abcd1234', label: '<script>x</script>' } })] };
     const b = tab => html(U.Blotter, { account: hostile, accountId: 'main', lotSize: 65, tab, onTab: noop, onChanged: noop });
     const positions = b('positions');
     assert(positions.includes('03 Nov 22700 CE') && positions.includes('+2 (130)') && positions.includes('+₹1,300.00') && positions.includes('Exit'), 'a position shows lots, quantity, P&L and an exit button');
-    assert(b('open').includes('Cancel') && b('open').includes('O1'));
-    const history = b('history');
+    assert(positions.includes('Total P&amp;L') && !positions.includes('Booked'), 'positions show one total, not a column of booked P&L');
+    const orders = b('orders');
+    assert(orders.includes('Waiting to fill') && orders.includes('Cancel') && orders.includes('O1') && orders.includes('History'), 'orders shows what is waiting, then the history');
+    const history = orders;
     assert(history.includes('&lt;img src=x onerror=alert(1)&gt;') && history.includes('&lt;script&gt;x&lt;/script&gt;'), 'text from orders and agents is escaped');
     assert(!/<img src=x/.test(history) && !/<script>/.test(history));
     assert(b('trades').includes('130') && b('trades').includes('80.00'));
     assert(html(U.Blotter, { account: { ...account, summary: { ...account.summary, positions: [] } }, accountId: 'main', lotSize: 65, tab: 'positions', onTab: noop, onChanged: noop }).includes('No open positions.'));
     assert(html(U.Blotter, { account: null, accountId: 'main', lotSize: 65, tab: 'positions', onTab: noop, onChanged: noop }).includes('Loading'));
-    assert(html(U.Blotter, { account, accountId: 'main', lotSize: 65, tab: 'history', onTab: noop, onChanged: noop }).includes('Claude (agent)'));
+    assert(html(U.Blotter, { account, accountId: 'main', lotSize: 65, tab: 'orders', onTab: noop, onChanged: noop }).includes('Claude (agent)'));
+    assert(html(U.Blotter, { account, accountId: 'main', lotSize: 65, tab: 'positions', onTab: noop, onChanged: noop }).match(/seg-btn/g).length === 3, 'three tabs: positions, orders, trades');
   }
   {
     const pay = html(U.PayoffPanel, { account, market });

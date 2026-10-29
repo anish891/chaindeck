@@ -1,30 +1,39 @@
+import { useEffect, useRef } from 'react';
 import { instrumentKey, shortExpiry } from '../format';
 import type { Market, OptionType, Quote, Side } from '../types';
-import type { Selection } from '../ticket';
 
 interface Props {
   market: Market | null;
   held: Set<string>;
-  selection: Selection;
   onPick: (strike: number, type: OptionType, side: Side) => void;
   onExpiry: (expiry: string) => void;
 }
 
-const leg = (q: Quote | null, f: 'ltp' | 'bid' | 'ask') => (q && q[f] ? (q[f] as number).toFixed(2) : 'n/a');
-const book = (q: Quote | null) => (q && (q.bid || q.ask) ? `${leg(q, 'bid')} / ${leg(q, 'ask')}` : 'n/a');
+const ltp = (q: Quote | null) => (q && q.ltp ? q.ltp.toFixed(2) : 'n/a');
 
-function BuySell({ strike, type, expiry, held, selection, onPick }: { strike: number; type: OptionType; expiry: string } & Pick<Props, 'held' | 'selection' | 'onPick'>) {
-  const key = instrumentKey(expiry, strike, type);
-  const sel = selection.instrument === key;
+/** One tappable price. Tapping opens the order sheet on Buy; the sheet has the Sell switch. */
+function Price({ strike, type, expiry, q, held, onPick }: { strike: number; type: OptionType; expiry: string; q: Quote | null } & Pick<Props, 'held' | 'onPick'>) {
+  if (!q) return <span className="pt-muted">n/a</span>;
+  const isHeld = held.has(instrumentKey(expiry, strike, type));
   return (
-    <span className={`pt-bs${held.has(key) ? ' held' : ''}`}>
-      <button type="button" className={`pt-b${sel && selection.side === 'BUY' ? ' on' : ''}`} title={`Buy ${strike} ${type}`} aria-label={`Buy ${strike} ${type}`} onClick={() => onPick(strike, type, 'BUY')}>B</button>
-      <button type="button" className={`pt-s${sel && selection.side === 'SELL' ? ' on' : ''}`} title={`Sell ${strike} ${type}`} aria-label={`Sell ${strike} ${type}`} onClick={() => onPick(strike, type, 'SELL')}>S</button>
-    </span>
+    <button type="button" className={`pt-px${isHeld ? ' held' : ''}`} aria-label={`Trade ${strike} ${type}${isHeld ? ' (you hold this)' : ''}`} onClick={() => onPick(strike, type, 'BUY')}>
+      {ltp(q)}
+    </button>
   );
 }
 
-export function Chain({ market, held, selection, onPick, onExpiry }: Props) {
+export function Chain({ market, held, onPick, onExpiry }: Props) {
+  const scroll = useRef<HTMLDivElement | null>(null);
+  const expiry = market && market.expiry;
+  const atm = market && market.atmStrike;
+
+  // open on the at-the-money strikes, not the far in-the-money end; again when the expiry changes
+  useEffect(() => {
+    const box = scroll.current;
+    const row = box && box.querySelector<HTMLElement>('tr.pt-atm');
+    if (box && row) box.scrollTop = Math.max(0, row.offsetTop - box.clientHeight / 2 + row.offsetHeight / 2);
+  }, [expiry, atm !== null]);
+
   return (
     <div className="panel">
       <div className="panel-head">
@@ -35,38 +44,28 @@ export function Chain({ market, held, selection, onPick, onExpiry }: Props) {
           ))}
         </div>
       </div>
-      <div className="table-scroll">
+      <div className="table-scroll pt-chain-scroll" ref={scroll}>
         <table className="pt-table pt-chain">
           <thead>
-            <tr>
-              <th className="right pt-book">Bid / Ask</th><th className="right">LTP</th><th className="center">Calls</th>
-              <th className="center">Strike</th>
-              <th className="center">Puts</th><th className="right">LTP</th><th className="right pt-book">Bid / Ask</th>
-            </tr>
+            <tr><th className="center">Calls</th><th className="center">Strike</th><th className="center">Puts</th></tr>
           </thead>
           <tbody>
-            {!market && <tr><td colSpan={7} className="empty-note">Option chain unavailable right now.</td></tr>}
-            {market && market.strikes.length === 0 && <tr><td colSpan={7} className="empty-note">No strikes for this expiry.</td></tr>}
+            {!market && <tr><td colSpan={3} className="empty-note">Option chain unavailable right now.</td></tr>}
+            {market && market.strikes.length === 0 && <tr><td colSpan={3} className="empty-note">No strikes for this expiry.</td></tr>}
             {market && market.expiry && market.strikes.map(r => {
-              const itmCall = market.spot > r.strike;
-              const itmPut = market.spot < r.strike;
               const expiry = market.expiry as string;
               return (
                 <tr key={r.strike} className={r.strike === market.atmStrike ? 'pt-atm' : ''}>
-                  <td className={`right muted pt-book${itmCall ? ' pt-itm' : ''}`}>{book(r.CE)}</td>
-                  <td className={`right${itmCall ? ' pt-itm' : ''}`}>{leg(r.CE, 'ltp')}</td>
-                  <td className="center">{r.CE && <BuySell strike={r.strike} type="CE" expiry={expiry} held={held} selection={selection} onPick={onPick} />}</td>
+                  <td className={`center${market.spot > r.strike ? ' pt-itm' : ''}`}><Price strike={r.strike} type="CE" expiry={expiry} q={r.CE} held={held} onPick={onPick} /></td>
                   <td className="center pt-strike">{r.strike}</td>
-                  <td className="center">{r.PE && <BuySell strike={r.strike} type="PE" expiry={expiry} held={held} selection={selection} onPick={onPick} />}</td>
-                  <td className={`right${itmPut ? ' pt-itm' : ''}`}>{leg(r.PE, 'ltp')}</td>
-                  <td className={`right muted pt-book${itmPut ? ' pt-itm' : ''}`}>{book(r.PE)}</td>
+                  <td className={`center${market.spot < r.strike ? ' pt-itm' : ''}`}><Price strike={r.strike} type="PE" expiry={expiry} q={r.PE} held={held} onPick={onPick} /></td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
-      <div className="panel-note">Prices from NSE, refreshed about once a minute. B buys, S sells. Lot size {market ? market.lotSize : 'n/a'}.</div>
+      <div className="panel-note">Tap a price to buy or sell. A dot means you hold it. Prices from NSE, about once a minute. Lot size {market ? market.lotSize : 'n/a'}.</div>
     </div>
   );
 }
