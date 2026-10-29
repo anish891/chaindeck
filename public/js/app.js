@@ -1820,6 +1820,25 @@ function openStrike(strike) {
   openStrikePanel({ expiry: d.expiry, strike, live: d.strikes.find(s => s.strike === strike), spot: d.spot });
 }
 
+// ── paper trading entry: visible to the signed-in owner only ──
+// Hiding the button is a courtesy; the real gate is server-side (every /api/paper call needs the owner session cookie).
+// The owner reaches the sign-in page at /paper directly. Once signed in, this button appears on the dashboard.
+function openPaper() {
+  window.location.assign('/paper');
+}
+
+async function showPaperButton() {
+  const btn = document.getElementById('paperBtn');
+  if (!btn) return;
+  try {
+    const r = await fetch('/api/paper/session', { credentials: 'same-origin' });
+    const s = await r.json();
+    btn.hidden = !(s && s.ok && s.signedIn);
+  } catch (e) {
+    btn.hidden = true;
+  }
+}
+
 // Page actions wired through data-click / data-change attributes (no inline handlers, so the CSP can
 // forbid inline script). A value is a space-separated list of actions; "name:arg" passes an argument.
 const ACTIONS = {
@@ -1841,7 +1860,8 @@ const ACTIONS = {
   setChartTimeframe,
   toggleChartLayer,
   toggleLevelsExpanded,
-  toggleTrustDrawer
+  toggleTrustDrawer,
+  openPaper
 };
 
 function runActions(spec, event) {
@@ -1869,6 +1889,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initStrikePanel();
   initExplain();
   loadCalendar();
+  showPaperButton();
   onChartData(() => { if (currentData) renderFlowFeed(currentData); });
   initPriceChart({ getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null });
   window.addEventListener('strike-click', e => openStrike(e.detail));

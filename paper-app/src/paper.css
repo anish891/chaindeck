@@ -1,4 +1,4 @@
-/* Paper trading page. Builds on styles.css tokens (colours, panels, top bar, key strip). */
+/* Paper trading app. Builds on the dashboard's styles.css tokens (colours, panels, top bar, key strip). */
 
 /* several blocks here set display: flex, which would otherwise beat the hidden attribute */
 .paper-page [hidden] { display: none !important; }
@@ -15,6 +15,8 @@
 }
 
 .pt-link {
+  font: inherit;
+  cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -129,15 +131,13 @@ textarea { resize: vertical; width: 100%; }
 .pt-label { font-size: 12px; color: var(--muted); }
 .pt-check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
 .pt-check input { width: auto; }
-#tkBracketRows { display: flex; flex-direction: column; gap: 10px; }
-#tkBracketRows[hidden] { display: none; }
+.pt-bracket { display: flex; flex-direction: column; gap: 10px; }
 .pt-preview { font-size: 12px; color: var(--muted); line-height: 1.5; min-height: 18px; }
 .pt-preview.pt-warn, .pt-result.pt-warn { color: var(--warn); }
 .pt-result { font-size: 12px; min-height: 16px; line-height: 1.5; }
 .pt-result.pt-okmsg { color: var(--bull); }
 
 /* charts */
-.pt-chart { position: relative; height: 260px; }
 
 /* accounts */
 .pt-account-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
@@ -211,3 +211,24 @@ textarea { resize: vertical; width: 100%; }
 .dep-stats b { font-family: var(--mono); }
 .dep-log { font-size: 11px; color: var(--muted); line-height: 1.6; }
 .dep-buttons { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+
+/* SVG charts (no chart library): theme colours come from CSS variables, so every theme works with no redraw logic */
+.pt-chart { position: relative; width: 100%; }
+.pt-chart svg { display: block; }
+.pt-axis { font-size: 10px; fill: var(--muted); font-family: var(--mono); }
+.pt-tip {
+  position: absolute;
+  top: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+  box-shadow: var(--shadow);
+  max-width: 220px;
+  white-space: nowrap;
+}
+.pt-tip-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+main { display: block; }

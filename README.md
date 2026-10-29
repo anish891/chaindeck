@@ -245,8 +245,15 @@ traders read it, with an English and हिन्दी toggle. The language cho
 
 ## Paper trading
 
-A separate page (`/paper.html`, linked from the top bar) for practising NIFTY option trades with simulated money on
-real NSE prices, testing strategies, and letting AI agents trade. It is owner only: sign in once with `PAPER_SECRET`.
+A separate app (`/paper`) for practising NIFTY option trades with simulated money on real NSE prices, testing
+strategies, and letting AI agents trade. It is owner only: sign in once with `PAPER_SECRET`. The dashboard shows a
+"Paper trading" button only while that owner session is active; the server enforces the same rule on every route.
+
+It is a React + TypeScript app built with Vite. Source is in `paper-app/`, the built output is committed to
+`public/paper/` (the site is served as static files, with no build step on deploy). After changing anything in
+`paper-app/`, run `npm run build:paper` and commit the result; `npm test` and CI fail if the bundle is stale.
+`npm run dev:paper` starts the Vite dev server (proxying `/api` to a local `node api/index.js` on port 3000) and
+`npm run typecheck:paper` checks the types.
 
 ### Trade
 - **Accounts:** up to 20, each with its own cash (₹1,00,000 by default), history and equity curve. Reset or delete any time.
