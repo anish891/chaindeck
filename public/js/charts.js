@@ -273,6 +273,16 @@ export function renderStraddleChart(canvasId, points) {
   ], v => fmt(Math.round(v)));
 }
 
+/** Expiry day: the ATM straddle against the path time decay alone would take from its first value after 09:15. */
+export function renderExpiryDecayChart(canvasId, series) {
+  const accent = cssVar('--accent') || '#3b82f6';
+  const muted = cssVar('--muted') || '#6b7280';
+  renderLineChart(canvasId, series.map(p => istHm(p.t)), [
+    { label: 'Straddle', data: series.map(p => p.straddle), borderColor: accent, spanGaps: true },
+    { label: 'Time decay alone', data: series.map(p => p.timeOnly), borderColor: muted, borderWidth: 1.5, borderDash: [5, 4] }
+  ], v => fmt(Math.round(v)));
+}
+
 /** Trading-time ATM IV against 15 / 30 / 60 minute realised vol. */
 export function renderIvRvChart(canvasId, points) {
   const accent = cssVar('--accent') || '#3b82f6';

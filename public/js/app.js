@@ -11,8 +11,10 @@ import { classifyFlow } from './flow.js';
 import { evaluateTrust, trackContent } from './data-checks.js';
 import { renderTrust, toggleTrustDrawer } from './trust-ui.js';
 import { renderFlowPanel, renderGlance } from './flow-panel.js';
+import { computeExpiryDay } from './expiry-day.js';
+import { renderExpiryPanel } from './expiry-panel.js';
 import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, toggleLevelsExpanded, restyleChart, chartScreenshot, currentChartSignals, chartFeedStatus, nearestChartLevels, onChartData, setSignalsPaused } from './price-chart.js';
-import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderParticipantChart } from './charts.js';
+import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderExpiryDecayChart, renderParticipantChart } from './charts.js';
 
 let currentData = null;
 let prevData = null;
@@ -410,6 +412,24 @@ function renderVolPanels() {
     ['IV minus RV 30m', spread === null ? 'n/a' : `${spread >= 0 ? '+' : ''}${spread.toFixed(1)} pts`],
     ['IV percentile', pctl && pctl.pct !== null ? `${pctl.pct} (${pctl.samples} sessions)` : `n/a (${pctl ? pctl.samples : 0} of 5 sessions)`]
   ]);
+  renderExpiryDay(points);
+}
+
+// Expiry Day panel: straddle decay against time alone, pin risk around max pain, gamma near the money
+function renderExpiryDay(points) {
+  const head = document.getElementById('expiryDayHead');
+  if (!head || !currentData) return;
+  const x = computeExpiryDay(currentData, points);
+  renderExpiryPanel({
+    head,
+    decay: document.getElementById('expiryDecayBody'),
+    pin: document.getElementById('expiryPinBody'),
+    gamma: document.getElementById('expiryGammaBody')
+  }, x);
+  const series = x.decay && x.decay.series ? x.decay.series : [];
+  const wrap = document.getElementById('expiryDecayChartWrap');
+  if (wrap) wrap.hidden = series.length < 2;
+  if (series.length >= 2) renderExpiryDecayChart('expiryDecayChart', series);
 }
 
 // Baseline snapshot (5m / 15m earlier) from server history, shaped like a local snapshot.

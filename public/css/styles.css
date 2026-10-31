@@ -2520,3 +2520,44 @@ body[data-trust="bad"] .glance-grid, body[data-trust="bad"] #metricsRow { opacit
 .nav-link:hover { background: var(--hover); }
 button.nav-link { font: inherit; font-size: 12px; cursor: pointer; }
 .nav-link[hidden] { display: none; } /* the display rule above would otherwise win over the hidden attribute */
+
+/* ═════════ Expiry Day panel ═════════ */
+.xd-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 2px 0 12px; font-size: 12px; }
+.xd-head-text { color: var(--muted); line-height: 1.5; min-width: 0; }
+.xd-badge { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.xd-badge.live { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.xd-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1100px) { .xd-grid { grid-template-columns: 1fr; } }
+.xd-card { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.xd-card-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.xd-chart { height: 180px; margin-bottom: 8px; }
+.xd-chart[hidden] { display: none; }
+.xd-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 6px; }
+.xd-verdict-sub { font-size: 11px; color: var(--muted); }
+.xd-pill { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); }
+.xd-pill.fast { color: var(--accent); border-color: var(--accent); }
+.xd-pill.slow { color: var(--warn); border-color: var(--warn); }
+.xd-pill.even { color: var(--text); }
+.xd-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 8px 0; }
+.xd-stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.xd-stat-label { font-size: 10px; color: var(--muted); }
+.xd-stat-val { font-family: var(--mono); font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
+.xd-note { font-size: 12px; line-height: 1.5; margin: 6px 0; overflow-wrap: anywhere; }
+.xd-fine { font-size: 10px; line-height: 1.5; color: var(--muted); margin-top: 8px; }
+.xd-list { margin-top: 8px; }
+.xd-list-title { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+.xd-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-top: 1px solid var(--border); }
+.xd-row-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.xd-row-main strong { font-family: var(--mono); font-size: 13px; }
+.xd-row-sub { font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
+.xd-row-val { font-family: var(--mono); font-size: 13px; font-weight: 700; white-space: nowrap; }
+.xd-bars { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
+.xd-bar-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) 64px; align-items: center; gap: 8px; font-size: 11px; }
+.xd-bar-row.atm .xd-bar-strike { color: var(--accent); font-weight: 700; }
+.xd-bar-strike { font-family: var(--mono); color: var(--muted); }
+.xd-bar-track { position: relative; height: 10px; }
+.xd-bar-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: var(--border); }
+.xd-bar-fill { position: absolute; top: 1px; bottom: 1px; border-radius: 2px; }
+.xd-bar-fill.pos { background: var(--accent); }
+.xd-bar-fill.neg { background: var(--warn); }
+.xd-bar-val { font-family: var(--mono); text-align: right; color: var(--muted); white-space: nowrap; }

@@ -704,6 +704,38 @@
     </div>
   </div>
 
+  <!-- EXPIRY DAY: straddle decay vs time alone, pin risk around max pain, gamma near the money -->
+  <div id="expiryDaySection" class="section">
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/></svg>
+          Expiry Day
+          <span data-explain="expiryDay"></span>
+        </div>
+        <span class="panel-note">Selected expiry, from live prices and saved snapshots</span>
+      </div>
+      <div id="expiryDayHead"></div>
+      <div class="xd-grid">
+        <div class="xd-card">
+          <div class="xd-card-title" data-explain="expiryDecay">Straddle decay</div>
+          <div class="vol-chart-wrap xd-chart" id="expiryDecayChartWrap">
+            <canvas id="expiryDecayChart"></canvas>
+          </div>
+          <div id="expiryDecayBody"></div>
+        </div>
+        <div class="xd-card">
+          <div class="xd-card-title" data-explain="expiryPin">Pin risk around max pain</div>
+          <div id="expiryPinBody"></div>
+        </div>
+        <div class="xd-card">
+          <div class="xd-card-title" data-explain="expiryGamma">Gamma near the money</div>
+          <div id="expiryGammaBody"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ROLLING ATM STRADDLE + IV VS REALISED VOL (from persisted snapshots) -->
   <div id="volPanelsSection" class="section pair-grid">
     <div class="panel">
