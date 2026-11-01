@@ -182,6 +182,8 @@ function chartOptions(p) {
     rightPriceScale: { borderColor: p.grid, scaleMargins: { top: 0.06, bottom: 0.22 } },
     timeScale: { borderColor: p.grid, timeVisible: tf !== '1d', secondsVisible: false, rightOffset: 6 },
     crosshair: { mode: 0 },
+    // On a phone, an up/down swipe over the chart should scroll the page, not pan the chart.
+    handleScroll: { vertTouchDrag: false },
     localization: { priceFormatter: n => n.toLocaleString('en-IN', { maximumFractionDigits: 1 }) }
   };
 }

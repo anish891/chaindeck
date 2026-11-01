@@ -6,8 +6,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ChainDeck: NIFTY Options Analytics</title>
   <link rel="stylesheet" href="/css/styles.css" />
-  <script src="/vendor/chart.umd.js"></script>
-  <script src="/vendor/lightweight-charts.standalone.production.js"></script>
+  <script defer src="/vendor/chart.umd.js"></script>
+  <script defer src="/vendor/lightweight-charts.standalone.production.js"></script>
 </head>
 
 <body>
@@ -25,8 +25,8 @@
 
     <div class="topbar-right">
       <!-- Only shown to the signed-in owner (see showPaperButton in app.js); everyone else sees nothing here. -->
-      <button type="button" class="nav-link" id="paperBtn" data-click="openPaper" hidden title="Practise trades on live prices with simulated money">
-        <svg class="ico" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg> Paper trading
+      <button type="button" class="nav-link" id="paperBtn" data-click="openPaper" hidden title="Practise trades on live prices with simulated money" aria-label="Paper trading">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg><span class="btn-label"> Paper trading</span>
       </button>
       <button class="trust-btn idle" id="trustBtn" data-click="toggleTrustDrawer" title="Data checks: freshness, cross-checks and recomputed numbers" aria-label="Open data checks">
         <i class="trust-dot"></i><span id="trustText">Checking data</span>
@@ -36,8 +36,8 @@
         <span class="bell-badge" id="alertBadge" hidden>0</span>
       </button>
       <div class="dropdown" id="exportDropdown">
-        <button class="dropdown-toggle" data-click="toggleExportMenu" title="Export Data & Analytics">
-          <svg class="ico" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg> Export <span class="dropdown-caret">▾</span>
+        <button class="dropdown-toggle" data-click="toggleExportMenu" title="Export Data & Analytics" aria-label="Export">
+          <svg class="ico" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg><span class="btn-label"> Export</span> <span class="dropdown-caret">▾</span>
         </button>
         <div class="dropdown-menu" id="exportMenu">
           <button class="dropdown-item" data-click="exportCSV closeExportMenu" title="Export Option Chain to CSV">
@@ -61,18 +61,18 @@
         <option value="light">Light</option>
       </select>
       <label class="interval-label">Expiry</label>
-      <select id="expirySelect" data-change="onExpiryChange">
+      <select id="expirySelect" data-change="onExpiryChange" aria-label="Expiry">
         <option value="">Loading…</option>
       </select>
       <label class="interval-label">Refresh</label>
-      <select id="intervalSelect" data-change="onIntervalChange">
+      <select id="intervalSelect" data-change="onIntervalChange" aria-label="Refresh interval">
         <option value="3000" selected>3s</option>
         <option value="5000">5s</option>
         <option value="10000">10s</option>
         <option value="30000">30s</option>
       </select>
-      <button class="refresh-btn" data-click="fetchNow">
-        <svg class="ico" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg> Refresh now
+      <button class="refresh-btn" data-click="fetchNow" title="Refresh now" aria-label="Refresh now">
+        <svg class="ico" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg><span class="btn-label"> Refresh now</span>
       </button>
     </div>
   </div>

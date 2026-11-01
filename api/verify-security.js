@@ -43,6 +43,9 @@ const url = (s, p) => `http://127.0.0.1:${s.address().port}${p}`;
   assert(hdrRoute && hdrRoute.continue === true, 'vercel.json needs a header route with continue:true');
   assert.deepStrictEqual(hdrRoute.headers, sec.SECURITY_HEADERS, 'vercel.json headers must equal api/security.js (regenerate vercel.json if you change one)');
   assert.strictEqual(vercel.routes[0], hdrRoute, 'header route must come first');
+  const cacheRoute = vercel.routes.find(r => r.headers && r.headers['Cache-Control']);
+  assert(cacheRoute && cacheRoute.continue === true && /vendor\|fonts/.test(cacheRoute.src) && /max-age=86400/.test(cacheRoute.headers['Cache-Control']),
+    'vendor files and fonts are cached for a day (no immutable: their names are not hashed)');
 
   // ── 4. the page is CSP-clean: no inline handlers, no inline scripts, no third-party resources ──
   const html = read('public/index.html');
