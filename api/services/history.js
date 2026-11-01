@@ -10,6 +10,9 @@ const { addVolSeries } = require('./volatility');
 //   oi:k:{expiry}:{t}         string     → per-strike OI/price/IV for that snapshot (read selectively)
 //   oi:latest:{expiry}        string     → most recent trading date recorded for the expiry
 //   oi:sessions               hash       → date → end-of-day summary (similar sessions, IV history)
+//
+// Expiry replay reads the same keys back for a past expiry day: the series lives DAY_TTL (14 days), the per-strike
+// snapshots STRIKES_TTL (7 days), so the last expiry replays in full and the one before it shows decay only.
 
 const DAY_TTL = 14 * 24 * 3600;
 const STRIKES_TTL = 7 * 24 * 3600;
@@ -175,6 +178,77 @@ async function getIntraday(expiry, date = null) {
   return { date: day, expiry, points: addVolSeries(points, expiry), baselines };
 }
 
+const REPLAY_FRAME_MIN = 10; // one strike snapshot per 10 minutes is enough to step through the day
+const REPLAY_REACH = 600; // points either side of spot kept per frame (pin looks out ~2 sigma, gamma 5 strikes)
+const REPLAY_LOOKBACK_DAYS = 14; // = DAY_TTL: older series have expired
+const NSE_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const IST_MS = 330 * 60000;
+
+/** '2026-10-27' -> '27-Oct-2026' (an expiry day's own contract name). */
+function ymdToExpiry(ymd) {
+  const [y, m, d] = ymd.split('-');
+  return `${d}-${NSE_MONTHS[Number(m) - 1]}-${y}`;
+}
+
+/**
+ * Past expiry days whose series is still stored, newest first. A day counts when the contract expiring that day was
+ * recorded on that day, so holiday-shifted expiries are found without a calendar. Today is left out: it is still live.
+ */
+async function listExpiryReplays(nowMs = Date.now()) {
+  const today = new Date(nowMs + IST_MS).toISOString().slice(0, 10);
+  const days = [];
+  for (let i = 1; i <= REPLAY_LOOKBACK_DAYS; i++) {
+    const ymd = new Date(Date.parse(`${today}T00:00:00Z`) - i * 86400000).toISOString().slice(0, 10);
+    const dow = new Date(`${ymd}T00:00:00Z`).getUTCDay();
+    if (dow !== 0 && dow !== 6) days.push(ymd);
+  }
+  const lens = await store.pipeline(days.map(ymd => ['LLEN', `oi:s:${ymd}:${ymdToExpiry(ymd)}`]));
+  return days
+    .map((date, i) => ({ date, expiry: ymdToExpiry(date), points: Number(lens[i]) || 0 }))
+    .filter(r => r.points > 0)
+    .map(r => ({ ...r, strikesKept: nowMs - Date.parse(`${r.date}T10:00:00Z`) < STRIKES_TTL * 1000 }));
+}
+
+/** Pick the snapshot closest after each frame mark (09:15, 09:25, ...), at most one per mark. */
+function pickReplayFrames(points, minutes = REPLAY_FRAME_MIN) {
+  const picks = [];
+  let lastMark = null;
+  let last = null;
+  for (const p of points) {
+    const mod = new Date(p.t + IST_MS);
+    const mins = mod.getUTCHours() * 60 + mod.getUTCMinutes() + mod.getUTCSeconds() / 60;
+    if (mins < 9 * 60 + 15 || mins > 15 * 60 + 30) continue;
+    last = p;
+    const mark = Math.floor((mins - (9 * 60 + 15)) / minutes);
+    if (mark !== lastMark) { picks.push(p); lastMark = mark; }
+  }
+  if (last && picks[picks.length - 1].t !== last.t) picks.push(last); // always end on the last in-session snapshot
+  return picks;
+}
+
+/**
+ * One past expiry day for the replay: the full series (spot, straddle, max pain, IV, GEX per snapshot) and strike
+ * frames every 10 minutes, trimmed to strikes near that frame's spot. Frames whose strike data has expired are left
+ * out, so a day older than STRIKES_TTL comes back with points but no frames.
+ */
+async function getExpiryReplay(expiry) {
+  const m = /^(\d{2})-([A-Z][a-z]{2})-(\d{4})$/.exec(expiry || '');
+  const mi = m ? NSE_MONTHS.indexOf(m[2]) : -1;
+  if (mi < 0) return { expiry, date: null, points: [], frames: [] };
+  const date = `${m[3]}-${String(mi + 1).padStart(2, '0')}-${m[1]}`;
+  const points = sortedUnique(await store.lrange(`oi:s:${date}:${expiry}`, 0, -1));
+  if (!points.length) return { expiry, date, points: [], frames: [] };
+  const picks = pickReplayFrames(points);
+  const blobs = await store.pipeline(picks.map(p => ['GET', `oi:k:${expiry}:${p.t}`]));
+  const frames = [];
+  picks.forEach((p, i) => {
+    const rows = safeParse(blobs[i]);
+    if (!Array.isArray(rows) || !rows.length) return;
+    frames.push({ t: p.t, strikes: rows.filter(r => Math.abs(r[0] - p.spot) <= REPLAY_REACH) });
+  });
+  return { expiry, date, points, frames };
+}
+
 const COLS = ['strike', 'ceOI', 'peOI', 'ceChg', 'peChg', 'ceLtp', 'peLtp', 'ceIv', 'peIv'];
 const rowToObject = r => Object.fromEntries(COLS.map((c, i) => [c, r[i]]));
 
@@ -233,6 +307,10 @@ module.exports = {
   recordSnapshot,
   getIntraday,
   getStrikeHistory,
+  listExpiryReplays,
+  getExpiryReplay,
+  pickReplayFrames,
+  ymdToExpiry,
   getSessions,
   saveSession,
   buildSessionRecord

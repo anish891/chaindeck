@@ -95,6 +95,21 @@
 
   <div id="trustBanner" class="trust-banner" role="status" hidden></div>
 
+  <!-- BEFORE THE OPEN: overnight cues, only shown 07:15-09:15 IST on trading days (see premarket-panel.js) -->
+  <div id="premarketSection" class="section" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title">
+          <svg class="ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/></svg>
+          Before the Open
+          <span data-explain="premarket"></span>
+        </div>
+        <span class="panel-note">07:15 to 09:15 IST</span>
+      </div>
+      <div id="premarketBody"></div>
+    </div>
+  </div>
+
   <!-- AT A GLANCE: four plain cards -->
   <div id="glanceSection" class="section">
     <div id="glanceCards" class="glance-grid" aria-live="polite"></div>
@@ -716,6 +731,17 @@
         <span class="panel-note">Selected expiry, from live prices and saved snapshots</span>
       </div>
       <div id="expiryDayHead"></div>
+      <div class="xd-replay">
+        <label class="interval-label" for="replayDay">Replay a past expiry</label>
+        <select id="replayDay" data-change="onReplayDayChange">
+          <option value="">Live</option>
+        </select>
+        <button type="button" id="replayPrev" data-click="replayStep:-1" aria-label="Previous 10 minutes" title="Previous 10 minutes" hidden></button>
+        <select id="replayTime" data-change="onReplayTimeChange" aria-label="Replay time" hidden></select>
+        <button type="button" id="replayNext" data-click="replayStep:1" aria-label="Next 10 minutes" title="Next 10 minutes" hidden></button>
+        <button type="button" id="replayPlay" data-click="replayTogglePlay" hidden></button>
+        <span id="replayNote" class="xd-replay-note"></span>
+      </div>
       <div class="xd-grid">
         <div class="xd-card">
           <div class="xd-card-title" data-explain="expiryDecay">Straddle decay</div>

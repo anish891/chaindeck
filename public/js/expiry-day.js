@@ -248,4 +248,44 @@ export function computeExpiryDay(d, points = [], nowMs = Date.now()) {
   };
 }
 
+const SQRT_2_OVER_PI = Math.sqrt(2 / Math.PI);
+
+/**
+ * Rebuild what computeExpiryDay needs at one replay frame of a past expiry day (from /api/expiry-replay): an option
+ * chain shaped like /api/option-chain from the saved snapshot, and the series up to that moment, so the panel shows the
+ * day as it stood then. Per-strike gamma is recomputed with Black-Scholes from the saved IV (the server's greeks are not
+ * stored); the 1 sigma move uses the server's formula (straddle / sqrt(2/pi)). Zero gamma and the GEX regime are not
+ * stored, so they read n/a.
+ */
+export function replayInput(replay, frameIndex, lotSize = 65) {
+  const frame = replay && replay.frames ? replay.frames[frameIndex] : null;
+  if (!frame) return null;
+  const points = (replay.points || []).filter(p => p && Number.isFinite(p.t) && p.t <= frame.t);
+  const p = points[points.length - 1];
+  if (!p || !(p.spot > 0)) return null;
+  const closeMs = expiryCloseMs(expiryYmd(replay.expiry));
+  const years = yearsTo(closeMs, frame.t);
+  const leg = (oi, chg, ltp, iv, strike) => ({
+    openInterest: oi, changeinOpenInterest: chg, lastPrice: ltp, impliedVolatility: iv,
+    greeks: { gamma: bsGamma(p.spot, strike, years, iv) || 0 }
+  });
+  const d = {
+    expiry: replay.expiry,
+    spot: p.spot,
+    atm: Math.round(p.spot / 50) * 50,
+    dataAsOf: new Date(frame.t).toISOString(),
+    straddlePrice: p.straddle,
+    straddleDetails: { oneSigmaMove: p.straddle > 0 ? p.straddle / SQRT_2_OVER_PI : null, tradingDaysLeft: 0 },
+    maxPain: p.maxPain,
+    atmIv: p.atmIv,
+    gex: { totalGexCr: Number.isFinite(p.gexCr) ? p.gexCr : null, lotSize, zeroGammaLevel: null, gexRegime: null },
+    strikes: frame.strikes.map(([strike, ceOI, peOI, ceChg, peChg, ceLtp, peLtp, ceIv, peIv]) => ({
+      strike,
+      CE: leg(ceOI, ceChg, ceLtp, ceIv, strike),
+      PE: leg(peOI, peChg, peLtp, peIv, strike)
+    }))
+  };
+  return { d, points, nowMs: frame.t };
+}
+
 export const EXPIRY_CONSTANTS = { SESSION_MIN, PIN_BAND, NEAR_STRIKES, DECAY_TOLERANCE, DECAY_MIN_ELAPSED };

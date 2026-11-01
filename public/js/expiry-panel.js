@@ -42,7 +42,10 @@ export function renderExpiryHead(host, x) {
   host.textContent = '';
   if (!x || x.status !== 'ok') { host.append(el('div', 'empty-note', 'Waiting for option chain data.')); return; }
   const bar = el('div', 'xd-head');
-  if (x.isExpiryDay) {
+  if (x.replay) {
+    bar.append(el('span', 'xd-badge replay', 'Replay'));
+    bar.append(el('span', 'xd-head-text', `${x.expiry} expiry as it stood at ${hm(x.replay.t)}, ${x.minsLeft >= 60 ? `${Math.floor(x.minsLeft / 60)} h ${Math.round(x.minsLeft % 60)} min` : `${Math.round(x.minsLeft)} min`} before the close. ${x.replay.note}`));
+  } else if (x.isExpiryDay) {
     bar.append(el('span', 'xd-badge live', 'Expiry day'));
     bar.append(el('span', 'xd-head-text', x.minsLeft > 0
       ? `${x.expiry} expires at 15:30 today, ${x.minsLeft >= 60 ? `${Math.floor(x.minsLeft / 60)} h ${Math.round(x.minsLeft % 60)} min` : `${Math.round(x.minsLeft)} min`} of trading left.`

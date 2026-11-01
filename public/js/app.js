@@ -1,5 +1,5 @@
 import { initAlerts, processAlerts, toggleAlertsDrawer, alertsEnabled } from './alerts.js';
-import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData, fetchParticipantData, fetchCalendar } from './api-client.js';
+import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData, fetchParticipantData, fetchCalendar, fetchPremarket } from './api-client.js';
 import { initExplain } from './explain.js';
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
@@ -13,6 +13,8 @@ import { renderTrust, toggleTrustDrawer } from './trust-ui.js';
 import { renderFlowPanel, renderGlance } from './flow-panel.js';
 import { computeExpiryDay } from './expiry-day.js';
 import { renderExpiryPanel } from './expiry-panel.js';
+import { inPremarketWindow, renderPremarket } from './premarket-panel.js';
+import { initExpiryReplay, loadReplayDays, replayActive, onReplayDayChange, onReplayTimeChange, replayStep, replayTogglePlay } from './expiry-replay.js';
 import { initExport, exportCSV, exportPDF, takeSnapshot, toggleExportMenu, closeExportMenu } from './export.js';
 import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, toggleLevelsExpanded, restyleChart, currentChartSignals, chartFeedStatus, nearestChartLevels, onChartData, setSignalsPaused } from './price-chart.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderExpiryDecayChart, renderParticipantChart } from './charts.js';
@@ -424,6 +426,8 @@ function renderVolPanels() {
 function renderExpiryDay(points) {
   const head = document.getElementById('expiryDayHead');
   if (!head || !currentData) return;
+  loadReplayDays();
+  if (replayActive()) return; // a past day is on screen; live data takes the panel back when "Live" is chosen
   const x = computeExpiryDay(currentData, points);
   renderExpiryPanel({
     head,
@@ -1339,12 +1343,40 @@ function isMarketOpen() {
   return day >= 1 && day <= 5 && !nseHolidays.has(ymd) && mins >= 9 * 60 + 10 && mins <= 15 * 60 + 40;
 }
 
+// Before the Open: overnight cues, fetched only inside the 07:15-09:15 IST window (the panel is hidden otherwise)
+const PREMARKET_REFRESH_MS = 60000;
+let premarketData = null;
+let premarketFetchedAt = 0;
+
+async function refreshPremarket() {
+  const section = document.getElementById('premarketSection');
+  const body = document.getElementById('premarketBody');
+  if (!section || !body) return;
+  const now = Date.now();
+  const show = inPremarketWindow(now, nseHolidays);
+  section.hidden = !show;
+  if (!show) { premarketData = null; return; }
+  if (now - premarketFetchedAt < PREMARKET_REFRESH_MS) { renderPremarket(body, premarketData); return; } // keeps "open in" current
+  premarketFetchedAt = now;
+  if (!premarketData) renderPremarket(body, null);
+  let failed = false;
+  try {
+    premarketData = await fetchPremarket();
+  } catch (e) {
+    console.error('Pre-market cues fetch failed:', e);
+    failed = true;
+  }
+  renderPremarket(body, premarketData, { error: failed });
+}
+setInterval(refreshPremarket, 30000);
+
 async function loadCalendar() {
   try {
     nseHolidays = new Set(await fetchCalendar());
   } catch (e) {
     console.error('Holiday calendar fetch failed (weekends only until it loads):', e);
   }
+  refreshPremarket(); // the window depends on holidays, so decide once they are known
 }
 
 function scheduleNext() {
@@ -1590,6 +1622,10 @@ const ACTIONS = {
   toggleChartLayer,
   toggleLevelsExpanded,
   toggleTrustDrawer,
+  onReplayDayChange,
+  onReplayTimeChange,
+  replayStep,
+  replayTogglePlay,
   openPaper
 };
 
@@ -1621,6 +1657,7 @@ document.addEventListener('DOMContentLoaded', () => {
   showPaperButton();
   onChartData(() => { if (currentData) renderFlowFeed(currentData); });
   initExport(() => currentData);
+  initExpiryReplay({ lotSize: () => (currentData && currentData.gex && currentData.gex.lotSize) || 65, onExit: () => renderVolPanels() });
   initPriceChart({ getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null });
   window.addEventListener('strike-click', e => openStrike(e.detail));
   document.getElementById('chainBody')?.addEventListener('click', e => {

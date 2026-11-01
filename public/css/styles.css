@@ -2540,6 +2540,12 @@ button.nav-link { font: inherit; font-size: 12px; cursor: pointer; }
 .xd-head-text { color: var(--muted); line-height: 1.5; min-width: 0; }
 .xd-badge { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
 .xd-badge.live { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.xd-badge.replay { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.xd-replay { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: -4px 0 12px; }
+.xd-replay button { display: inline-flex; align-items: center; gap: 4px; }
+.xd-replay [hidden] { display: none; }
+.xd-replay button:disabled { opacity: 0.45; cursor: default; }
+.xd-replay-note { font-size: 11px; color: var(--muted); }
 .xd-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 @media (max-width: 1100px) { .xd-grid { grid-template-columns: 1fr; } }
 .xd-card { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
@@ -2575,3 +2581,22 @@ button.nav-link { font: inherit; font-size: 12px; cursor: pointer; }
 .xd-bar-fill.pos { background: var(--accent); }
 .xd-bar-fill.neg { background: var(--warn); }
 .xd-bar-val { font-family: var(--mono); text-align: right; color: var(--muted); white-space: nowrap; }
+
+/* Before the Open (pre-market cues) */
+.pm-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 8px; font-size: 12px; }
+.pm-lean { font-weight: 700; font-size: 14px; }
+.pm-lean.up, .pm-chg.up { color: var(--bull); }
+.pm-lean.down, .pm-chg.down { color: var(--bear); }
+.pm-sub { color: var(--muted); }
+.pm-nifty { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+.pm-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1100px) { .pm-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .pm-grid { grid-template-columns: 1fr; } }
+.pm-card { min-width: 0; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+.pm-card-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 6px; }
+.pm-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.pm-row:last-child { border-bottom: none; }
+.pm-name { display: flex; flex-direction: column; min-width: 0; }
+.pm-asof { font-size: 10px; color: var(--muted); }
+.pm-price, .pm-chg { font-family: var(--mono); text-align: right; }
+.pm-chg { min-width: 64px; }
