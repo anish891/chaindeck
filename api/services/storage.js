@@ -86,6 +86,10 @@ async function memCmd(args) {
       const [start, stop] = rest.map(Number);
       return e.value.slice(start, stop === -1 ? undefined : stop + 1);
     }
+    case 'LLEN': {
+      const e = memGet(key, 'list');
+      return e ? e.value.length : 0;
+    }
     case 'INCR': {
       const e = memGet(key, 'str');
       const n = (e ? Number(e.value) || 0 : 0) + 1;

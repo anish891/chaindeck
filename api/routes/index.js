@@ -9,6 +9,7 @@ const integrity = require('../services/integrity');
 const { istNow } = require('../services/market');
 const { fetchRawNSEOptionChain, refreshHolidays, staleReasonCode } = require('../services/nse');
 const calendar = require('../services/calendar');
+const premarket = require('../services/premarket');
 const paperRoutes = require('./paper');
 const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../security');
 const {
@@ -58,6 +59,38 @@ router.get('/intraday', async (req, res) => {
     res.json({ ok: true, persistent: history.configured, ...data });
   } catch (err) {
     return sendError(res, 500, 'Error reading intraday history', err);
+  }
+});
+
+// Overnight cues for the pre-market panel (US, US futures, Asia, rupee, crude, gold, US yield). No NSE data involved.
+router.get('/premarket', async (req, res) => {
+  try {
+    const data = await premarket.getPremarket();
+    res.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120');
+    res.json({ ok: true, ...data });
+  } catch (err) {
+    return sendError(res, 502, 'Error reading pre-market cues', err);
+  }
+});
+
+// Past expiry days still in storage, and one of them as a replay (series + 10-minute strike frames). A past day never
+// changes, so the replay is cached for a day at the edge; the list changes once a day.
+router.get('/expiry-replay', async (req, res) => {
+  const { expiry } = req.query;
+  if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 27-Oct-2026.' });
+  try {
+    if (expiry === undefined) {
+      const days = await history.listExpiryReplays();
+      res.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=3600');
+      return res.json({ ok: true, persistent: history.configured, days });
+    }
+    const data = await history.getExpiryReplay(expiry);
+    const today = istNow().ymd;
+    if (data.date && data.date >= today) return res.status(400).json({ ok: false, error: 'Only past expiry days can be replayed.' });
+    res.set('Cache-Control', data.points.length ? 'public, s-maxage=86400' : HISTORY_CACHE);
+    res.json({ ok: true, ...data });
+  } catch (err) {
+    return sendError(res, 500, 'Error reading expiry replay', err);
   }
 });
 

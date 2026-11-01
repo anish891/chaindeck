@@ -25,6 +25,21 @@ export async function fetchIntradayData(expiry) {
   return json;
 }
 
+export async function fetchPremarket() {
+  const r = await fetch('/api/premarket');
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json;
+}
+
+/** Past expiry days still stored ({ days }), or one of them ({ points, frames }) when `expiry` is given. */
+export async function fetchExpiryReplay(expiry) {
+  const r = await fetch(expiry ? `/api/expiry-replay?expiry=${encodeURIComponent(expiry)}` : '/api/expiry-replay');
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json;
+}
+
 export async function fetchStrikeHistory(expiry, strike) {
   const r = await fetch(`/api/strike-history?expiry=${encodeURIComponent(expiry)}&strike=${strike}`);
   const json = await r.json();

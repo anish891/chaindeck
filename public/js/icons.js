@@ -22,7 +22,11 @@ const PATHS = {
   loader: '<path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/>',
   minus: '<path d="M5 12h14"/>',
   help: '<circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
-  x: '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>'
+  x: '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',
+  'chevron-left': '<path d="M15 18l-6-6 6-6"/>',
+  'chevron-right': '<path d="M9 18l6-6-6-6"/>',
+  play: '<path d="M7 4l13 8-13 8z"/>',
+  pause: '<path d="M8 4v16"/><path d="M16 4v16"/>'
 };
 
 /** SVG markup for an icon (empty string for an unknown name, so a typo never breaks the page). */
