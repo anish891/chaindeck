@@ -25,6 +25,13 @@
       "continue": true
     },
     {
+      "src": "/(vendor|fonts)/(.*)",
+      "headers": {
+        "Cache-Control": "public, max-age=86400"
+      },
+      "continue": true
+    },
+    {
       "src": "/paper.html",
       "status": 308,
       "headers": {

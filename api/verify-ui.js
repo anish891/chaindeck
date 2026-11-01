@@ -12,6 +12,7 @@ const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 
 const html = read('public/index.html');
 const app = read('public/js/app.js');
+const exporter = read('public/js/export.js');
 
 // ── 1. actions referenced by the page exist ──
 const actionsBlock = /const ACTIONS = \{([\s\S]*?)\n\};/.exec(app);
@@ -57,9 +58,9 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
 //       blank / clipped / sliced ──
 {
   const grab = name => {
-    const i = app.indexOf(name);
-    assert(i > 0, `${name} not found in app.js`);
-    return app.slice(i, i + 5500);
+    const i = exporter.indexOf(name);
+    assert(i > 0, `${name} not found in export.js`);
+    return exporter.slice(i, i + 5500);
   };
   const build = grab('function buildDashboardReport');
   const mark = grab('function markAvoidBreaks');
@@ -69,7 +70,7 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
     return m ? m[1] : '';
   };
 
-  assert(!app.includes('buildPdfReportElement'), 'the old hand-built summary report must be gone (the PDF mirrors the dashboard)');
+  assert(!app.includes('buildPdfReportElement') && !exporter.includes('buildPdfReportElement'), 'the old hand-built summary report must be gone (the PDF mirrors the dashboard)');
   // content: clones the dashboard sections, so every panel (including future ones) is included
   assert(/document\.body\.children/.test(build) && /cloneNode\(true\)/.test(build), 'the report must clone the live dashboard sections');
   assert(/position === 'fixed'/.test(build), 'fixed overlays, drawers and the footer must be skipped');
@@ -85,25 +86,26 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(/overflow:\s*visible/.test(rule('.pdf-export-report .table-wrap')) && /max-height:\s*none/.test(rule('.pdf-export-report .table-wrap')), 'the option chain must not be height/scroll limited in the report');
   assert(/min-width:\s*0/.test(rule('.pdf-export-report table')), 'the report tables must override the global min-width: 860px');
   // pagination
-  assert(/jsPDF:\s*\{[^}]*orientation:\s*'landscape'/.test(app), 'landscape keeps the dashboard layout');
-  const pagebreak = (/^\s*pagebreak:\s*\{.*\}\s*$/m.exec(app) || [''])[0];
+  assert(/jsPDF:\s*\{[^}]*orientation:\s*'landscape'/.test(exporter), 'landscape keeps the dashboard layout');
+  const pagebreak = (/^\s*pagebreak:\s*\{.*\}\s*$/m.exec(exporter) || [''])[0];
   assert(pagebreak, 'html2pdf pagebreak option not found');
   assert(pagebreak.includes("'.pdf-avoid'") && !pagebreak.includes('avoid-all'), "cards are kept whole via .pdf-avoid (not 'avoid-all', which leaves huge gaps)");
   assert(/display === 'grid'/.test(mark), 'grids must be kept together (a page-break spacer cannot hold back a single grid item)');
   assert(/previous\.style\.pageBreakBefore/.test(build), 'the option chain starts on its own page, keeping its heading with the table');
-  assert(/markAvoidBreaks\(reportContainer\)/.test(app) && /width: 1074px/.test(app), 'avoid-marking must run on the attached report at the page width (1074px)');
+  assert(/markAvoidBreaks\(reportContainer\)/.test(exporter) && /width: 1074px/.test(exporter), 'avoid-marking must run on the attached report at the page width (1074px)');
 }
 
 // ── 5. price chart: vendored library, exports, and safe rendering ──
 {
   const chartJs = read('public/js/price-chart.js');
   assert(/id="priceChart"/.test(html), 'chart container missing');
-  assert(/<script src="\/vendor\/lightweight-charts\.standalone\.production\.js"><\/script>/.test(html), 'the vendored (same-origin) Lightweight Charts build must be loaded');
+  assert(/<script defer src="\/vendor\/lightweight-charts\.standalone\.production\.js"><\/script>/.test(html), 'the vendored (same-origin) Lightweight Charts build must be loaded, deferred');
+  assert(/<script defer src="\/vendor\/chart\.umd\.js"><\/script>/.test(html), 'Chart.js must be deferred so it does not block the first paint');
   assert(fs.existsSync(path.join(root, 'public/vendor/LICENSE-lightweight-charts.md')), 'the Apache-2.0 licence must ship with the vendored build');
   assert(/attributionLogo:\s*true/.test(chartJs), 'Lightweight Charts requires its attribution to stay visible');
   assert(/takeScreenshot\(/.test(chartJs), 'the chart is several stacked canvases; exports must use the library screenshot');
   // a cloned DOM chart is blank: the report must skip its canvases and substitute the screenshot
-  assert(/closest\('#priceChart'\)/.test(app) && /chartScreenshot\(\)/.test(app), 'the PDF report must replace the price chart with a screenshot');
+  assert(/closest\('#priceChart'\)/.test(exporter) && /chartScreenshot\(\)/.test(exporter), 'the PDF report must replace the price chart with a screenshot');
   assert(/import \{[^}]*escapeHtml[^}]*\} from '\.\/ui-utils\.js'/.test(chartJs), 'network-derived strings must be escaped before they reach innerHTML');
   // Every ${...} in the panel templates that is NOT wrapped in escapeHtml() must be on this reviewed list: numbers the
   // server computed, fixed labels and class names. Adding another forces a look at whether it can carry text from the network.

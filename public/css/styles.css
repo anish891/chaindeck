@@ -1352,6 +1352,20 @@ tbody tr.atm-row td {
   }
 }
 
+/* Phones: icon-only buttons and no select captions, so the top bar fits in about two rows. The selects carry aria-labels
+   and their values (a date, "3s") say what they are. The footer legend stays on one line and scrolls sideways. */
+@media (max-width: 600px) {
+  .topbar-right { gap: 6px; }
+  .topbar-right .btn-label,
+  .topbar-right .interval-label,
+  .topbar-right .theme-ico { display: none; }
+  .footer { flex-wrap: nowrap; gap: 12px; padding: 6px 12px; }
+  .footer .legend { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; min-width: 0; }
+  .footer .legend::-webkit-scrollbar { display: none; }
+  .leg-item { white-space: nowrap; }
+  .countdown { flex-shrink: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation: none !important;
