@@ -381,3 +381,7 @@ session is saved after the close for "Sessions That Looked Like Today", the vola
   rather than hiding it.
 - Scores, regimes and probabilities describe current conditions and how option prices are set. They are not
   forecasts.
+
+## Author
+
+Built by [Anish Tejwani](https://anishtejwani.dev).
