@@ -74,7 +74,7 @@ function renderDrawer() {
     });
   });
   drawer.append(body);
-  drawer.append(el('div', 'trust-note', 'These checks show the numbers are fresh, agree with a second source and are internally consistent (PCR, OI totals, max pain and put-call parity are recomputed from the raw NSE data with separate code). They cannot prove NSE itself is right. Yahoo is delayed and unofficial, so its comparison allows a small gap.'));
+  drawer.append(el('div', 'trust-note', 'These checks show the numbers are fresh, agree with a second feed and are internally consistent (PCR, OI totals, max pain and put-call parity are recomputed from the raw option chain with separate code). They cannot prove the data provider (Upstox) itself is right. The spot comparison allows a small gap.'));
 }
 
 export function toggleTrustDrawer(arg) {

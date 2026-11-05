@@ -74,6 +74,6 @@ export function byText(o: { agent?: { label: string } | null; source?: string })
 export const MARKET_REASONS: Record<string, string> = {
   MARKET_CLOSED: 'Market closed. Orders are accepted 09:15 to 15:30 IST on trading days.',
   NO_DATA: 'No option chain data right now.',
-  DATA_STALE: 'NSE did not answer, so prices are a leftover copy. Orders and fills are paused until fresh data arrives.',
-  DATA_OLD: 'The latest NSE snapshot is more than 3 minutes old. Orders and fills are paused.'
+  DATA_STALE: 'Upstox did not answer, so prices are a leftover copy. Orders and fills are paused until fresh data arrives.',
+  DATA_OLD: 'The latest option chain snapshot is more than 3 minutes old. Orders and fills are paused.'
 };

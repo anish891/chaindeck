@@ -170,7 +170,7 @@ function renderParticipants() {
   }
 }
 
-// NSE's index list sometimes times out for one refresh; keep the last good sectors on screen meanwhile.
+// The index quotes sometimes time out for one refresh; keep the last good sectors on screen meanwhile.
 let lastSectorData = null;
 
 function renderSectors(d) {
@@ -346,7 +346,7 @@ function renderTimeline() {
 
   if (points.length < 2) {
     if (empty) empty.textContent = intraday
-      ? 'Collecting snapshots. One is stored each time NSE updates (about once a minute).'
+      ? 'Collecting snapshots. One is stored each time the option chain updates (about once a minute).'
       : 'Intraday history is unavailable right now.';
     if (points.length === 0) return;
   } else if (empty) {
@@ -377,7 +377,7 @@ function renderVolPanels() {
   const d = currentData;
   const points = intraday && d && intraday.expiry === d.expiry ? intraday.points || [] : [];
   const emptyText = intraday
-    ? 'Collecting snapshots. One is stored each time NSE updates (about once a minute).'
+    ? 'Collecting snapshots. One is stored each time the option chain updates (about once a minute).'
     : 'Intraday history is unavailable right now.';
   const last = points[points.length - 1] || null;
 
@@ -412,7 +412,7 @@ function renderVolPanels() {
   const pctl = d && d.atmIvPercentile;
   fillSummary('ivRvSummary', [
     ['ATM IV', volPct(ivT)],
-    ['NSE IV (calendar)', volPct(d ? d.atmIv : null)],
+    ['ATM IV (calendar)', volPct(d ? d.atmIv : null)],
     ['RV 15m', volPct(last ? last.rv15 : null)],
     ['RV 30m', volPct(rv30)],
     ['RV 60m', volPct(last ? last.rv60 : null)],
@@ -543,7 +543,7 @@ function refreshTrust() {
 }
 
 const FEED_HELP = {
-  chain: 'Option chain from NSE. NSE refreshes about every 30 to 60 seconds. Amber after 90 seconds, red after 3 minutes or when the server is showing a leftover copy because NSE failed.',
+  chain: 'Option chain from Upstox, timed by the index\'s last trade. Amber after 90 seconds, red after 3 minutes or when the server is showing a leftover copy because Upstox failed.',
   candles: 'Price candles from Yahoo Finance (delayed by design). Shows how far the latest candle is behind the clock. Red when the server is showing a leftover copy or this page could not load them.',
   saved: 'Saved per-minute snapshots (the cron job). Amber after 3 minutes without a new point, red after 6.'
 };
@@ -567,7 +567,7 @@ function renderFreshness() {
   const open = isMarketOpen();
 
   const chainAge = currentData ? (now - new Date(currentData.dataAsOf || currentData.fetchedAt).getTime()) / 1000 : NaN;
-  setChip('freshChain', 'NSE', 'chain', freshness('chain', chainAge, { open, hasData: !!currentData, stale: !!(currentData && currentData.feed && currentData.feed.stale) }));
+  setChip('freshChain', 'Upstox', 'chain', freshness('chain', chainAge, { open, hasData: !!currentData, stale: !!(currentData && currentData.feed && currentData.feed.stale) }));
 
   const cs = chartFeedStatus();
   if (!cs) {

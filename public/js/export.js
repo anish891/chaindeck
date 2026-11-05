@@ -203,7 +203,7 @@ function buildDashboardReport(d) {
   head.innerHTML = `
     <div>
       <h1>Chain<span>Deck</span> Analytics Report</h1>
-      <div class="pdf-report-sub">Generated: <strong>${escapeHtml(dateStr)} IST</strong> | Expiry: <strong>${escapeHtml(d.expiry || 'n/a')}</strong> | Data sourced from NSE India. For analytical purposes only.</div>
+      <div class="pdf-report-sub">Generated: <strong>${escapeHtml(dateStr)} IST</strong> | Expiry: <strong>${escapeHtml(d.expiry || 'n/a')}</strong> | Data sourced from Upstox. For analytical purposes only.</div>
     </div>
     <div class="pdf-report-spot">
       <div>Spot: ${escapeHtml(fmt(d.spot))}</div>

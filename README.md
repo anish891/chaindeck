@@ -1,6 +1,6 @@
 # ChainDeck: NIFTY Options Analytics
 
-A live NIFTY 50 options dashboard. ChainDeck reads the NSE option chain during market hours and turns it into
+A live NIFTY 50 options dashboard. ChainDeck reads the NIFTY option chain from the Upstox API during market hours and turns it into
 open interest structure, gamma exposure, volatility, positioning and intraday history in one page, with alerts and
 a plain-language explanation for every number.
 
@@ -12,7 +12,7 @@ ChainDeck is for information and education only. It does not give investment adv
 
 - **Key numbers strip** (stays on screen while you scroll): spot, ATM strike, day change, PCR, India VIX, max pain,
   implied future, market regime and the age of the data.
-- **Expiry selector** for every weekly and monthly expiry NSE lists.
+- **Expiry selector** for every open weekly and monthly expiry.
 - **Auto-refresh** every 3, 5, 10 or 30 seconds while the market is open (every 60 seconds once it closes),
   plus a manual refresh button.
 - **Light, dark or system theme.**
@@ -69,7 +69,7 @@ change against the open and the day average, and the day's range.
 
 ### IV vs Realised Volatility
 ATM implied volatility next to realised volatility over the last 15, 30 and 60 minutes. The summary shows ATM IV,
-NSE's calendar IV, each realised vol window, the gap between IV and 30-minute realised vol, and an IV percentile
+the calendar-basis ATM IV, each realised vol window, the gap between IV and 30-minute realised vol, and an IV percentile
 against saved session closes.
 
 ### Intraday Timeline
@@ -166,21 +166,21 @@ stands out, which is the current result, no condition changes anything.
 ## Data trust
 
 A light in the top bar (Verified, warnings or failing) opens a drawer listing every data check. Nothing here can prove
-NSE itself is right; it shows the numbers are fresh, agree with a second source and are internally consistent.
+the data provider itself is right; it shows the numbers are fresh, agree with a second feed and are internally consistent.
 
 | Check | What it does |
 |---|---|
-| NSE option chain current | Age of the NSE timestamp: amber after 90 seconds, red after 3 minutes (while the market is open) |
-| Leftover copy | Red while trading if NSE did not answer and the last good copy is being shown, with the reason; a warning only after the close |
-| Snapshots changing | Warns if 3 consecutive new NSE snapshots carry identical contents, fails at 5 (a feed that is "refreshing" but frozen) |
+| Option chain current | Age of the snapshot (the index's last trade time on Upstox): amber after 90 seconds, red after 3 minutes (while the market is open) |
+| Leftover copy | Red while trading if Upstox did not answer and the last good copy is being shown, with the reason; a warning only after the close |
+| Snapshots changing | Warns if 3 consecutive new option chain snapshots carry identical contents, fails at 5 (a feed that is "refreshing" but frozen) |
 | Candles current, saved snapshots current | Latest candle lag and the per-minute cron job, as in the Feeds chips |
 | Saved history complete | Minutes saved today against minutes since the open (a warning at most; skipped without storage) |
-| NSE spot vs Yahoo | Two independent sources agree within 0.15 percent (warn) or 0.4 percent (fail) |
-| Totals, PCR, max pain, ATM | Recomputed straight from the raw NSE payload with separate code and compared with what the page shows |
+| Chain spot vs candles | The option chain's spot and the latest candle (a separate feed) agree within 0.15 percent (warn) or 0.4 percent (fail) |
+| Totals, PCR, max pain, ATM | Recomputed straight from the raw option chain payload with separate code and compared with what the page shows |
 | Put-call parity | Strikes near the money should imply the same forward; outliers point to stale quotes |
 | Basis, IV, day range | Implied future near spot, ATM IV in a plausible band, spot inside the day range |
 
-Before anything is cached, each NSE payload is validated (plausible spot, no negative or non-numeric values, enough rows, no
+Before anything is cached, each option chain payload is validated (plausible spot, no negative or non-numeric values, enough rows, no
 jump of more than 8 percent between snapshots, not older than the copy already held). A payload that fails is rejected
 and the last good copy is kept and flagged.
 
@@ -245,7 +245,7 @@ traders read it, with an English and हिन्दी toggle. The language cho
 
 ## Paper trading
 
-A separate app (`/paper`) for practising NIFTY option trades with simulated money on real NSE prices, testing
+A separate app (`/paper`) for practising NIFTY option trades with simulated money on real market prices from Upstox, testing
 strategies, and letting AI agents trade. It is owner only: sign in once with `PAPER_SECRET`. The dashboard shows a
 "Paper trading" button only while that owner session is active; the server enforces the same rule on every route.
 
@@ -261,14 +261,14 @@ It is a React + TypeScript app built with Vite. Source is in `paper-app/`, the b
 - **Orders:** market, limit, stop limit (SL) and stop market (SL-M), with an optional target and stop that become
   exits cancelling each other once the entry fills. A preview shows the fill price, charges and free cash before you place it.
 - **Fills:** market buys pay the ask and sells receive the bid (last price plus or minus 1% when the book is empty).
-  Waiting orders fill only on a newer NSE snapshot than the one they were placed against, never on the quote just seen.
+  Waiting orders fill only on a newer option chain snapshot than the one they were placed against, never on the quote just seen.
   Stops trigger on the last traded price. All orders are day orders, cancelled at 15:30; positions carry overnight.
 - **Charges:** brokerage ₹20 an order, STT 0.15% of premium on sells and of intrinsic value on exercise, NSE
   transaction charge, SEBI fee, stamp duty and GST (rates as of 2026, in `api/services/paperCosts.js`).
 - **Margin:** an estimate, not SPAN. A naked short option needs about 9% of spot (less for out of the money), and a
   spread needs only its maximum loss. With ₹1,00,000 you can buy options and trade spreads, not sell naked.
 - **Expiry:** open options cash-settle at intrinsic value against the NIFTY close, 15 minutes after the expiry close.
-- **Paused trading:** orders are refused outside 09:15 to 15:30 IST, when NSE serves a leftover copy, or when the
+- **Paused trading:** orders are refused outside 09:15 to 15:30 IST, when the server is showing a leftover copy, or when the
   latest snapshot is more than 3 minutes old.
 - **Views:** positions, open orders, order history (with who placed each order and why), trades, a payoff chart (at
   expiry and today) and the equity curve.
@@ -310,7 +310,7 @@ spreadsheet would treat as formulas are neutralised).
 - **Requirements:** Node 22 or newer. `npm test` runs the whole suite (no network or storage needed) and CI runs it on every push (`.github/workflows/ci.yml`).
 - **Per-minute recorder:** point cron-job.org (or similar) at `/api/cron/snapshot` with `Authorization: Bearer <CRON_SECRET>` during market hours.
 - **Is the recorder alive?** `GET /api/snapshot-age` returns HTTP 503 when the last saved snapshot is more than 5 minutes old during market hours, and 200 otherwise. Point an uptime monitor at it to be alerted when the cron job stops. It reveals only that age.
-- **NSE holidays:** the list comes from NSE's holiday master (refreshed at most daily, falling back to a built-in 2026 list), so holidays are treated as closed everywhere: the market-hours checks, time to expiry and the trust light.
+- **Trading holidays:** the list comes from Upstox's market holidays, counting days the F&O segment is shut (refreshed at most daily, falling back to a built-in 2026 list), so holidays are treated as closed everywhere: the market-hours checks, time to expiry and the trust light.
 - **Storage:** with Upstash configured, history uses roughly 5 to 7 commands a minute from the recorder, plus about 6 per open dashboard per minute. The free plan allows 500K commands a month, so check usage in the Upstash dashboard if you leave several tabs open all day.
 - **Paper trading setup:** set `PAPER_SECRET` (a long random value, e.g. `openssl rand -hex 32`) in the Vercel
   environment; without it the paper pages and agent API answer 503 in production. Add a second cron-job.org job for
@@ -322,7 +322,8 @@ spreadsheet would treat as formulas are neutralised).
   account with waiting orders and 4 for each running strategy (a typical setup of two accounts and one strategy is about
   100K commands a month). A paper page left open adds about 5 a minute. Accounts that only hold positions are not
   rewritten during the session.
-- **Data sources and use:** option data comes from NSE's public website API and candles from Yahoo Finance's chart endpoint. Both are unofficial and subject to the providers' terms; this project is for personal analysis, is not investment advice, and should not be offered as a paid or public service without licensed data and the appropriate registrations.
+- **Upstox token:** create a read-only Analytics Token (Upstox Developer Apps, Analytics tab, Generate Token; valid one year, no daily login) and set it as `UPSTOX_ACCESS_TOKEN` in `.env.local` and in the Vercel environment. See `.env.example`. `GET /api/health` reports which source is in use. `DATA_SOURCE=nse` switches back to the old NSE scraper and Yahoo candles; without a token that fallback is used automatically and a warning is logged.
+- **Data sources and use:** option chain, quotes, candles and holidays come from the Upstox API under your own account; FII/DII positions from NSE's public end-of-day file; index constituents (for breadth) from the index provider's public lists; overnight cues from Yahoo Finance. All are subject to the providers' terms; this project is for personal analysis, is not investment advice, and should not be offered as a paid or public service without licensed data and the appropriate registrations.
 
 ---
 
@@ -332,16 +333,17 @@ spreadsheet would treat as formulas are neutralised).
 
 | Data | Source | Freshness |
 |---|---|---|
-| Option chain | NSE option chain | NSE updates about once a minute during market hours |
-| India VIX, sector indices, NIFTY 50 breadth | NSE index list | Live while the page is open, reused for up to 15 seconds; if NSE is slow (over 2.5 seconds) or fails, the last good values are kept for up to 10 minutes |
-| Previous session high, low and close for CPR | Daily NIFTY bars | Once per session |
+| Option chain | Upstox option chain API | Live; served from a 5 second cache |
+| India VIX, sector indices, NIFTY 50 breadth | Upstox market quotes (breadth counted from each index's constituent stocks) | Live while the page is open, reused for up to 15 seconds; if Upstox is slow (over 2.5 seconds) or fails, the last good values are kept for up to 10 minutes |
+| Previous session high, low and close for CPR | Upstox daily NIFTY candles | Once per session |
 | FII / DII / Pro / Client positions | NSE end-of-day participant-wise OI file | Published each evening after the close |
-| NIFTY candles and ETF volume | Yahoo Finance chart data (unofficial, delayed) | 20 seconds while the market is open; only if Yahoo fails are candles built from saved spot values |
+| NIFTY candles and ETF volume | Upstox historical and intraday candles | 20 seconds while the market is open; only if Upstox fails are candles built from saved spot values |
+| Overnight cues (pre-market panel) | Yahoo Finance (unofficial, delayed) | Every 2 minutes from 07:15 to 09:15 IST |
 
 Outside market hours the dashboard shows the last session's values.
 
 ### Intraday history
-A compact copy of each new NSE snapshot (series values and per-strike OI, premium and IV) is saved about once a
+A compact copy of each new option chain snapshot (series values and per-strike OI, premium and IV) is saved about once a
 minute. This powers the Intraday Timeline, the Rolling ATM Straddle, IV vs Realised Volatility, the 5, 15 and 30
 minute OI views, rate-of-change figures that survive a page refresh, and the strike drill-down. A summary of each
 session is saved after the close for "Sessions That Looked Like Today", the volatility regime and the IV percentile.
@@ -351,7 +353,7 @@ session is saved after the close for "Sessions That Looked Like Today", the vola
   trading days for a per-day figure. That is about 0.68 standard deviations, so price stays inside it only about half
   the time. The true one-standard-deviation range is the straddle divided by sqrt(2/pi), about 1.25 times the straddle,
   and is shown separately as the 1σ range (about two times out of three).
-- **Time to expiry:** measured from when NSE quoted the prices to 15:30 IST on expiry day, so Greeks, GEX, the
+- **Time to expiry:** measured from when the prices were quoted to 15:30 IST on expiry day, so Greeks, GEX, the
   zero-gamma level and the implied distribution stay consistent with the quotes after hours and over weekends.
 - **Implied future:** put-call parity at the ATM strike.
 - **Max pain:** the expiry level at which option holders collectively lose the most.
@@ -363,7 +365,7 @@ session is saved after the close for "Sessions That Looked Like Today", the vola
   (Breeden-Litzenberger), with a lognormal fallback.
 - **Realised volatility:** squared log returns of spot between snapshots, divided by the trading minutes they cover
   and annualised over 252 trading days of 375 minutes.
-- **Trading-time IV:** NSE quotes IV on a 365-day calendar. It is converted so the same variance is spread over
+- **Trading-time IV:** option IV is quoted on a 365-day calendar. It is converted so the same variance is spread over
   trading hours only (09:15 to 15:30 IST, weekdays), which makes it directly comparable with intraday realised
   volatility. Exchange holidays are not modelled.
 - **IV percentile:** the share of saved session closing IVs at or below today's IV (shown once 5 sessions exist).
@@ -371,12 +373,11 @@ session is saved after the close for "Sessions That Looked Like Today", the vola
   snapshots only, with put labels read from NIFTY's side.
 
 ### Limitations
-- NSE's data can lag by a minute or more, and NSE sometimes times out. When that happens the dashboard keeps the
+- Upstox can occasionally time out or reject a request (for example an expired token). When that happens the dashboard keeps the
   last good values on screen (for the index list, at most 10 minutes old).
 - Realised volatility needs about 15 minutes of snapshots each morning and reads high in the first half hour.
 - Intraday realised volatility leaves out overnight gaps, so implied volatility usually sits above it.
-- Candle data comes from an unofficial Yahoo Finance endpoint and can be delayed or unavailable. The chart says when it
-  is using saved spot values instead, whose highs and lows are only as good as the once-a-minute sampling.
+- If the candle feed is unavailable, the chart says when it is using saved spot values instead, whose highs and lows are only as good as the once-a-minute sampling.
 - Pattern signals are weak evidence. The backtest usually shows hit rates close to chance, and the panel reports that
   rather than hiding it.
 - Scores, regimes and probabilities describe current conditions and how option prices are set. They are not
