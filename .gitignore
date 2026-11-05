@@ -2,6 +2,7 @@
 node_modules/
 .vercel
 .env*
+!.env.example
 *.log
 
 # Not part of the deployment: promo video project and rendered videos (kept locally only)
