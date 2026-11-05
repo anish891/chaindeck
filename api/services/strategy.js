@@ -2,6 +2,7 @@
 //
 // {
 //   name: 'ORB breakout',
+//   symbol: 'NIFTY' | 'SENSEX',                     the index traded (NIFTY when absent); sets strike step, lot size, data
 //   interval: '5m' | '15m',
 //   entry: {
 //     window: { from: '09:45', to: '13:30' },       entry candle must START inside this window (IST)
@@ -14,7 +15,7 @@
 //     stopLoss: { unit: 'pct' | 'rupees', value: 30 } | null,   pct = percent of the net premium paid or received
 //     target:   { unit: 'pct' | 'rupees', value: 60 } | null,
 //     exitAt: '15:15',                                          every trade is closed by then (intraday only)
-//     indexMovePts: 80 | null                                   exit if NIFTY moves this far from the entry level
+//     indexMovePts: 80 | null                                   exit if the index moves this far from the entry level
 //   }
 // }
 //
@@ -29,7 +30,11 @@
 //
 // Option-chain readings (PCR, OI walls) are not conditions here: there is no history of them to backtest against.
 
-const STRIKE_STEP = 50;
+const { INDICES } = require('./instruments');
+
+const STRIKE_STEP = 50; // NIFTY's; strikeStepFor(symbol) for any index
+const STRATEGY_SYMBOLS = ['NIFTY', 'SENSEX'];
+const strikeStepFor = (symbol = 'NIFTY') => (INDICES[symbol] ? INDICES[symbol].strikeStep : STRIKE_STEP);
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const OPEN_MIN = 9 * 60 + 15;
 const LAST_EXIT_MIN = 15 * 60 + 25;
@@ -72,6 +77,8 @@ function validateExitRule(r, name) {
 function validateStrategy(input) {
   const s = input || {};
   if (typeof s.name !== 'string' || !s.name.trim() || s.name.length > 40) return bad('name: 1 to 40 characters.');
+  const symbol = s.symbol === undefined || s.symbol === null ? 'NIFTY' : s.symbol;
+  if (!oneOf(symbol, STRATEGY_SYMBOLS)) return bad(`symbol must be ${STRATEGY_SYMBOLS.join(' or ')}.`);
   if (!oneOf(s.interval, ['5m', '15m'])) return bad('interval must be 5m or 15m.');
 
   const e = s.entry || {};
@@ -97,7 +104,7 @@ function validateStrategy(input) {
   const legs = [];
   for (const l of s.legs) {
     if (!l || !oneOf(l.side, ['BUY', 'SELL']) || !oneOf(l.optionType, ['CE', 'PE'])) return bad('Each leg needs side BUY/SELL and optionType CE/PE.');
-    if (!Number.isInteger(l.strikeOffset) || l.strikeOffset < -20 || l.strikeOffset > 20) return bad('strikeOffset: whole number of strikes from ATM, -20 to 20 (50 points each).');
+    if (!Number.isInteger(l.strikeOffset) || l.strikeOffset < -20 || l.strikeOffset > 20) return bad(`strikeOffset: whole number of strikes from ATM, -20 to 20 (${strikeStepFor(symbol)} points each).`);
     if (!Number.isInteger(l.lots) || l.lots < 1 || l.lots > 10) return bad('lots: 1 to 10 per leg.');
     const expiry = l.expiry === undefined ? 'weekly' : l.expiry;
     if (!oneOf(expiry, ['weekly', 'next'])) return bad('expiry: weekly (nearest) or next.');
@@ -118,6 +125,7 @@ function validateStrategy(input) {
     ok: true,
     value: {
       name: s.name.trim(),
+      symbol,
       interval: s.interval,
       entry: { window: { from: w.from, to: w.to }, weekdays: [...new Set(weekdays)].sort(), maxTradesPerDay, conditions },
       legs,
@@ -155,4 +163,4 @@ const PRESETS = [
   }
 ];
 
-module.exports = { STRIKE_STEP, LAST_EXIT_MIN, toMins, validateStrategy, PRESETS, CONDITION_HELP };
+module.exports = { STRIKE_STEP, STRATEGY_SYMBOLS, strikeStepFor, LAST_EXIT_MIN, toMins, validateStrategy, PRESETS, CONDITION_HELP };
