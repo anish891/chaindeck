@@ -319,5 +319,62 @@ const sleep = async () => {};
   assert.deepStrictEqual(failing['NIFTY 50'], ['INE423A01024', 'INE742F01042'], 'failed downloads keep the last good list');
   cons._clear();
 
+  // ── candles from Upstox ─────────────────────────────────────────────
+  const uc = require('./services/upstoxCandles');
+  assert.deepStrictEqual(uc.parseRange('60d'), { sessions: 60, calendarDays: 95 });
+  assert.deepStrictEqual(uc.parseRange('5y'), { sessions: null, calendarDays: 1830 });
+  assert.throws(() => uc.parseRange('max'), /Unsupported range/);
+  const rowsIn = [
+    ['2026-11-05T09:20:00+05:30', 22710, 22730, 22700, 22725, 0, 0],
+    ['2026-11-05T09:15:00+05:30', 22700, 22715, 22690, 22710, 12000, 0],
+    ['2026-11-05T09:15:00+05:30', 22700, 22715, 22690, 22710, 12000, 0],   // duplicate
+    ['2026-11-05T09:25:00+05:30', 22725, null, 22720, 22722, 0, 0],         // missing high: dropped
+    'junk'
+  ];
+  const parsedC = uc.parseUpstoxCandles(rowsIn);
+  assert.deepStrictEqual(parsedC.map(c => c.t), [Date.parse('2026-11-05T09:15:00+05:30'), Date.parse('2026-11-05T09:20:00+05:30')], 'sorted oldest first, de-duplicated');
+  assert.deepStrictEqual(parsedC[0], { t: Date.parse('2026-11-05T09:15:00+05:30'), o: 22700, h: 22715, l: 22690, c: 22710, v: 12000 });
+  assert.strictEqual(parsedC[1].v, null, 'index volume 0 means no volume');
+
+  // windows: 60 sessions of 5m candles -> intraday + 4 history windows of <= 28 days, keyed path with the encoded instrument
+  const paths = [];
+  const nowC = Date.parse('2026-11-05T11:00:00+05:30');
+  const dayRows = (ymd) => [[`${ymd}T09:15:00+05:30`, 1, 2, 1, 2, 5, 0], [`${ymd}T15:25:00+05:30`, 2, 3, 2, 3, 5, 0]];
+  const histGet = async (path) => {
+    paths.push(path);
+    if (path.includes('/intraday/')) return { candles: dayRows('2026-11-05') };
+    const [toDay, from] = path.split('/').slice(-2);
+    const out = [];
+    for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${toDay}T00:00:00Z`); t += 86400000) {
+      const d = new Date(t); if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+      out.push(...dayRows(d.toISOString().slice(0, 10)));
+    }
+    return { candles: out };
+  };
+  const c60 = await uc.fetchUpstoxCandles('NSE_INDEX|Nifty 50', '5m', '60d', { get: histGet, nowMs: nowC });
+  assert.ok(paths[0].startsWith('/v3/historical-candle/intraday/NSE_INDEX%7CNifty%2050/minutes/5'));
+  assert.strictEqual(paths.length, 5, 'intraday + 4 windows for ~95 calendar days');
+  for (const pth of paths.slice(1)) {
+    const [toDay, from] = pth.split('/').slice(-2);
+    assert.ok((Date.parse(toDay) - Date.parse(from)) / 86400000 <= 27, `window ${from}..${toDay} within a month`);
+    assert.ok(toDay < '2026-11-05', 'history stops at yesterday; today comes from the intraday call');
+  }
+  assert.strictEqual(new Set(c60.map(c => new Date(c.t + 330 * 60000).toISOString().slice(0, 10))).size, 60, 'trimmed to 60 sessions');
+  assert.strictEqual(new Date(c60[c60.length - 1].t + 330 * 60000).toISOString().slice(0, 10), '2026-11-05', 'today included');
+
+  // daily: one history request; a failing intraday call (holiday, pre-open) is fine, an auth failure is not
+  paths.length = 0;
+  const d1 = await uc.fetchUpstoxCandles('NSE_INDEX|Nifty 50', '1d', '1y', { get: async p => { if (p.includes('intraday')) { paths.push(p); throw Object.assign(new Error('no data'), { code: 'UPSTOX_HTTP' }); } return histGet(p); }, nowMs: nowC });
+  assert.strictEqual(paths.length, 2);
+  assert.ok(paths[1].includes('/days/1/'));
+  assert.ok(d1.length > 200);
+  await assert.rejects(uc.fetchUpstoxCandles('X|Y', '5m', '5d', { get: async () => { throw Object.assign(new Error('expired'), { code: 'UPSTOX_AUTH' }); }, nowMs: nowC }), e => e.code === 'UPSTOX_AUTH');
+  await assert.rejects(uc.fetchUpstoxCandles('X|Y', '2h', '5d', { get: histGet }), /Unsupported interval/);
+
+  // the candle module maps its Yahoo symbols to Upstox instruments
+  const candlesMod = require('./services/candles');
+  assert.deepStrictEqual(Object.keys(candlesMod.UPSTOX_KEYS).sort(), Object.keys(candlesMod.SYMBOLS).sort());
+  assert.strictEqual(candlesMod.UPSTOX_KEYS.etf, 'NSE_EQ|INF204KB14I2', 'NIFTYBEES by ISIN');
+
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

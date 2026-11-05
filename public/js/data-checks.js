@@ -124,14 +124,16 @@ export function evaluateTrust({ now, marketOpen, chain = null, candles = null, s
     checks.push(chk('saved_fresh', F, 'Per-minute snapshots are being saved', marketOpen ? 'warn' : 'skip', 'no saved history found (needs storage and the cron job)'));
   }
 
-  // ── cross-source: NSE spot vs the Yahoo candle ──
+  // ── cross-check: option chain spot vs the latest candle (a separate feed: Upstox candles or Yahoo) ──
   const lastClose = candles && candles.lastClose;
-  if (chain && chain.d && Number.isFinite(lastClose) && candles.feed && candles.feed.source === 'yahoo' && !candles.feed.stale) {
+  const candleFeed = candles && candles.feed && candles.feed.source;
+  if (chain && chain.d && Number.isFinite(lastClose) && (candleFeed === 'upstox' || candleFeed === 'yahoo') && !candles.feed.stale) {
+    const feedName = candleFeed === 'upstox' ? 'Upstox candle' : 'Yahoo';
     const gap = Math.abs(chain.d.spot - lastClose) / chain.d.spot;
     const lvl = gap <= SPOT_TOLERANCE.warn ? 'pass' : gap <= SPOT_TOLERANCE.fail ? 'warn' : 'fail';
-    checks.push(chk('spot_vs_yahoo', 'Cross-check', 'NSE spot agrees with the Yahoo price', lvl, `${(gap * 100).toFixed(2)}% apart (NSE ${Math.round(chain.d.spot)}, Yahoo ${Math.round(lastClose)})`));
+    checks.push(chk('spot_vs_yahoo', 'Cross-check', `Option chain spot agrees with the ${feedName} price`, lvl, `${(gap * 100).toFixed(2)}% apart (chain ${Math.round(chain.d.spot)}, ${feedName} ${Math.round(lastClose)})`));
   } else {
-    checks.push(chk('spot_vs_yahoo', 'Cross-check', 'NSE spot agrees with the Yahoo price', 'skip', 'no current Yahoo candle to compare with'));
+    checks.push(chk('spot_vs_yahoo', 'Cross-check', 'Option chain spot agrees with the candle price', 'skip', 'no current candle from a separate feed to compare with'));
   }
 
   // ── the server's independent recomputation ──

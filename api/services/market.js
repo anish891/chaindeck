@@ -2,9 +2,10 @@ const fetch = require('node-fetch');
 const { getCookies, fetchWithTimeout } = require('./nse');
 const upstox = require('./upstox');
 const constituents = require('./constituents');
+const upstoxCandles = require('./upstoxCandles');
 
 // Cached market-context lookups: India VIX, index day stats, sectors and breadth (Upstox quotes, or NSE when DATA_SOURCE=nse),
-// and the previous completed session's OHLC (for real CPR/pivots) from Yahoo Finance.
+// and the previous completed session's OHLC (for real CPR/pivots) from the same provider's daily candles.
 // Every function resolves to null on failure so analytics can degrade gracefully.
 
 
@@ -168,6 +169,10 @@ function _setIndexLoader(fn) {
 }
 
 async function loadDailyBars() {
+  if (optionChainSource() === 'upstox') {
+    const candles = await upstoxCandles.fetchUpstoxCandles(NIFTY_KEY, '1d', '10d');
+    return candles.map(c => ({ date: new Date(c.t + 330 * 60 * 1000).toISOString().slice(0, 10), open: c.o, high: c.h, low: c.l, close: c.c }));
+  }
   const url = 'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=10d&interval=1d';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
@@ -207,7 +212,7 @@ async function getPivotBasis() {
     const prior = bars.filter(b => b.date < now.ymd).pop();
     const basis = sessionClosed && todayBar ? todayBar : prior;
     if (!basis) return ohlcCache.value;
-    const value = { ...basis, source: 'yahoo' };
+    const value = { ...basis, source: optionChainSource() === 'upstox' ? 'upstox' : 'yahoo' };
     ohlcCache = { ts: Date.now(), value, key };
     return value;
   } catch (err) {

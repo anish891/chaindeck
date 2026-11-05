@@ -308,8 +308,9 @@ function renderStatus() {
   if (!el) return;
   if (!data) { el.textContent = 'Loading chart data...'; return; }
   const bits = [];
-  if (data.source === 'yahoo') bits.push('Candles: Yahoo Finance (delayed, unofficial)');
-  else if (data.source === 'stored') bits.push('Candles built from this app\'s saved spot values (Yahoo unavailable); highs and lows are approximate');
+  if (data.source === 'upstox') bits.push('Candles: Upstox');
+  else if (data.source === 'yahoo') bits.push('Candles: Yahoo Finance (delayed, unofficial)');
+  else if (data.source === 'stored') bits.push('Candles built from this app\'s saved spot values (candle feed unavailable); highs and lows are approximate');
   else bits.push('No candle data available right now');
   bits.push(data.volumeSource === 'etf' ? 'Volume: NIFTYBEES ETF as a proxy (the index has no volume)' : 'No volume data');
   el.textContent = bits.join('. ') + '.';

@@ -52,6 +52,7 @@ const path = require('path');
   r = M.evaluateTrust(base({ candles: { ...candlesOk, lastClose: 22700 * 1.01 } })); assert.strictEqual(by(r).spot_vs_yahoo.level, 'fail'); assert.strictEqual(r.blocking, true);
   r = M.evaluateTrust(base({ candles: { ...candlesOk, feed: { ...candlesOk.feed, source: 'stored' } } })); assert.strictEqual(by(r).spot_vs_yahoo.level, 'skip', 'saved-spot candles are not an independent source');
   r = M.evaluateTrust(base({ candles: null })); assert.strictEqual(by(r).spot_vs_yahoo.level, 'skip');
+  r = M.evaluateTrust(base({ candles: { ...candlesOk, feed: { ...candlesOk.feed, source: 'upstox' }, lastClose: 22700 * 1.01 } })); assert.strictEqual(by(r).spot_vs_yahoo.level, 'fail', 'Upstox candles are cross-checked too'); assert.ok(/Upstox/.test(by(r).spot_vs_yahoo.label));
 
   // server integrity failures flow through, and only the blocking ones pause
   const bad = id => ({ ...pass(id), level: 'fail', detail: 'mismatch' });
