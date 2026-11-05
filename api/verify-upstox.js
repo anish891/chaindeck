@@ -311,6 +311,7 @@ const sleep = async () => {};
       const colon = key.replace('|', ':');
       if (key === 'NSE_INDEX|Nifty 50') out[colon] = q(key, 22770, 22700);
       else if (key === 'NSE_INDEX|India VIX') out[colon] = q(key, 13.2, 13.8);
+      else if (key === 'BSE_INDEX|SENSEX') out[colon] = q(key, 80400, 80000);
       else if (key === 'NSE_INDEX|Nifty Bank') out[colon] = q(key, 50100, 50000);
       else if (key.startsWith('NSE_EQ|') && stockQ[key.slice(7)]) out[colon] = q(key, ...stockQ[key.slice(7)]);
     }
@@ -320,10 +321,11 @@ const sleep = async () => {};
   assert.strictEqual(snap.source, 'upstox');
   assert.strictEqual(snap.nifty.last, 22770);
   assert.strictEqual(snap.vix.percentChange, -4.35);
+  assert.strictEqual(snap.sensex.percentChange, 0.5, 'SENSEX day stats in the same quote call');
   assert.deepStrictEqual(snap.breadth, { advances: 2, declines: 1, unchanged: 1 });
   assert.strictEqual(snap.sectors.length, 1, 'sectors without a quote are left out, as before');
   assert.deepStrictEqual(snap.sectors[0], { name: 'Bank', index: 'NIFTY BANK', last: 50100, percentChange: 0.2, advances: 1, declines: 1 });
-  assert.deepStrictEqual(quoteCalls, [2 + mkt.SECTORS.length + 4], 'one quote call for indices and stocks together');
+  assert.deepStrictEqual(quoteCalls, [3 + mkt.SECTORS.length + 4], 'one quote call for indices and stocks together');
 
   // breadth unknown when constituents are unavailable; NIFTY missing is an error (the old copy is then served)
   const noLists = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => { throw new Error('down'); } });
@@ -338,7 +340,7 @@ const sleep = async () => {};
   let n = 0;
   const flakyStocks = async (p, query) => { n += 1; if (n > 1) throw new Error('boom'); return quoteGet(p, query); };
   const big = await mkt.loadIndicesUpstox({ get: flakyStocks, getLists: async () => many });
-  assert.strictEqual(n, 3, '468 keys -> 3 calls of at most 200');
+  assert.strictEqual(n, 3, '469 keys -> 3 calls of at most 200');
   assert.strictEqual(big.nifty.last, 22770);
 
   // ── constituent lists ───────────────────────────────────────────────

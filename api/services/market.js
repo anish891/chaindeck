@@ -14,7 +14,7 @@ const INDICES_MAX_STALE = 10 * 60 * 1000; // older than this, a fallback value w
 const OHLC_TTL = 30 * 60 * 1000;
 
 let indicesCache = { ts: 0, value: null };
-let ohlcCache = { ts: 0, value: null, key: null };
+const ohlcCache = new Map(); // symbol -> { ts, value, key }
 let indicesInflight = null;
 
 function istNow(date = new Date()) {
@@ -54,6 +54,7 @@ const SECTORS = [
 ];
 const NIFTY_KEY = 'NSE_INDEX|Nifty 50';
 const VIX_KEY = 'NSE_INDEX|India VIX';
+const SENSEX_KEY = 'BSE_INDEX|SENSEX';
 const QUOTE_BATCH = 200; // instrument keys per Upstox quote call
 
 async function loadIndices() {
@@ -102,7 +103,7 @@ function countBreadth(isins, quotes) {
 async function loadIndicesUpstox({ get = upstox.get, getLists = () => constituents.getConstituents() } = {}) {
   const lists = await getLists().catch(err => { console.error('constituents failed:', err.message); return {}; });
   const stockKeys = [...new Set(Object.values(lists || {}).flat())].map(isin => `NSE_EQ|${isin}`);
-  const keys = [NIFTY_KEY, VIX_KEY, ...SECTORS.map(s => s[2]), ...stockKeys];
+  const keys = [NIFTY_KEY, SENSEX_KEY, VIX_KEY, ...SECTORS.map(s => s[2]), ...stockKeys];
   const batches = [];
   for (let i = 0; i < keys.length; i += QUOTE_BATCH) batches.push(keys.slice(i, i + QUOTE_BATCH));
   const replies = await Promise.all(batches.map((b, i) => {
@@ -117,6 +118,7 @@ async function loadIndicesUpstox({ get = upstox.get, getLists = () => constituen
   const nifty = fromUpstoxQuote(quotes.get(NIFTY_KEY));
   if (!nifty) throw new Error('NIFTY 50 missing from Upstox quotes');
   const vix = fromUpstoxQuote(quotes.get(VIX_KEY));
+  const sensex = fromUpstoxQuote(quotes.get(SENSEX_KEY));
   const sectors = SECTORS.map(([name, index, key]) => {
     const q = fromUpstoxQuote(quotes.get(key));
     if (!q) return null;
@@ -124,7 +126,7 @@ async function loadIndicesUpstox({ get = upstox.get, getLists = () => constituen
     return { name, index, last: q.last, percentChange: q.percentChange, advances: b ? b.advances : null, declines: b ? b.declines : null };
   }).filter(Boolean);
   const breadth = countBreadth(lists && lists['NIFTY 50'], quotes);
-  return { nifty, vix, sectors, breadth, source: 'upstox' };
+  return { nifty, sensex, vix, sectors, breadth, source: 'upstox' };
 }
 
 const defaultLoader = () => (optionChainSource() === 'upstox' ? loadIndicesUpstox() : loadIndices());
@@ -168,12 +170,16 @@ function _setIndexLoader(fn) {
   indicesInflight = null;
 }
 
-async function loadDailyBars() {
+// Daily bars per index: Upstox instrument key, and the Yahoo symbol for the fallback path.
+const DAILY_SOURCES = { NIFTY: { upstox: NIFTY_KEY, yahoo: '%5ENSEI' }, SENSEX: { upstox: SENSEX_KEY, yahoo: '%5EBSESN' } };
+
+async function loadDailyBars(symbol = 'NIFTY') {
+  const src = DAILY_SOURCES[symbol] || DAILY_SOURCES.NIFTY;
   if (optionChainSource() === 'upstox') {
-    const candles = await upstoxCandles.fetchUpstoxCandles(NIFTY_KEY, '1d', '10d');
+    const candles = await upstoxCandles.fetchUpstoxCandles(src.upstox, '1d', '10d');
     return candles.map(c => ({ date: new Date(c.t + 330 * 60 * 1000).toISOString().slice(0, 10), open: c.o, high: c.h, low: c.l, close: c.c }));
   }
-  const url = 'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=10d&interval=1d';
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${src.yahoo}?range=10d&interval=1d`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
   try {
@@ -200,24 +206,25 @@ async function loadDailyBars() {
  * OHLC of the session pivots should be built from: the previous completed
  * session intraday, or today's once the cash market has closed (next day's CPR).
  */
-async function getPivotBasis() {
+async function getPivotBasis(symbol = 'NIFTY') {
   const now = istNow();
   const sessionClosed = now.isWeekday && now.mins >= 15 * 60 + 35;
   const key = `${now.ymd}|${sessionClosed}`;
-  if (ohlcCache.value && ohlcCache.key === key && Date.now() - ohlcCache.ts < OHLC_TTL) return ohlcCache.value;
+  const hit = ohlcCache.get(symbol) || { ts: 0, value: null, key: null };
+  if (hit.value && hit.key === key && Date.now() - hit.ts < OHLC_TTL) return hit.value;
 
   try {
-    const bars = await loadDailyBars();
+    const bars = await loadDailyBars(symbol);
     const todayBar = bars.find(b => b.date === now.ymd);
     const prior = bars.filter(b => b.date < now.ymd).pop();
     const basis = sessionClosed && todayBar ? todayBar : prior;
-    if (!basis) return ohlcCache.value;
+    if (!basis) return hit.value;
     const value = { ...basis, source: optionChainSource() === 'upstox' ? 'upstox' : 'yahoo' };
-    ohlcCache = { ts: Date.now(), value, key };
+    ohlcCache.set(symbol, { ts: Date.now(), value, key });
     return value;
   } catch (err) {
-    console.error('Pivot basis (daily OHLC) failed:', err.message);
-    return ohlcCache.value; // may be null → caller falls back to OI estimate
+    console.error(`Pivot basis (daily OHLC, ${symbol}) failed:`, err.message);
+    return hit.value; // may be null → caller falls back to OI estimate
   }
 }
 
