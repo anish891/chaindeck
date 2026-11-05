@@ -6,7 +6,7 @@ unchanged. Every move uses `git mv`, so `git log --follow` still shows each file
 
 ## What to review first
 
-1. **`.github/workflows/security.yml`**: new jobs. Check that gitleaks and CodeQL pass on the PR.
+1. **`.github/workflows/security.yml`**: new jobs. Both passed on the PR: gitleaks found no leaks in the PR's commits, and CodeQL raised no alerts. The whole history was scanned separately (see the findings) and is rescanned weekly.
 2. **`test/run.js`** and `package.json` → `npm test`: the 36-command chain becomes a runner. It covers the same 36
    files (checked against the old list), and it exits non-zero on the first failure (checked with a failing file).
 3. **One of the service-split commits**, for example `refactor: group market data services ...`. Every changed line
@@ -95,7 +95,7 @@ script), `paper-app/src/test-entry.ts` and two `public/js` files (comments only)
 | `actions/checkout` and `actions/setup-node` pinned to commit SHAs (`v7.0.1`, `v7.1.0`: the same versions `@v7` already resolved to) | A moved or compromised tag can't change what runs |
 | `persist-credentials: false` on checkout | Later steps never push, so the token shouldn't sit in `.git/config` |
 | `timeout-minutes` and `concurrency` with cancel-in-progress | Stops runaway jobs; an old run doesn't race a newer push |
-| New `security.yml`: gitleaks over the full history, and CodeQL (`security-extended`); push, PR and weekly | Secret scanning and static analysis in CI. The workflow starts with `permissions: {}` and each job asks only for what it needs |
+| New `security.yml`: gitleaks (a PR's own commits, the commits in a push, and the whole history weekly or when run by hand) and CodeQL (`security-extended`) | Secret scanning and static analysis in CI. The workflow starts with `permissions: {}` and each job asks only for what it needs |
 | New `dependabot.yml` (npm grouped minor/patch weekly, majors separately; GitHub Actions weekly) | Keeps pinned SHAs and dependencies current through reviewable PRs. Nothing updates automatically |
 | `vercel.json` | **Unchanged.** It builds `api/index.js`, which didn't move, and Vercel traces the moved modules from there |
 | CI steps (`npm ci`, `npm test`, `build:paper`, bundle check, `npm audit`) | Unchanged |

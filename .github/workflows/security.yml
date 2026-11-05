@@ -6,6 +6,7 @@ on:
   pull_request:
   schedule:
     - cron: '17 3 * * 1' # weekly, Monday 03:17 UTC: new CodeQL rules and gitleaks patterns catch old code too
+  workflow_dispatch: # run by hand (Actions tab) for a full-history secret scan at any time
 
 # Nothing by default; each job asks only for what it needs.
 permissions: {}
@@ -16,7 +17,9 @@ concurrency:
 
 jobs:
   secrets:
-    name: Secret scan (gitleaks, full history)
+    # What gitleaks-action scans depends on the event: a pull request's own commits, the commits in a push, and the
+    # whole history on the weekly schedule or a manual run.
+    name: Secret scan (gitleaks)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -25,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # every commit, not just the tip
+          fetch-depth: 0 # the full history has to be present for the scheduled and manual full scans
           persist-credentials: false
       - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
         env:
