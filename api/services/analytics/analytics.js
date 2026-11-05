@@ -1,5 +1,5 @@
 const { getIndexSnapshot, getPivotBasis } = require('../market/market');
-const history = require('../history');
+const history = require('../storage/history');
 const { toTradingTimeIv, expiryCloseMs, ivPercentile } = require('./volatility');
 const calendar = require('../market/calendar');
 const instruments = require('../providers/instruments');

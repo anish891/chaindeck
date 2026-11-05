@@ -1,4 +1,4 @@
-// Tests for the India VIX / index snapshot cache in services/market.js (no network: the NSE loader is replaced).
+// Tests for the India VIX / index snapshot cache in services/market/market.js (no network: the NSE loader is replaced).
 const assert = require('assert');
 const market = require('../api/services/market/market');
 

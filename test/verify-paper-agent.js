@@ -8,7 +8,7 @@ const app = require('../api/index');
 const paperRouter = require('../api/routes/paper');
 const { createService, AGENT } = require('../api/services/paper/paperAccounts');
 const { formatNseDate } = require('../api/services/providers/nse');
-const storage = require('../api/services/storage');
+const storage = require('../api/services/storage/storage');
 
 const DAY = 24 * 3600 * 1000;
 const EXPIRIES = [3, 10, 17, 24, 31].map(d => formatNseDate(Date.now() + d * DAY));

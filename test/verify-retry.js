@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { withRetry } = require('../api/services/retry');
+const { withRetry } = require('../api/services/util/retry');
 
 (async () => {
   const sleep = async () => {};

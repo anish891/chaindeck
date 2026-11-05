@@ -441,7 +441,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 
 /** The service wired to real storage, the option chain feed (Upstox, or NSE for NIFTY) and daily candles. */
 function defaultService() {
-  const store = require('../storage');
+  const store = require('../storage/storage');
   const { fetchRawOptionChain } = require('../market/optionChain');
   const candles = require('../market/candles');
   const { lotSizeFor } = require('../providers/upstoxChain');

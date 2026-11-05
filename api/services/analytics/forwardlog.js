@@ -16,7 +16,7 @@
 // Zone outcome: "held" if price reached the zone and then moved 1 ATR away before closing through it, "broke" if it
 // closed through it first, "inconclusive" if neither by the close, "untouched" if price never got there.
 
-const store = require('../storage');
+const store = require('../storage/storage');
 const { wilson } = require('./backtest');
 const { istDay } = require('../market/candles');
 

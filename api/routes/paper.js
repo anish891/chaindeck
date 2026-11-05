@@ -50,7 +50,7 @@ let strategyService = null;
 const strategies = () => strategyService || (strategyService = defaultStrategyService());
 let liveService = null;
 const live = () => liveService || (liveService = createLiveService({
-  store: require('../services/storage'),
+  store: require('../services/storage/storage'),
   accounts: svc(),
   loadLive: (interval, symbol = 'NIFTY') => require('../services/market/candles').getLiveData(interval, { symbol })
 }));

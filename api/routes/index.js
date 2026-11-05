@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const history = require('../services/history');
+const history = require('../services/storage/history');
 const { getParticipantHistory } = require('../services/market/participants');
 const chartAnalysis = require('../services/analytics/chartAnalysis');
 const forwardLog = require('../services/analytics/forwardlog');
-const { withRetry } = require('../services/retry');
+const { withRetry } = require('../services/util/retry');
 const integrity = require('../services/analytics/integrity');
 const { istNow } = require('../services/market/market');
 const { refreshHolidays } = require('../services/market/holidays');
@@ -44,7 +44,7 @@ router.get('/option-chain', async (req, res) => {
     const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawOptionChain(symbol, expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry, { symbol });
     res.set('Cache-Control', READ_CACHE);
-    // Recompute the headline numbers from the raw payload with separate code and compare (see services/integrity.js).
+    // Recompute the headline numbers from the raw payload with separate code and compare (see services/analytics/integrity.js).
     let checks;
     try {
       checks = integrity.verifyProcessed(raw, data, targetExpiry);
@@ -141,7 +141,7 @@ router.get('/forward-log', async (req, res) => {
   }
 });
 
-// How each kind of support / resistance level actually behaved over the stored history (see services/scorecard.js).
+// How each kind of support / resistance level actually behaved over the stored history (see services/analytics/scorecard.js).
 router.get('/level-scorecard', async (req, res) => {
   try {
     const card = await chartAnalysis.getScorecard(require('../services/market/candles'));

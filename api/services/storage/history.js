@@ -1,6 +1,6 @@
 const store = require('./storage');
-const { istNow } = require('./market/market');
-const { addVolSeries } = require('./analytics/volatility');
+const { istNow } = require('../market/market');
+const { addVolSeries } = require('../analytics/volatility');
 
 // Intraday buffer + session summaries.
 //
@@ -304,7 +304,7 @@ async function getStrikeHistory(expiry, strike, date = null, maxSamples = 60, sy
  * (HTTP 503) so the monitor alerts you. Outside market hours it is always healthy.
  */
 function snapshotHealth(lastMs, nowMs = Date.now(), maxAgeSec = 300) {
-  const calendar = require('./market/calendar');
+  const calendar = require('../market/calendar');
   const marketOpen = calendar.isMarketOpenAt(nowMs, { before: 0, after: 5 });
   const ageSec = Number.isFinite(lastMs) ? Math.max(0, Math.round((nowMs - lastMs) / 1000)) : null;
   // The first minutes after the open (or a cold start) have no snapshot yet: allow one full interval before alarming.

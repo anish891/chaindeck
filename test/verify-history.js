@@ -1,5 +1,5 @@
 const assert = require('assert');
-const root = require('path').join(__dirname, '../api/services') + '/';
+const root = require('path').join(__dirname, '../api/services/storage') + '/';
 const history = require(root + 'history');
 
 const mk = (minOffset, callOI) => {

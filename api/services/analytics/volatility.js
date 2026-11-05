@@ -28,7 +28,7 @@ function expiryCloseMs(expiry) {
   return Date.UTC(Number(m[3]), month, Number(m[1])) + CLOSE_MIN * 60000 - IST_OFFSET_MS;
 }
 
-/** Minutes of regular NSE session between two instants (weekends and NSE holidays skipped; see calendar.js). */
+/** Minutes of regular NSE session between two instants (weekends and NSE holidays skipped; see market/calendar.js). */
 const tradingMinutesBetween = calendar.tradingMinutesBetween;
 
 /**
