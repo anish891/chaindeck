@@ -430,7 +430,7 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise(resolve => setTimeout(() => resolve(null), ms))]);
 }
 
-let cache = { data: null, ts: 0, expiry: null, symbol: null };
+const caches = new Map(); // symbol -> { data, ts, expiry }: one per index, so viewing SENSEX never evicts NIFTY
 const CACHE_TTL = 5000; // 5s TTL (NSE data refreshes every ~30-60s)
 
 async function processOptionChainData(raw, allExpiries, targetExpiry, { symbol = 'NIFTY' } = {}) {
@@ -439,7 +439,8 @@ async function processOptionChainData(raw, allExpiries, targetExpiry, { symbol =
   symbol = idx.symbol;
   const STEP = idx.strikeStep;
   const LOT_SIZE = lotSizeFor(symbol);
-  if (cache.data && now - cache.ts < CACHE_TTL && cache.expiry === targetExpiry && cache.symbol === symbol) {
+  const cache = caches.get(symbol);
+  if (cache && cache.data && now - cache.ts < CACHE_TTL && cache.expiry === targetExpiry) {
     return cache.data;
   }
 
@@ -787,7 +788,7 @@ async function processOptionChainData(raw, allExpiries, targetExpiry, { symbol =
     fetchedAt: new Date().toISOString()
   };
 
-  cache = { data: result, ts: now, expiry: targetExpiry, symbol };
+  caches.set(symbol, { data: result, ts: now, expiry: targetExpiry });
 
   // Persist for the intraday buffer / session history. Never let storage trouble break the response.
   try {
@@ -1024,8 +1025,10 @@ function computeIntradayMLPredictions(spot, maxPain, zeroGammaLevel, gexTotalCr,
   };
 }
 
-function getCacheData() {
-  return cache.data;
+/** The last result computed for an index (NIFTY by default), or null. */
+function getCacheData(symbol = 'NIFTY') {
+  const c = caches.get(symbol);
+  return c ? c.data : null;
 }
 
 module.exports = {

@@ -486,5 +486,45 @@ const sleep = async () => {};
   assert.ok(kept.holidays.includes('2026-11-10'), 'a failed refresh keeps the list in memory');
   hol._reset();
 
+  // ── routes: ?symbol= ────────────────────────────────────────────────
+  {
+    const http = require('http');
+    const app = require('./index');
+    const server = await new Promise(r => { const sv = http.createServer(app).listen(0, () => r(sv)); });
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+    const getJson = async path => { const r = await fetch(base + path); return { status: r.status, body: await r.json() }; };
+    const seen = [];
+    oc._setSource({
+      name: 'upstox',
+      knownExpiries: () => null,
+      load: async (sym) => {
+        seen.push(sym);
+        return sym === 'SENSEX'
+          ? { raw: toChainRaw(sxRowsA, { expiries: [SXEXP], asOfMs: Date.now(), quantityPerContract: 20 }), allExpiries: [SXEXP], targetExpiry: SXEXP }
+          : { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: Date.now(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: EXP };
+      }
+    });
+    const sxRes = await getJson('/option-chain?symbol=sensex');
+    assert.strictEqual(sxRes.status, 200, JSON.stringify(sxRes.body).slice(0, 200));
+    assert.strictEqual(sxRes.body.data.symbol, 'SENSEX');
+    assert.strictEqual(sxRes.body.data.strikeStep, 100);
+    assert.strictEqual(sxRes.body.data.feed.source, 'upstox');
+    const nfRes = await getJson('/option-chain');
+    assert.strictEqual(nfRes.body.data.symbol, 'NIFTY', 'NIFTY stays the default');
+    assert.deepStrictEqual(seen, ['SENSEX', 'NIFTY']);
+    for (const path of ['/option-chain?symbol=banknifty', '/intraday?expiry=12-Nov-2026&symbol=x', '/expiry-replay?symbol=%3Cb%3E', '/similar-sessions?symbol=nifty50', '/strike-history?expiry=12-Nov-2026&strike=80000&symbol=']) {
+      const r = await getJson(path);
+      assert.strictEqual(r.status, 400, `${path} -> ${r.status}`);
+      assert.ok(!/<b>/.test(JSON.stringify(r.body)), 'input never echoed');
+    }
+    assert.strictEqual((await getJson('/intraday?expiry=12-Nov-2026&symbol=SENSEX')).status, 200);
+    oc._setSource({ name: 'nse', knownExpiries: () => null, load: async () => { throw new Error('unused'); } });
+    const fallback = await getJson('/option-chain?symbol=SENSEX');
+    assert.strictEqual(fallback.status, 503);
+    assert.ok(/Upstox/.test(fallback.body.error));
+    oc._setSource(null);
+    await new Promise(r => server.close(r));
+  }
+
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

@@ -10,6 +10,7 @@ const { istNow } = require('../services/market');
 const { refreshHolidays } = require('../services/holidays');
 const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/optionChain');
 const calendar = require('../services/calendar');
+const instruments = require('../services/instruments');
 const premarket = require('../services/premarket');
 const paperRoutes = require('./paper');
 const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../security');
@@ -25,13 +26,23 @@ const READ_CACHE = 'public, s-maxage=3, stale-while-revalidate=10';
 const HISTORY_CACHE = 'public, s-maxage=10, stale-while-revalidate=20';
 const strictLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'sensitive' });
 
+/** ?symbol=NIFTY|SENSEX (case-insensitive, NIFTY when absent). null for anything else, which the caller turns into a 400. */
+function symbolOf(req) {
+  const v = req.query.symbol;
+  if (v === undefined) return 'NIFTY';
+  return instruments.isSymbol(v) ? String(v).toUpperCase() : null;
+}
+const BAD_SYMBOL = { ok: false, error: `symbol must be one of ${instruments.SYMBOLS.join(', ')}.` };
+
 router.get('/option-chain', async (req, res) => {
   refreshHolidays().catch(() => {}); // cheap: at most one upstream call a day, never blocks or throws
   const { expiry } = req.query;
+  const symbol = symbolOf(req);
+  if (!symbol) return res.status(400).json(BAD_SYMBOL);
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawOptionChain('NIFTY', expiry || null);
-    const data = await processOptionChainData(raw, allExpiries, targetExpiry);
+    const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawOptionChain(symbol, expiry || null);
+    const data = await processOptionChainData(raw, allExpiries, targetExpiry, { symbol });
     res.set('Cache-Control', READ_CACHE);
     // Recompute the headline numbers from the raw payload with separate code and compare (see services/integrity.js).
     let checks;
@@ -45,6 +56,7 @@ router.get('/option-chain', async (req, res) => {
     res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? staleReasonCode(staleReason) : null, source: sourceName() }, integrity: { checks } } });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
+    if (err.code === 'UNSUPPORTED_SYMBOL') return res.status(503).json({ ok: false, error: `${symbol} needs the Upstox data source (set UPSTOX_ACCESS_TOKEN).` });
     return sendError(res, 502, 'Error fetching option chain', err);
   }
 });
@@ -52,10 +64,12 @@ router.get('/option-chain', async (req, res) => {
 // Intraday series + baseline strike snapshots (5m / 15m / 30m earlier, and the open)
 router.get('/intraday', async (req, res) => {
   const { expiry, date } = req.query;
+  const symbol = symbolOf(req);
+  if (!symbol) return res.status(400).json(BAD_SYMBOL);
   if (!isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry (DD-Mon-YYYY) is required.' });
   if (date !== undefined && !isRecentDate(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD.' });
   try {
-    const data = await history.getIntraday(expiry, date || null);
+    const data = await history.getIntraday(expiry, date || null, symbol);
     res.set('Cache-Control', HISTORY_CACHE);
     res.json({ ok: true, persistent: history.configured, ...data });
   } catch (err) {
@@ -78,14 +92,16 @@ router.get('/premarket', async (req, res) => {
 // changes, so the replay is cached for a day at the edge; the list changes once a day.
 router.get('/expiry-replay', async (req, res) => {
   const { expiry } = req.query;
+  const symbol = symbolOf(req);
+  if (!symbol) return res.status(400).json(BAD_SYMBOL);
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 27-Oct-2026.' });
   try {
     if (expiry === undefined) {
-      const days = await history.listExpiryReplays();
+      const days = await history.listExpiryReplays(Date.now(), symbol);
       res.set('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=3600');
       return res.json({ ok: true, persistent: history.configured, days });
     }
-    const data = await history.getExpiryReplay(expiry);
+    const data = await history.getExpiryReplay(expiry, symbol);
     const today = istNow().ymd;
     if (data.date && data.date >= today) return res.status(400).json({ ok: false, error: 'Only past expiry days can be replayed.' });
     res.set('Cache-Control', data.points.length ? 'public, s-maxage=86400' : HISTORY_CACHE);
@@ -105,7 +121,7 @@ router.get('/chart-analysis', async (req, res) => {
   try {
     // Stored spot history is only read if Yahoo is down (it is a fallback; reading it every time cost a storage round trip).
     const fallbackPoints = expiry && interval !== '1d' ? async () => (await history.getIntraday(expiry)).points : null;
-    const data = await chartAnalysis.analyze(interval, { d: getCacheData(), fallbackPoints });
+    const data = await chartAnalysis.analyze(interval, { d: getCacheData('NIFTY'), fallbackPoints }); // the price chart is NIFTY's
     res.set('Cache-Control', HISTORY_CACHE);
     res.json({ ok: true, ...data });
   } catch (err) {
@@ -164,13 +180,15 @@ router.get('/snapshot-age', async (req, res) => {
 // One strike across the day (sampled)
 router.get('/strike-history', async (req, res) => {
   const { expiry, date } = req.query;
+  const symbol = symbolOf(req);
+  if (!symbol) return res.status(400).json(BAD_SYMBOL);
   const strike = Number(req.query.strike);
   if (!isPlausibleExpiry(expiry) || !Number.isInteger(strike) || strike <= 0 || strike > 1000000) {
     return res.status(400).json({ ok: false, error: 'expiry (DD-Mon-YYYY) and an integer strike are required.' });
   }
   if (date !== undefined && !isRecentDate(date)) return res.status(400).json({ ok: false, error: 'date must be YYYY-MM-DD.' });
   try {
-    const data = await history.getStrikeHistory(expiry, strike, date || null);
+    const data = await history.getStrikeHistory(expiry, strike, date || null, 60, symbol);
     res.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=60');
     res.json({ ok: true, ...data });
   } catch (err) {
@@ -199,24 +217,27 @@ router.get('/storage-status', (req, res) => {
 async function cronSnapshot(req, res) {
   await refreshHolidays(); // keep the holiday list current even when nobody has the page open
   const { expiry } = req.query;
+  const symbol = symbolOf(req);
+  if (!symbol) return res.status(400).json(BAD_SYMBOL);
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    // NSE sometimes rejects a cold request (fast 401/403 or a timeout) and answers a moment later, so try a few times.
+    // The upstream sometimes rejects a cold request (fast 401/403 or a timeout) and answers a moment later, so try a few times.
     const { raw, allExpiries, targetExpiry, stale: cronStale } = await withRetry(
       attempt => {
-        if (attempt > 1) console.error(`cron snapshot: retrying NSE fetch (attempt ${attempt})`);
-        return fetchRawOptionChain('NIFTY', expiry || null);
+        if (attempt > 1) console.error(`cron snapshot: retrying ${symbol} fetch (attempt ${attempt})`);
+        return fetchRawOptionChain(symbol, expiry || null);
       },
-      { attempts: 3, delayMs: 900, budgetMs: 6500, shouldRetry: e => e.code !== 'BAD_EXPIRY' }
+      { attempts: 3, delayMs: 900, budgetMs: 6500, shouldRetry: e => e.code !== 'BAD_EXPIRY' && e.code !== 'UNSUPPORTED_SYMBOL' && e.code !== 'UPSTOX_AUTH' }
     );
-    const data = await processOptionChainData(raw, allExpiries, targetExpiry);
+    const data = await processOptionChainData(raw, allExpiries, targetExpiry, { symbol });
     // Score the chart's signals and zones against what price did next. Best effort: the snapshot above is already saved.
     // Never record signals from data that is stale or fails its own consistency checks.
     let healthy = !cronStale;
     try { healthy = healthy && !integrity.hasFailure(integrity.verifyProcessed(raw, data, targetExpiry)); } catch (e) { healthy = false; }
-    const forward = healthy ? await forwardLog.run(data) : { skipped: 'unhealthy-data' };
+    // The forward log scores NIFTY's price chart signals, so only NIFTY snapshots feed it.
+    const forward = symbol !== 'NIFTY' ? { skipped: 'nifty-only' } : healthy ? await forwardLog.run(data) : { skipped: 'unhealthy-data' };
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, expiry: data.expiry, dataAsOf: data.dataAsOf, persistent: history.configured, forward });
+    res.json({ ok: true, symbol, expiry: data.expiry, dataAsOf: data.dataAsOf, persistent: history.configured, forward });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
     return sendError(res, 502, 'Cron snapshot failed', err);
@@ -263,17 +284,19 @@ router.post('/session-summary', strictLimit, requireSecret, async (req, res) => 
 });
 
 router.get('/similar-sessions', async (req, res) => {
+  const symbol = symbolOf(req);
+  if (!symbol) return res.status(400).json(BAD_SYMBOL);
   try {
-    let liveData = getCacheData();
+    let liveData = getCacheData(symbol);
     if (!liveData) {
-      const { raw, allExpiries, targetExpiry } = await fetchRawOptionChain('NIFTY');
-      liveData = await processOptionChainData(raw, allExpiries, targetExpiry);
+      const { raw, allExpiries, targetExpiry } = await fetchRawOptionChain(symbol);
+      liveData = await processOptionChainData(raw, allExpiries, targetExpiry, { symbol });
     }
     const currentVector = extractFeatureVector(liveData);
 
     // Exclude today's own (possibly just-written) record so a session can't match itself at 100%
     const today = istNow().ymd;
-    const pastSessions = (await history.getSessions(100)).filter(x => x.date !== today);
+    const pastSessions = (await history.getSessions(100, symbol)).filter(x => x.date !== today);
 
     if (pastSessions.length === 0) {
       // No stored sessions (DB disabled/empty): say so instead of inventing history.
