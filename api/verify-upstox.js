@@ -247,5 +247,77 @@ const sleep = async () => {};
   assert.strictEqual(oc.staleReasonCode(stale.staleReason), 'timeout');
   oc._setSource(null);
 
+  // ── index snapshot from Upstox quotes ───────────────────────────────
+  const mkt = require('./services/market');
+  const q = (key, last, prev, o = {}) => ({ instrument_token: key, last_price: last, prev_ohlc: { close: prev }, live_ohlc: { open: o.open || prev, high: o.high || last, low: o.low || prev, close: last } });
+  assert.deepStrictEqual(mkt.fromUpstoxQuote(q('NSE_INDEX|Nifty 50', 22770, 22700, { open: 22710, high: 22800, low: 22650 })),
+    { last: 22770, previousClose: 22700, open: 22710, high: 22800, low: 22650, percentChange: 0.31 });
+  assert.strictEqual(mkt.fromUpstoxQuote({ last_price: 0 }), null);
+  assert.strictEqual(mkt.fromUpstoxQuote(null), null);
+  assert.strictEqual(mkt.fromUpstoxQuote({ last_price: 10, prev_ohlc: {} }).percentChange, null, 'no previous close: no % change, not a fake 0');
+
+  const ISIN = n => `INE${String(n).padStart(8, '0')}0`;
+  const lists = { 'NIFTY 50': [ISIN(1), ISIN(2), ISIN(3), ISIN(4)], 'NIFTY BANK': [ISIN(1), ISIN(2)] };
+  const stockQ = { [ISIN(1)]: [101, 100], [ISIN(2)]: [99, 100], [ISIN(3)]: [100, 100], [ISIN(4)]: [105, 100] };
+  const quoteCalls = [];
+  const quoteGet = async (path, query) => {
+    quoteCalls.push(query.instrument_key.length);
+    assert.strictEqual(path, '/v3/market-quote/ohlc');
+    assert.strictEqual(query.interval, '1d');
+    const out = {};
+    for (const key of query.instrument_key) {
+      const colon = key.replace('|', ':');
+      if (key === 'NSE_INDEX|Nifty 50') out[colon] = q(key, 22770, 22700);
+      else if (key === 'NSE_INDEX|India VIX') out[colon] = q(key, 13.2, 13.8);
+      else if (key === 'NSE_INDEX|Nifty Bank') out[colon] = q(key, 50100, 50000);
+      else if (key.startsWith('NSE_EQ|') && stockQ[key.slice(7)]) out[colon] = q(key, ...stockQ[key.slice(7)]);
+    }
+    return out;
+  };
+  const snap = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => lists });
+  assert.strictEqual(snap.source, 'upstox');
+  assert.strictEqual(snap.nifty.last, 22770);
+  assert.strictEqual(snap.vix.percentChange, -4.35);
+  assert.deepStrictEqual(snap.breadth, { advances: 2, declines: 1, unchanged: 1 });
+  assert.strictEqual(snap.sectors.length, 1, 'sectors without a quote are left out, as before');
+  assert.deepStrictEqual(snap.sectors[0], { name: 'Bank', index: 'NIFTY BANK', last: 50100, percentChange: 0.2, advances: 1, declines: 1 });
+  assert.deepStrictEqual(quoteCalls, [2 + mkt.SECTORS.length + 4], 'one quote call for indices and stocks together');
+
+  // breadth unknown when constituents are unavailable; NIFTY missing is an error (the old copy is then served)
+  const noLists = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => { throw new Error('down'); } });
+  assert.strictEqual(noLists.breadth, null);
+  assert.strictEqual(noLists.sectors[0].advances, null);
+  await assert.rejects(mkt.loadIndicesUpstox({ get: async () => ({}), getLists: async () => ({}) }), /NIFTY 50 missing/);
+  assert.strictEqual(mkt.countBreadth([], new Map()), null);
+
+  // large constituent sets are split into batches; a failed stock batch only blanks breadth
+  const many = { 'NIFTY 50': Array.from({ length: 450 }, (_, i) => ISIN(i + 10)) };
+  quoteCalls.length = 0;
+  let n = 0;
+  const flakyStocks = async (p, query) => { n += 1; if (n > 1) throw new Error('boom'); return quoteGet(p, query); };
+  const big = await mkt.loadIndicesUpstox({ get: flakyStocks, getLists: async () => many });
+  assert.strictEqual(n, 3, '468 keys -> 3 calls of at most 200');
+  assert.strictEqual(big.nifty.last, 22770);
+
+  // ── constituent lists ───────────────────────────────────────────────
+  const cons = require('./services/constituents');
+  const csv = 'Company Name,Industry,Symbol,Series,ISIN Code\nA Ltd.,X,AAA,EQ,INE423A01024\nB Ltd.,Y,BBB,EQ,INE742F01042\nbad,row,,,\n';
+  assert.deepStrictEqual(cons.parseConstituentCsv(csv), ['INE423A01024', 'INE742F01042']);
+  assert.strictEqual(cons.parseConstituentCsv('<html>blocked</html>'), null);
+  const memStore = (() => { const m = new Map(); return { get: async k => m.get(k) || null, set: async (k, v) => { m.set(k, v); } }; })();
+  let downloads = 0;
+  const csvFetch = async () => { downloads += 1; return { ok: true, text: async () => csv }; };
+  cons._clear();
+  const got = await cons.getConstituents({ fetchImpl: csvFetch, storeImpl: memStore, nowMs: 1e12 });
+  assert.strictEqual(Object.keys(got).length, Object.keys(cons.FILES).length);
+  assert.strictEqual(downloads, Object.keys(cons.FILES).length);
+  cons._clear();
+  await cons.getConstituents({ fetchImpl: csvFetch, storeImpl: memStore, nowMs: 1e12 + 3600e3 });
+  assert.strictEqual(downloads, Object.keys(cons.FILES).length, 'a stored copy under a day old is reused');
+  cons._clear();
+  const failing = await cons.getConstituents({ fetchImpl: async () => ({ ok: false }), storeImpl: memStore, nowMs: 1e12 + 30 * 3600e3 });
+  assert.deepStrictEqual(failing['NIFTY 50'], ['INE423A01024', 'INE742F01042'], 'failed downloads keep the last good list');
+  cons._clear();
+
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

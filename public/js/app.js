@@ -199,7 +199,7 @@ function renderSectors(d) {
     tile.append(
       cell('span', sct.name, 'sector-name'),
       cell('strong', `${pctChg > 0 ? '+' : ''}${pctChg.toFixed(2)}%`, 'sector-pct'),
-      cell('span', `${sct.advances} up · ${sct.declines} down`, 'sector-breadth')
+      cell('span', Number.isFinite(sct.advances) && Number.isFinite(sct.declines) ? `${sct.advances} up · ${sct.declines} down` : 'breadth n/a', 'sector-breadth')
     );
     return tile;
   }));
