@@ -38,6 +38,9 @@ const path = require('path');
   // after the close a leftover copy is expected: warning only, nothing pauses
   r = M.evaluateTrust(base({ marketOpen: false, chain: { d, ageSec: 30, stale: true, staleReason: 'timeout', integrity: serverOk } }));
   assert.strictEqual(by(r).nse_stale_copy.level, 'warn'); assert.strictEqual(r.blocking, false); assert.strictEqual(r.status, 'warn');
+  // labels name the provider actually serving the chain
+  r = M.evaluateTrust(base()); assert.ok(/from Upstox/.test(by(r).nse_fresh.label) && by(r).nse_stale_copy.detail === 'live from Upstox');
+  r = M.evaluateTrust(base({ chain: { d: { ...d, feed: { source: 'nse' } }, ageSec: 40, stale: true, staleReason: 'timeout', integrity: serverOk } })); assert.ok(/from NSE/.test(by(r).nse_fresh.label)); assert.ok(/^NSE did not answer in time/.test(by(r).nse_stale_copy.detail));
 
   // closed market: nothing time-based is a problem
   r = M.evaluateTrust(base({ marketOpen: false, chain: { d, ageSec: 99999, stale: false, integrity: serverOk } }));
