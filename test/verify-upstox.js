@@ -1,6 +1,6 @@
 // Upstox client checks: no network, every reply comes from a fake fetch.
 const assert = require('assert');
-const upstox = require('../api/services/upstox');
+const upstox = require('../api/services/providers/upstox');
 const market = require('../api/services/market');
 market.getIndexSnapshot = async () => null; // offline
 market.getPivotBasis = async () => null;
@@ -56,7 +56,7 @@ const sleep = async () => {};
   await assert.rejects(upstox.get('/x', {}, { fetchImpl: async () => ({ status: 200, ok: true, json: async () => { throw new Error('html'); } }), accessToken: 't', sleep }), e => e.code === 'UPSTOX_BAD_REPLY');
 
   // ── index config and expiries ───────────────────────────────────────
-  const instruments = require('../api/services/instruments');
+  const instruments = require('../api/services/providers/instruments');
   assert.strictEqual(instruments.getIndex('nifty').underlyingKey, 'NSE_INDEX|Nifty 50');
   assert.throws(() => instruments.getIndex('FOO'), e => e.code === 'BAD_SYMBOL');
   assert.deepStrictEqual(instruments.SYMBOLS, ['NIFTY', 'SENSEX']);
@@ -101,7 +101,7 @@ const sleep = async () => {};
   await assert.rejects(instruments.fetchContracts('NIFTY', { get: async () => [], nowMs: now }), /no open expiries/);
 
   // ── adapter: Upstox chain -> ChainDeck chain ────────────────────────
-  const { toChainRaw, formatIstTimestamp } = require('../api/services/upstoxAdapter');
+  const { toChainRaw, formatIstTimestamp } = require('../api/services/providers/upstoxAdapter');
   const integrity = require('../api/services/integrity');
   const analytics = require('../api/services/analytics');
   assert.strictEqual(formatIstTimestamp(Date.parse('2026-11-05T04:45:07Z')), '05-Nov-2026 10:15:07');
@@ -211,7 +211,7 @@ const sleep = async () => {};
   assert.throws(() => toChainRaw(null), /not a list/);
 
   // ── chain loader ────────────────────────────────────────────────────
-  const chain = require('../api/services/upstoxChain');
+  const chain = require('../api/services/providers/upstoxChain');
   chain._clearCache();
   const log = [];
   const fakeGet = async (path, q) => {
@@ -389,7 +389,7 @@ const sleep = async () => {};
   assert.strictEqual(big.nifty.last, 22770);
 
   // ── constituent lists ───────────────────────────────────────────────
-  const cons = require('../api/services/constituents');
+  const cons = require('../api/services/providers/constituents');
   const csv = 'Company Name,Industry,Symbol,Series,ISIN Code\nA Ltd.,X,AAA,EQ,INE423A01024\nB Ltd.,Y,BBB,EQ,INE742F01042\nbad,row,,,\n';
   assert.deepStrictEqual(cons.parseConstituentCsv(csv), ['INE423A01024', 'INE742F01042']);
   assert.strictEqual(cons.parseConstituentCsv('<html>blocked</html>'), null);
@@ -409,7 +409,7 @@ const sleep = async () => {};
   cons._clear();
 
   // ── candles from Upstox ─────────────────────────────────────────────
-  const uc = require('../api/services/upstoxCandles');
+  const uc = require('../api/services/providers/upstoxCandles');
   assert.deepStrictEqual(uc.parseRange('60d'), { sessions: 60, calendarDays: 95 });
   assert.deepStrictEqual(uc.parseRange('5y'), { sessions: null, calendarDays: 1830 });
   assert.throws(() => uc.parseRange('max'), /Unsupported range/);

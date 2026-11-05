@@ -1,5 +1,5 @@
 const fetch = require('node-fetch');
-const store = require('./storage');
+const store = require('../storage');
 
 // Index constituents (ISIN codes) for breadth: how many stocks in NIFTY 50, and in each sector index, are up or down.
 // Upstox quotes stocks by ISIN (NSE_EQ|<ISIN>) but has no "advances/declines" for an index, so ChainDeck counts them itself.

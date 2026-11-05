@@ -7,7 +7,7 @@ const fetch = require('node-fetch');
 const app = require('../api/index');
 const paperRouter = require('../api/routes/paper');
 const { createService, AGENT } = require('../api/services/paperAccounts');
-const { formatNseDate } = require('../api/services/nse');
+const { formatNseDate } = require('../api/services/providers/nse');
 const storage = require('../api/services/storage');
 
 const DAY = 24 * 3600 * 1000;

@@ -444,7 +444,7 @@ function defaultService() {
   const store = require('./storage');
   const { fetchRawOptionChain } = require('./optionChain');
   const candles = require('./candles');
-  const { lotSizeFor } = require('./upstoxChain');
+  const { lotSizeFor } = require('./providers/upstoxChain');
   const loadSettle = async (expiry, symbol = 'NIFTY') => {
     const ymd = calendar.nseDateToYmd(expiry);
     const { candles: daily } = await candles.getCandles('1d', { symbol });

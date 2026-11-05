@@ -28,7 +28,7 @@ const { NOTABLE_TYPES, MARKER_MIN_QUALITY } = require('./signals');
 const calendar = require('./calendar');
 const engine = require('./paperEngine');
 const { strikeStepFor, toMins } = require('./strategy');
-const { INDICES } = require('./instruments');
+const { INDICES } = require('./providers/instruments');
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 3600 * 1000;

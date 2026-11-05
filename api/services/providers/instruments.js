@@ -1,5 +1,5 @@
 const upstox = require('./upstox');
-const calendar = require('./calendar');
+const calendar = require('../calendar');
 
 // The indices ChainDeck can read, and how Upstox names them.
 //

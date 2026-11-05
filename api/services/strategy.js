@@ -30,7 +30,7 @@
 //
 // Option-chain readings (PCR, OI walls) are not conditions here: there is no history of them to backtest against.
 
-const { INDICES } = require('./instruments');
+const { INDICES } = require('./providers/instruments');
 
 const STRIKE_STEP = 50; // NIFTY's; strikeStepFor(symbol) for any index
 const STRATEGY_SYMBOLS = ['NIFTY', 'SENSEX'];

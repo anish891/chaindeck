@@ -13,8 +13,8 @@ market.getIndexSnapshot = async () => null; // compare the chain maths only
 market.getPivotBasis = async () => null;
 const analytics = require('../api/services/analytics');
 const integrity = require('../api/services/integrity');
-const upstoxChain = require('../api/services/upstoxChain');
-const nse = require('../api/services/nse');
+const upstoxChain = require('../api/services/providers/upstoxChain');
+const nse = require('../api/services/providers/nse');
 
 const SYMBOL = (process.argv[2] || 'NIFTY').toUpperCase();
 const KEYS = ['spot', 'atm', 'pcr', 'volPcr', 'maxPain', 'totalCallOI', 'totalPutOI', 'totalCallChgOI', 'totalPutChgOI', 'straddlePrice', 'atmIv', 'ivSkew', 'maxCallOIStrike', 'maxPutOIStrike'];

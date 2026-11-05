@@ -1,7 +1,7 @@
 // BUG-002 / MATH-004: the app must know about NSE holidays (weekday closures), not just weekends.
 const assert = require('assert');
 const cal = require('../api/services/calendar');
-const nse = require('../api/services/nse');
+const nse = require('../api/services/providers/nse');
 const vol = require('../api/services/volatility');
 
 const IST = 330 * 60000;
@@ -74,7 +74,7 @@ const at = (y, m, d, h, mi) => Date.UTC(y, m - 1, d, h, mi) - IST; // an IST wal
   assert.strictEqual(nse.formatNseDate(Date.UTC(2026, 11, 31, 20, 0)), '01-Jan-2027', '20:00 UTC on 31 Dec is already 1 Jan in IST');
   assert.strictEqual(nse.formatNseDate(Date.UTC(2027, 1, 5, 0, 0)), '05-Feb-2027');
   assert.ok(require('../api/middleware/security').isValidExpiry(nse.formatNseDate(Date.now())));
-  assert.ok(!/30-Jun-2026/.test(require('fs').readFileSync(require('path').join(__dirname, '../api/services/nse.js'), 'utf8')), 'no hard-coded probe date');
+  assert.ok(!/30-Jun-2026/.test(require('fs').readFileSync(require('path').join(__dirname, '../api/services/providers/nse.js'), 'utf8')), 'no hard-coded probe date');
 
   console.log('calendar checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

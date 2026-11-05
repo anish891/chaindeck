@@ -1,9 +1,9 @@
 const integrity = require('./integrity');
 const calendar = require('./calendar');
-const nse = require('./nse');
-const upstox = require('./upstox');
-const upstoxChain = require('./upstoxChain');
-const instruments = require('./instruments');
+const nse = require('./providers/nse');
+const upstox = require('./providers/upstox');
+const upstoxChain = require('./providers/upstoxChain');
+const instruments = require('./providers/instruments');
 
 // The option chain every route reads, with the caching around it:
 //   - a fresh copy (5 s) is served from memory

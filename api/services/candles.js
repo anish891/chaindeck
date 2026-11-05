@@ -1,6 +1,6 @@
 const fetch = require('node-fetch');
 const calendar = require('./calendar');
-const upstoxCandles = require('./upstoxCandles');
+const upstoxCandles = require('./providers/upstoxCandles');
 
 // OHLC candles for the Nifty 50 index (and SENSEX, see seriesFor) from Upstox (or Yahoo Finance when DATA_SOURCE=nse / no Upstox token), with volume
 // borrowed from the Nifty 50 ETF (NIFTYBEES).

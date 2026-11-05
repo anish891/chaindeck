@@ -2,14 +2,14 @@ const { getIndexSnapshot, getPivotBasis } = require('./market');
 const history = require('./history');
 const { toTradingTimeIv, expiryCloseMs, ivPercentile } = require('./volatility');
 const calendar = require('./calendar');
-const instruments = require('./instruments');
+const instruments = require('./providers/instruments');
 
 // ── Tunables (override via env) ──────────────────────────────────────────
 const RISK_FREE_RATE = parseFloat(process.env.RISK_FREE_RATE) || 0.065;
 // Lot size and strike step come per index from instruments.js (the lot size from Upstox's live contract list when known).
 // GEX magnitude scales linearly with the lot size (sign, regime and zero-gamma level do not).
 const lotSizeFor = symbol => {
-  try { return require('./upstoxChain').lotSizeFor(symbol); } catch (e) { return instruments.getIndex(symbol).lotSize; }
+  try { return require('./providers/upstoxChain').lotSizeFor(symbol); } catch (e) { return instruments.getIndex(symbol).lotSize; }
 };
 const PCR_BULL = 1.2;
 const PCR_BEAR = 0.8;

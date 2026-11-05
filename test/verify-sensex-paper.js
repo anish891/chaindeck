@@ -8,7 +8,7 @@ const { validateStrategy, strikeStepFor } = require('../api/services/strategy');
 const B = require('../api/services/strategyBacktest');
 const L = require('../api/services/strategyLive');
 const C = require('../api/services/candles');
-const upstoxCandles = require('../api/services/upstoxCandles');
+const upstoxCandles = require('../api/services/providers/upstoxCandles');
 const optionChain = require('../api/services/optionChain');
 const calendar = require('../api/services/calendar');
 
