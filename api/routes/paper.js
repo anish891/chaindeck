@@ -32,10 +32,10 @@
 
 const express = require('express');
 const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../middleware/security');
-const { defaultService, ID_RE } = require('../services/paperAccounts');
-const { defaultStrategyService } = require('../services/paperStrategies');
-const { createLiveService } = require('../services/strategyLive');
-const analytics = require('../services/paperAnalytics');
+const { defaultService, ID_RE } = require('../services/paper/paperAccounts');
+const { defaultStrategyService } = require('../services/paper/paperStrategies');
+const { createLiveService } = require('../services/paper/strategyLive');
+const analytics = require('../services/paper/paperAnalytics');
 
 const router = express.Router();
 const signInLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, name: 'paper-signin' });

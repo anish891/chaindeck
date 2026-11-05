@@ -3,9 +3,9 @@
 const assert = require('assert');
 const http = require('http');
 const fetch = require('node-fetch');
-const { validateStrategy, PRESETS } = require('../api/services/strategy');
-const B = require('../api/services/strategyBacktest');
-const { createStrategyService } = require('../api/services/paperStrategies');
+const { validateStrategy, PRESETS } = require('../api/services/paper/strategy');
+const B = require('../api/services/paper/strategyBacktest');
+const { createStrategyService } = require('../api/services/paper/paperStrategies');
 const calendar = require('../api/services/market/calendar');
 
 const IST = 330 * 60 * 1000;
@@ -166,7 +166,7 @@ const base = over => ({
   // HTTP: owner backtest and save, agent backtest with its own quota
   const app = require('../api/index');
   const paperRouter = require('../api/routes/paper');
-  const { createService, AGENT } = require('../api/services/paperAccounts');
+  const { createService, AGENT } = require('../api/services/paper/paperAccounts');
   const { formatNseDate } = require('../api/services/providers/nse');
   const EXPS = [3, 10, 17, 24, 31].map(dd => formatNseDate(Date.now() + dd * DAY));
   paperRouter.setService(createService({ store, isMarketOpen: () => false, loadRaw: async () => ({ raw: { records: { timestamp: null, data: [] } }, allExpiries: EXPS, targetExpiry: EXPS[0], stale: false }), loadSettle: async () => null }));

@@ -2,11 +2,11 @@
 // owner and agent market endpoints, backtests and live strategies. Fake store, feeds and candles only; no network.
 // NIFTY accounts (including ones stored before SENSEX existed, with no symbol) must behave exactly as before.
 const assert = require('assert');
-const E = require('../api/services/paperEngine');
-const { createService } = require('../api/services/paperAccounts');
-const { validateStrategy, strikeStepFor } = require('../api/services/strategy');
-const B = require('../api/services/strategyBacktest');
-const L = require('../api/services/strategyLive');
+const E = require('../api/services/paper/paperEngine');
+const { createService } = require('../api/services/paper/paperAccounts');
+const { validateStrategy, strikeStepFor } = require('../api/services/paper/strategy');
+const B = require('../api/services/paper/strategyBacktest');
+const L = require('../api/services/paper/strategyLive');
 const C = require('../api/services/market/candles');
 const upstoxCandles = require('../api/services/providers/upstoxCandles');
 const optionChain = require('../api/services/market/optionChain');
@@ -278,7 +278,7 @@ function fakeStore() {
     assert(rep.assumptions.some(a => /Thursdays/.test(a)));
 
     // the strategy service loads the strategy's own index's data
-    const { createStrategyService } = require('../api/services/paperStrategies');
+    const { createStrategyService } = require('../api/services/paper/paperStrategies');
     const asked = [];
     const strategies = createStrategyService({ store: fakeStore(), loadData: async (interval, symbol) => { asked.push(symbol); return { candles, vix: candles.map(c => ({ t: c.t, c: 13 })), fetchedAt: 1 }; } });
     await strategies.backtest(base({ symbol: 'SENSEX' }));

@@ -22,13 +22,13 @@
 //    or a lucky market cannot pass for an edge.
 
 const { tradeCharges } = require('./paperCosts');
-const { wilson } = require('./analytics/backtest');
-const { detectAll } = require('./analytics/patterns');
-const { NOTABLE_TYPES, MARKER_MIN_QUALITY } = require('./analytics/signals');
-const calendar = require('./market/calendar');
+const { wilson } = require('../analytics/backtest');
+const { detectAll } = require('../analytics/patterns');
+const { NOTABLE_TYPES, MARKER_MIN_QUALITY } = require('../analytics/signals');
+const calendar = require('../market/calendar');
 const engine = require('./paperEngine');
 const { strikeStepFor, toMins } = require('./strategy');
-const { INDICES } = require('./providers/instruments');
+const { INDICES } = require('../providers/instruments');
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 3600 * 1000;

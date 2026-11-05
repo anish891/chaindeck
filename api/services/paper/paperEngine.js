@@ -24,9 +24,9 @@
 // and `cfg.lotSize` its lot size; configFor(symbol) builds that config.
 
 const { tradeCharges, exerciseCharges, RATES } = require('./paperCosts');
-const { parseNseTs, strikesFor } = require('./analytics/integrity');
-const { nseDateToYmd, CLOSE_MIN } = require('./market/calendar');
-const { INDICES } = require('./providers/instruments');
+const { parseNseTs, strikesFor } = require('../analytics/integrity');
+const { nseDateToYmd, CLOSE_MIN } = require('../market/calendar');
+const { INDICES } = require('../providers/instruments');
 
 const DEFAULTS = {
   lotSize: parseInt(process.env.NIFTY_LOT_SIZE, 10) || 65,

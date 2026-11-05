@@ -10,7 +10,7 @@ const root = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const app = require('../api/index');
 const paperRouter = require('../api/routes/paper');
-const { createService } = require('../api/services/paperAccounts');
+const { createService } = require('../api/services/paper/paperAccounts');
 const { formatNseDate } = require('../api/services/providers/nse');
 
 const listen = a => new Promise(res => { const s = http.createServer(a).listen(0, () => res(s)); });

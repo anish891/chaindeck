@@ -3,11 +3,11 @@
 const assert = require('assert');
 const http = require('http');
 const fetch = require('node-fetch');
-const L = require('../api/services/strategyLive');
-const A = require('../api/services/paperAnalytics');
-const { validateStrategy } = require('../api/services/strategy');
-const { createService } = require('../api/services/paperAccounts');
-const E = require('../api/services/paperEngine');
+const L = require('../api/services/paper/strategyLive');
+const A = require('../api/services/paper/paperAnalytics');
+const { validateStrategy } = require('../api/services/paper/strategy');
+const { createService } = require('../api/services/paper/paperAccounts');
+const E = require('../api/services/paper/paperEngine');
 
 const IST = 330 * 60 * 1000;
 const at = (d, h, m, s = 0) => Date.UTC(2026, 10, d, h, m, s) - IST; // November 2026, IST wall clock

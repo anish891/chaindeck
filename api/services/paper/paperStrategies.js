@@ -75,8 +75,8 @@ function createStrategyService({ store, loadData, now = Date.now }) {
 }
 
 function defaultStrategyService() {
-  const store = require('./storage');
-  const candles = require('./market/candles');
+  const store = require('../storage');
+  const candles = require('../market/candles');
   return createStrategyService({ store, loadData: (interval, symbol = 'NIFTY') => candles.getBacktestData(interval, { symbol }) });
 }
 

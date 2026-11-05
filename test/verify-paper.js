@@ -1,8 +1,8 @@
 // Paper trading: engine rules (fills, charges, margin, brackets, expiry) and the account service with a fake store and feed.
 const assert = require('assert');
-const E = require('../api/services/paperEngine');
-const { tradeCharges, exerciseCharges } = require('../api/services/paperCosts');
-const { createService } = require('../api/services/paperAccounts');
+const E = require('../api/services/paper/paperEngine');
+const { tradeCharges, exerciseCharges } = require('../api/services/paper/paperCosts');
+const { createService } = require('../api/services/paper/paperAccounts');
 
 const IST = 330 * 60 * 1000;
 const at = (d, h, m) => Date.UTC(2026, 10, d, h, m) - IST; // November 2026, IST wall clock

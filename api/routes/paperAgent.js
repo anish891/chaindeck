@@ -15,8 +15,8 @@ const { paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../
 const { fetchRawOptionChain } = require('../services/market/optionChain');
 const { processOptionChainData } = require('../services/analytics/analytics');
 const integrity = require('../services/analytics/integrity');
-const { AGENT } = require('../services/paperAccounts');
-const { accountAnalytics } = require('../services/paperAnalytics');
+const { AGENT } = require('../services/paper/paperAccounts');
+const { accountAnalytics } = require('../services/paper/paperAnalytics');
 
 const READS_PER_MINUTE = 120;
 
