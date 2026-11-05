@@ -42,6 +42,13 @@ const nseDateToYmd = calendar.nseDateToYmd;
 
 const istYmd = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
 
+/** An Upstox expiry ('2026-11-10', '2026-11-10T...' or epoch ms such as 1794767399000) -> IST 'YYYY-MM-DD', or null. */
+function expiryYmd(v) {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 0) return istYmd(v);
+  if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+  return null;
+}
+
 /**
  * Upstox option-contract rows -> { expiries: ['10-Nov-2026', ...] (nearest first, today's included), lotSize | null }.
  * Expiries already past (IST calendar day) are dropped; malformed rows are ignored.
@@ -51,8 +58,8 @@ function parseContracts(rows, nowMs = Date.now()) {
   const ymds = new Set();
   const lots = new Map();
   for (const r of Array.isArray(rows) ? rows : []) {
-    if (!r || typeof r.expiry !== 'string') continue;
-    const ymd = r.expiry.slice(0, 10);
+    const ymd = r ? expiryYmd(r.expiry) : null;
+    if (!ymd) continue;
     if (!ymdToNseDate(ymd) || ymd < today) continue;
     ymds.add(ymd);
     const lot = Number(r.lot_size);
@@ -73,4 +80,4 @@ async function fetchContracts(symbol = 'NIFTY', { get = upstox.get, nowMs = Date
   return out;
 }
 
-module.exports = { INDICES, getIndex, ymdToNseDate, nseDateToYmd, parseContracts, fetchContracts, istYmd };
+module.exports = { INDICES, getIndex, expiryYmd, ymdToNseDate, nseDateToYmd, parseContracts, fetchContracts, istYmd };

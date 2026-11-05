@@ -78,6 +78,11 @@ const sleep = async () => {};
     { expiry: '2026-12-29', lot_size: 75, instrument_type: 'CE' },   // odd lot on one far contract: outvoted
     { expiry: 'garbage', lot_size: 65 }, null
   ];
+  // Upstox's instrument data gives expiries as epoch ms at 23:59:59 IST; the contract API as YYYY-MM-DD. Both are read.
+  assert.strictEqual(instruments.expiryYmd(Date.parse('2026-11-09T18:29:59Z')), '2026-11-09');
+  assert.strictEqual(instruments.expiryYmd('2026-11-10T00:00:00'), '2026-11-10');
+  assert.strictEqual(instruments.expiryYmd('soon'), null);
+  assert.deepStrictEqual(instruments.parseContracts([{ expiry: Date.parse('2026-11-09T18:29:59Z'), lot_size: 65 }], now).expiries, ['09-Nov-2026']);
   const parsed = instruments.parseContracts(contracts, now);
   assert.deepStrictEqual(parsed.expiries, ['05-Nov-2026', '10-Nov-2026', '17-Nov-2026', '29-Dec-2026'], 'unique, sorted, past dropped');
   assert.strictEqual(parsed.lotSize, 65);
@@ -128,6 +133,8 @@ const sleep = async () => {};
     assert.strictEqual(leg[f], want[f], `leg field ${f}`);
   }
   assert.strictEqual(leg.identifier, 'NSE_FO|22500CE');
+  const epochRows = JSON.parse(JSON.stringify(upstoxRows)).map(r => ({ ...r, expiry: Date.parse('2026-11-10T18:29:59Z') }));
+  assert.strictEqual(toChainRaw(epochRows).records.data[0].expiryDate, EXP, 'epoch expiry on chain rows');
 
   // With quantityPerContract 1, numbers pass through untouched.
   assert.strictEqual(toChainRaw(upstoxRows, { quantityPerContract: 1 }).records.data[0].CE.openInterest, upstoxRows[0].call_options.market_data.oi);

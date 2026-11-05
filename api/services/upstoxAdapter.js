@@ -1,4 +1,4 @@
-const { ymdToNseDate } = require('./instruments');
+const { ymdToNseDate, expiryYmd } = require('./instruments');
 
 // Upstox option chain -> the chain shape the rest of ChainDeck reads.
 //
@@ -88,7 +88,7 @@ function toChainRaw(rows, { expiries = [], asOfMs = Date.now(), quantityPerContr
   const data = [];
   for (const r of rows) {
     if (!r) continue;
-    const expiry = ymdToNseDate(typeof r.expiry === 'string' ? r.expiry.slice(0, 10) : '') || String(r.expiry);
+    const expiry = ymdToNseDate(expiryYmd(r.expiry)) || String(r.expiry);
     const strike = num(r.strike_price);
     const ctx = { strike, expiry, spot, q };
     const row = { strikePrice: strike, expiryDate: expiry };
