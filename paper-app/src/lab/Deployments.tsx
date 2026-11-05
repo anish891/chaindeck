@@ -51,7 +51,7 @@ export function Deployments({ deployments, error, onStatus, onDelete }: Props) {
               </div>
               {d.open && (
                 <div className="pt-muted">
-                  Open since {timeIst(d.open.entryT)} at NIFTY {d.open.entrySpot}: {d.open.legs.map(l => `${l.side} ${l.strike} ${l.optionType} @ ${l.entry.toFixed(2)}`).join(', ')}
+                  Open since {timeIst(d.open.entryT)} at {d.strategy.symbol || 'NIFTY'} {d.open.entrySpot}: {d.open.legs.map(l => `${l.side} ${l.strike} ${l.optionType} @ ${l.entry.toFixed(2)}`).join(', ')}
                   {d.open.stopRs !== null ? `, stop ${inr(-d.open.stopRs)}` : ''}{d.open.targetRs !== null ? `, target ${inr(d.open.targetRs)}` : ''}
                 </div>
               )}

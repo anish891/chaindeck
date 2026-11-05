@@ -1,6 +1,7 @@
 import { NumField } from '../components/NumField';
 import { CONDITION_LABELS, CONDITION_ORDER, DAYS, MAX_CONDITIONS, MAX_LEGS, defaultCondition, exitRule, newLeg, offsetLabel } from '../strategy';
-import type { Condition, ConditionType, ExitRule, Interval, Leg, Strategy } from '../types';
+import { INDEX_INFO, INDEX_SYMBOLS } from '../format';
+import type { Condition, ConditionType, ExitRule, IndexSymbol, Interval, Leg, Strategy } from '../types';
 import { useState } from 'react';
 
 interface Props {
@@ -63,11 +64,15 @@ export function StrategyEditor({ strategy: s, onChange, error, onError }: Props)
   const setExits = (patch: Partial<Strategy['exits']>) => set({ exits: { ...s.exits, ...patch } });
   const setLeg = (i: number, patch: Partial<Leg>) => set({ legs: s.legs.map((l, k) => (k === i ? { ...l, ...patch } : l)) });
   const e = s.entry;
+  const symbol: IndexSymbol = s.symbol || 'NIFTY';
 
   return (
     <>
       <div className="lab-grid2">
         <label className="pt-field pt-field-col"><span className="pt-label">Name</span><input maxLength={40} value={s.name} onChange={ev => set({ name: ev.target.value })} /></label>
+        <label className="pt-field pt-field-col"><span className="pt-label">Index</span>
+          <select value={symbol} onChange={ev => set({ symbol: ev.target.value as IndexSymbol })}>{INDEX_SYMBOLS.map(x => <option key={x} value={x}>{INDEX_INFO[x].name}</option>)}</select>
+        </label>
         <label className="pt-field pt-field-col"><span className="pt-label">Candles</span>
           <select value={s.interval} onChange={ev => set({ interval: ev.target.value as Interval })}><option value="5m">5 minute</option><option value="15m">15 minute</option></select>
         </label>
@@ -107,7 +112,7 @@ export function StrategyEditor({ strategy: s, onChange, error, onError }: Props)
         }}>Add condition</button>
       </div>
 
-      <div className="lab-section">Legs (strikes are 50 points apart; ATM is fixed at entry)</div>
+      <div className="lab-section">Legs (strikes are {INDEX_INFO[symbol].strikeStep} points apart; ATM is fixed at entry)</div>
       <div>
         {s.legs.map((l, i) => (
           <div className="lab-row lab-leg" key={i}>
@@ -127,7 +132,7 @@ export function StrategyEditor({ strategy: s, onChange, error, onError }: Props)
         <div className="pt-field pt-field-col"><span className="pt-label">Stop loss</span><ExitRuleFields label="Stop loss" rule={s.exits.stopLoss} onChange={r => setExits({ stopLoss: r })} /></div>
         <div className="pt-field pt-field-col"><span className="pt-label">Target</span><ExitRuleFields label="Target" rule={s.exits.target} onChange={r => setExits({ target: r })} /></div>
         <label className="pt-field pt-field-col"><span className="pt-label">Exit by (IST, latest 15:25)</span><input type="time" step={300} value={s.exits.exitAt} onChange={ev => setExits({ exitAt: ev.target.value })} /></label>
-        <label className="pt-field pt-field-col"><span className="pt-label">Exit if NIFTY moves (points, blank for none)</span><NumField value={s.exits.indexMovePts} min={5} step={5} onChange={v => setExits({ indexMovePts: v })} /></label>
+        <label className="pt-field pt-field-col"><span className="pt-label">Exit if {symbol} moves (points, blank for none)</span><NumField value={s.exits.indexMovePts} min={5} step={5} onChange={v => setExits({ indexMovePts: v })} /></label>
       </div>
       <div className="pt-error" role="alert">{error}</div>
     </>
