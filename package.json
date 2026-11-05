@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node api/index.js",
     "dev": "node api/index.js",
-    "test": "npm run typecheck:paper && node test/verify-calculations.js && node test/verify-history.js && node test/verify-alerts.js && node test/verify-flow.js && node test/verify-volatility.js && node test/verify-market.js && node test/verify-buildup.js && node test/verify-price-chart.js && node test/verify-participants.js && node test/verify-candles.js && node test/verify-levels.js && node test/verify-patterns.js && node test/verify-signals.js && node test/verify-freshness.js && node test/verify-forwardlog.js && node test/verify-retry.js && node test/verify-upstox.js && node test/verify-scorecard.js && node test/verify-conditions.js && node test/verify-flowpanel.js && node test/verify-expiry.js && node test/verify-replay.js && node test/verify-premarket.js && node test/verify-integrity.js && node test/verify-datachecks.js && node test/verify-calendar.js && node test/verify-paper.js && node test/verify-paper-api.js && node test/verify-paper-ui.js && node test/verify-paper-agent.js && node test/verify-sensex-paper.js && node test/verify-strategy.js && node test/verify-live.js && node test/verify-syntax.js && node test/verify-security.js && node test/verify-ui.js",
+    "test": "npm run typecheck:paper && node test/run.js",
     "build:paper": "vite build --config paper-app/vite.config.mjs",
     "dev:paper": "vite --config paper-app/vite.config.mjs",
     "typecheck:paper": "tsc -p paper-app"
