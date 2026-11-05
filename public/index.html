@@ -60,6 +60,11 @@
         <option value="dark" selected>Dark</option>
         <option value="light">Light</option>
       </select>
+      <label class="interval-label" for="indexSelect">Index</label>
+      <select id="indexSelect" data-change="onIndexChange" aria-label="Index">
+        <option value="NIFTY" selected>NIFTY 50</option>
+        <option value="SENSEX">SENSEX</option>
+      </select>
       <label class="interval-label">Expiry</label>
       <select id="expirySelect" data-change="onExpiryChange" aria-label="Expiry">
         <option value="">Loading…</option>

@@ -526,5 +526,19 @@ const sleep = async () => {};
     await new Promise(r => server.close(r));
   }
 
+  // ── browser: index choice and URLs ──────────────────────────────────
+  {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '../public/js/api-client.js'), 'utf8');
+    const ac = await import('data:text/javascript;base64,' + Buffer.from(src).toString('base64'));
+    assert.strictEqual(ac.SYMBOL, 'NIFTY', 'NIFTY without a choice');
+    assert.strictEqual(ac.readSymbol('?index=sensex', null), 'SENSEX');
+    assert.strictEqual(ac.readSymbol('', 'SENSEX'), 'SENSEX', 'remembered choice');
+    assert.strictEqual(ac.readSymbol('?index=nifty', 'SENSEX'), 'NIFTY', 'the address wins over the saved choice');
+    assert.strictEqual(ac.readSymbol('?index=<script>', null), 'NIFTY', 'anything else falls back to NIFTY');
+    assert.strictEqual(ac.withSymbol('/api/option-chain', 'NIFTY'), '/api/option-chain', 'NIFTY URLs unchanged');
+    assert.strictEqual(ac.withSymbol('/api/option-chain', 'SENSEX'), '/api/option-chain?symbol=SENSEX');
+    assert.strictEqual(ac.withSymbol('/api/intraday?expiry=12-Nov-2026', 'SENSEX'), '/api/intraday?expiry=12-Nov-2026&symbol=SENSEX');
+  }
+
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

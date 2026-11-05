@@ -216,7 +216,7 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(!/innerHTML/.test(tu.replace(/\/\/[^\n]*/g, '')), 'trust-ui.js builds DOM with textContent only (check details carry network values)');
   assert(/toggleTrustDrawer,?\n/.test(app), 'toggleTrustDrawer must be a page action');
   assert(/function refreshTrust\(/.test(app) && /refreshTrust\(\);\s*\}/.test(app.slice(app.indexOf('function updateAge'), app.indexOf('function updateAge') + 800)), 'the checks must re-run every second with the age tick');
-  assert(/if \(!trust\.blocking\) processAlerts\(/.test(app), 'alerts must pause while data is blocking');
+  assert(/if \(!trust\.blocking(?: && [^)]*)?\) processAlerts\(/.test(app), 'alerts must pause while data is blocking');
   assert(/setSignalsPaused\(trust\.blocking\)/.test(app), 'signals must pause while data is blocking');
   assert(/signalsPaused/.test(read('public/js/price-chart.js')), 'the signals panel must show the paused state');
   const routes = read('api/routes/index.js');

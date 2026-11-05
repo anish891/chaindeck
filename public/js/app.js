@@ -1,5 +1,5 @@
 import { initAlerts, processAlerts, toggleAlertsDrawer, alertsEnabled } from './alerts.js';
-import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData, fetchParticipantData, fetchCalendar, fetchPremarket } from './api-client.js';
+import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData, fetchParticipantData, fetchCalendar, fetchPremarket, SYMBOL } from './api-client.js';
 import { initExplain } from './explain.js';
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
@@ -180,7 +180,7 @@ function renderSectors(d) {
   const breadthEl = document.getElementById('breadthNote');
   if (breadthEl) {
     const b = d.breadth;
-    breadthEl.textContent = b ? `NIFTY 50 breadth: ${b.advances} up, ${b.declines} down` : 'NIFTY 50 breadth: n/a';
+    breadthEl.textContent = SYMBOL !== 'NIFTY' ? 'Breadth: NIFTY 50 view only' : b ? `NIFTY 50 breadth: ${b.advances} up, ${b.declines} down` : 'NIFTY 50 breadth: n/a';
   }
   if (!grid) return;
   const sectors = (d.sectors || []).slice().sort((a, b) => b.percentChange - a.percentChange);
@@ -469,14 +469,34 @@ export async function fetchNow() {
     setLive(true);
     refreshIntraday();
     refreshParticipants();
-    refreshPriceChart();
-    refreshForwardLog();
-    refreshLevelScorecard();
+    if (SYMBOL === 'NIFTY') { // built from NIFTY candles; their panels are hidden on other indices
+      refreshPriceChart();
+      refreshForwardLog();
+      refreshLevelScorecard();
+    }
   } catch (e) {
     setLive(false);
     console.error('Fetch failed:', e);
+    if (!currentData && e && e.status === 503) showSetupProblem(e.message);
   } finally {
     fetchInProgress = false;
+  }
+}
+
+/** First load refused for a setup reason (e.g. SENSEX without an Upstox token): say so instead of spinning forever. */
+function showSetupProblem(message) {
+  const overlay = document.getElementById('overlay');
+  const msg = overlay && overlay.querySelector('.overlay-msg');
+  if (!msg) return;
+  overlay.querySelector('.spinner')?.remove();
+  msg.textContent = message || 'This view is not available right now.';
+  if (SYMBOL !== 'NIFTY' && !overlay.querySelector('.overlay-link')) {
+    const a = document.createElement('a');
+    a.className = 'overlay-link';
+    a.href = '?index=nifty';
+    a.textContent = 'Back to NIFTY 50';
+    a.addEventListener('click', () => { try { localStorage.setItem('index', 'NIFTY'); } catch (err) { /* ignore */ } });
+    overlay.append(a);
   }
 }
 
@@ -904,7 +924,8 @@ export function renderAll() {
   renderVolPanels();
   renderOiChart_();
   // Never alert from data that is stale or failing its own checks: that is how false alarms happen.
-  if (!trust.blocking) processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot, chart: currentChartSignals(), marketOpen: isMarketOpen() });
+  // Alerts are set up against NIFTY levels, so they only run on the NIFTY view.
+  if (!trust.blocking && SYMBOL === 'NIFTY') processAlerts(d, { spikeAlerts: lastSpikeAlerts, spot5m: serverSnapshot('m5')?.spot, chart: currentChartSignals(), marketOpen: isMarketOpen() });
   fetchSimilarSessions();
   renderTable();
 }
@@ -1420,6 +1441,35 @@ export function onIntervalChange() {
   startAutoRefresh();
 }
 
+/**
+ * Switch index. The page reloads with ?index=..., so nothing on screen or in memory (alert history, freshness counters,
+ * spot-jump checks, chart state) carries one index's numbers into the other.
+ */
+export function onIndexChange() {
+  const sel = document.getElementById('indexSelect');
+  const next = sel && sel.value === 'SENSEX' ? 'SENSEX' : 'NIFTY';
+  if (next === SYMBOL) return;
+  try { localStorage.setItem('index', next); } catch (e) { /* storage unavailable: the address still carries it */ }
+  const url = new URL(location.href);
+  if (next === 'NIFTY') url.searchParams.delete('index'); else url.searchParams.set('index', next.toLowerCase());
+  location.assign(url.toString());
+}
+
+/** NIFTY-only panels: the price chart and its levels and signals are built from NIFTY candles. */
+const NIFTY_ONLY_SECTIONS = ['priceChartSection', 'levelsSignalsSection'];
+
+function applyIndex() {
+  const sel = document.getElementById('indexSelect');
+  if (sel) sel.value = SYMBOL;
+  document.body.dataset.index = SYMBOL;
+  if (SYMBOL === 'NIFTY') return;
+  document.title = `ChainDeck: ${SYMBOL} Options Analytics`;
+  for (const id of NIFTY_ONLY_SECTIONS) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = true;
+  }
+}
+
 export function onExpiryChange() {
   const sel = document.getElementById('expirySelect');
   selectedExpiry = sel ? sel.value : null;
@@ -1476,11 +1526,12 @@ export function renderTradeSetup(d) {
   const pivot = d.cpr ? d.cpr.pivot : d.atm;
   const tc = d.cpr ? d.cpr.tc : pivot + 10;
   const bc = d.cpr ? d.cpr.bc : pivot - 10;
-  const r1 = d.cpr ? d.cpr.r1 : pivot + 50;
-  const s1 = d.cpr ? d.cpr.s1 : pivot - 50;
+  const step = d.strikeStep || 50;
+  const r1 = d.cpr ? d.cpr.r1 : pivot + step;
+  const s1 = d.cpr ? d.cpr.s1 : pivot - step;
   const zeroGamma = d.gex ? d.gex.zeroGammaLevel : (bc || pivot - 30);
-  const maxCall = d.maxCallOIStrike || (d.atm + 100);
-  const maxPut = d.maxPutOIStrike || (d.atm - 100);
+  const maxCall = d.maxCallOIStrike || (d.atm + 2 * step);
+  const maxPut = d.maxPutOIStrike || (d.atm - 2 * step);
   const pcr = d.pcr || 1.0;
   const isPosGamma = d.gex ? (d.gex.totalGexCr >= 0) : true;
   const sd = d.straddleDetails || {};
@@ -1613,6 +1664,7 @@ const ACTIONS = {
   sortTable,
   onThemeSelectChange,
   onExpiryChange,
+  onIndexChange,
   onIntervalChange,
   onOiChartModeChange,
   onTimelineMetricChange,
@@ -1649,6 +1701,7 @@ document.addEventListener('change', e => {
 // Initialization
 document.addEventListener('DOMContentLoaded', () => {
   hydrateIcons();
+  applyIndex();
   initTheme();
   initAlerts();
   initStrikePanel();
@@ -1657,8 +1710,12 @@ document.addEventListener('DOMContentLoaded', () => {
   showPaperButton();
   onChartData(() => { if (currentData) renderFlowFeed(currentData); });
   initExport(() => currentData);
-  initExpiryReplay({ lotSize: () => (currentData && currentData.gex && currentData.gex.lotSize) || 65, onExit: () => renderVolPanels() });
-  initPriceChart({ getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null });
+  initExpiryReplay({
+    lotSize: () => (currentData && currentData.gex && currentData.gex.lotSize) || 65,
+    strikeStep: () => (currentData && currentData.strikeStep) || 50,
+    onExit: () => renderVolPanels()
+  });
+  if (SYMBOL === 'NIFTY') initPriceChart({ getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null });
   window.addEventListener('strike-click', e => openStrike(e.detail));
   document.getElementById('chainBody')?.addEventListener('click', e => {
     const cell = e.target.closest('.strike-cell');

@@ -42,7 +42,7 @@ function setNote(text) {
 
 function render() {
   if (!replay) return;
-  const input = replayInput(replay, frameIndex, opts.lotSize());
+  const input = replayInput(replay, frameIndex, opts.lotSize(), opts.strikeStep ? opts.strikeStep() : 50);
   if (!input) return;
   const x = computeExpiryDay(input.d, input.points, input.nowMs);
   if (x.status === 'ok') {

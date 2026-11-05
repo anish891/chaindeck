@@ -190,8 +190,9 @@ export function gammaNearMoney(d, points, closeMs) {
     return { strike: s.strike, callCr: c, putCr: p, netCr: c - p, grossCr: c + p };
   });
   const totalGross = rows.reduce((a, r) => a + r.grossCr, 0);
-  const atm = d.atm || Math.round(spot / 50) * 50;
-  const near = rows.filter(r => Math.abs(r.strike - atm) <= NEAR_STRIKES * 50).sort((a, b) => a.strike - b.strike);
+  const step = d.strikeStep || 50; // NIFTY 50, SENSEX 100
+  const atm = d.atm || Math.round(spot / step) * step;
+  const near = rows.filter(r => Math.abs(r.strike - atm) <= NEAR_STRIKES * step).sort((a, b) => a.strike - b.strike);
   const nearGross = near.reduce((a, r) => a + r.grossCr, 0);
   const peak = near.reduce((best, r) => (!best || r.grossCr > best.grossCr ? r : best), null);
 
@@ -201,7 +202,7 @@ export function gammaNearMoney(d, points, closeMs) {
   const firstToday = (points || []).filter(p => p && p.spot > 0 && p.atmIv > 0 && Number.isFinite(p.t))
     .filter(p => { const ip = istParts(p.t); return ip.ymd === istParts(closeMs).ymd && ip.mins >= OPEN_MIN; })
     .sort((a, b) => a.t - b.t)[0] || null;
-  const gOpen = firstToday ? bsGamma(firstToday.spot, Math.round(firstToday.spot / 50) * 50, yearsTo(closeMs, firstToday.t), firstToday.atmIv) : null;
+  const gOpen = firstToday ? bsGamma(firstToday.spot, Math.round(firstToday.spot / step) * step, yearsTo(closeMs, firstToday.t), firstToday.atmIv) : null;
 
   const gex = (points || []).filter(p => p && Number.isFinite(p.gexCr) && Number.isFinite(p.t) && istParts(p.t).ymd === istParts(closeMs).ymd)
     .sort((a, b) => a.t - b.t);
@@ -213,7 +214,8 @@ export function gammaNearMoney(d, points, closeMs) {
     peak,
     atm,
     atmGamma: gNow,
-    deltaPer50: gNow !== null ? gNow * 50 : null,
+    deltaPer50: gNow !== null ? gNow * step : null, // per one strike step (50 points on NIFTY)
+    strikeStep: step,
     atmGammaOpen: gOpen,
     gammaVsOpen: gNow !== null && gOpen > 0 ? gNow / gOpen : null,
     netGexCr: d.gex ? d.gex.totalGexCr : null,
@@ -257,7 +259,7 @@ const SQRT_2_OVER_PI = Math.sqrt(2 / Math.PI);
  * stored); the 1 sigma move uses the server's formula (straddle / sqrt(2/pi)). Zero gamma and the GEX regime are not
  * stored, so they read n/a.
  */
-export function replayInput(replay, frameIndex, lotSize = 65) {
+export function replayInput(replay, frameIndex, lotSize = 65, strikeStep = 50) {
   const frame = replay && replay.frames ? replay.frames[frameIndex] : null;
   if (!frame) return null;
   const points = (replay.points || []).filter(p => p && Number.isFinite(p.t) && p.t <= frame.t);
@@ -272,7 +274,8 @@ export function replayInput(replay, frameIndex, lotSize = 65) {
   const d = {
     expiry: replay.expiry,
     spot: p.spot,
-    atm: Math.round(p.spot / 50) * 50,
+    atm: Math.round(p.spot / strikeStep) * strikeStep,
+    strikeStep,
     dataAsOf: new Date(frame.t).toISOString(),
     straddlePrice: p.straddle,
     straddleDetails: { oneSigmaMove: p.straddle > 0 ? p.straddle / SQRT_2_OVER_PI : null, tradingDaysLeft: 0 },
