@@ -3,9 +3,9 @@
 //   GET    /session                      { configured, signedIn }
 //   POST   /session                      { secret } -> sets the session cookie
 //   DELETE /session                      signs out
-//   GET    /market?expiry=               option chain for the order ticket (nearest four expiries)
+//   GET    /market?expiry=&symbol=       option chain for the order ticket (nearest four expiries; NIFTY or SENSEX)
 //   GET    /accounts                     list (creates the default account on first use)
-//   POST   /accounts                     { id, name, startingCapital }
+//   POST   /accounts                     { id, name, startingCapital, symbol } (symbol NIFTY by default, or SENSEX)
 //   GET    /accounts/:id                 summary, orders, trades, equity curve
 //   POST   /accounts/:id/orders          place an order
 //   POST   /accounts/:id/orders/preview  what an order would do, nothing saved
@@ -70,7 +70,8 @@ router.use(express.json({ limit: '8kb' }));
 const STATUS = {
   NOT_FOUND: 404, BUSY: 409, EXISTS: 409, TOO_MANY_ACCOUNTS: 409, TOO_MANY_KEYS: 409,
   BAD_ID: 400, BAD_CAPITAL: 400, BAD_NAME: 400, BAD_LABEL: 400, BAD_SCOPE: 400, BAD_STRATEGY: 400, TOO_MANY_STRATEGIES: 409,
-  TOO_MANY_DEPLOYMENTS: 409, ACCOUNT_IN_USE: 409, BAD_STATUS: 400, STOPPED: 409, NOT_STOPPED: 409
+  TOO_MANY_DEPLOYMENTS: 409, ACCOUNT_IN_USE: 409, BAD_STATUS: 400, STOPPED: 409, NOT_STOPPED: 409,
+  BAD_SYMBOL: 400, WRONG_INDEX: 409
 };
 
 /** Known, user-facing errors keep their message; anything else is logged and hidden. */
@@ -113,10 +114,11 @@ router.use(requirePaperOwner);
 // ── market ──
 
 router.get('/market', async (req, res) => {
-  const { expiry } = req.query;
+  const { expiry, symbol = 'NIFTY' } = req.query;
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 03-Nov-2026.' });
+  if (!['NIFTY', 'SENSEX'].includes(symbol)) return res.status(400).json({ ok: false, code: 'BAD_SYMBOL', error: 'symbol must be NIFTY or SENSEX.' });
   try {
-    res.json({ ok: true, ...(await svc().market(expiry || null)) });
+    res.json({ ok: true, ...(await svc().market(expiry || null, { symbol })) });
   } catch (err) {
     return fail(res, err, 'Error loading paper market');
   }
@@ -140,8 +142,8 @@ router.get('/accounts', async (req, res) => {
 router.post('/accounts', async (req, res) => {
   const b = req.body || {};
   try {
-    const state = await svc().createAccount({ id: b.id, name: b.name, startingCapital: b.startingCapital === undefined ? undefined : Number(b.startingCapital) });
-    res.status(201).json({ ok: true, account: { id: state.id, name: state.name } });
+    const state = await svc().createAccount({ id: b.id, name: b.name, startingCapital: b.startingCapital === undefined ? undefined : Number(b.startingCapital), symbol: b.symbol });
+    res.status(201).json({ ok: true, account: { id: state.id, name: state.name, symbol: state.symbol } });
   } catch (err) {
     return fail(res, err, 'Error creating paper account');
   }
