@@ -1,4 +1,4 @@
-// Paper trading engine for NIFTY index options: orders, fills, charges, margin, P&L and expiry settlement.
+// Paper trading engine for NIFTY and SENSEX index options: orders, fills, charges, margin, P&L and expiry settlement.
 //
 // Pure: every function takes an account state and a market "book" and returns a NEW state (the input is never changed).
 // Nothing here reads the clock, the network or storage, so the trading page, the agent API, the backtester and live
@@ -18,11 +18,15 @@
 // Margin is an approximation, not SPAN: each short option needs about 9% of spot (less half of how far it is out of the
 // money, never below 3.5% of spot) per unit, and a group whose loss at expiry is bounded (a spread) needs at most that loss.
 //
-// Instrument key: 'NIFTY|28-Oct-2026|25000|CE'. Quantities are units (lots x lot size); orders are placed in lots.
+// Instrument key: 'NIFTY|28-Oct-2026|25000|CE' or 'SENSEX|29-Oct-2026|82000|PE'. Quantities are units (lots x lot size);
+// orders are placed in lots. An account trades one index (state.symbol, NIFTY when absent: accounts made before SENSEX),
+// so margin, spot and settlement always refer to that one index. `cfg.symbol` (NIFTY when absent) is the account's index
+// and `cfg.lotSize` its lot size; configFor(symbol) builds that config.
 
 const { tradeCharges, exerciseCharges, RATES } = require('./paperCosts');
 const { parseNseTs, strikesFor } = require('./integrity');
 const { nseDateToYmd, CLOSE_MIN } = require('./calendar');
+const { INDICES } = require('./instruments');
 
 const DEFAULTS = {
   lotSize: parseInt(process.env.NIFTY_LOT_SIZE, 10) || 65,
@@ -38,6 +42,21 @@ const DEFAULTS = {
   otmCredit: 0.5,
   rates: RATES
 };
+
+const PAPER_SYMBOLS = ['NIFTY', 'SENSEX'];
+const symbolOf = cfg => (cfg && cfg.symbol) || 'NIFTY';
+const accountSymbol = state => (state && state.symbol) || 'NIFTY';
+
+/**
+ * Engine config for one index: NIFTY keeps `base` exactly as it is (its lot size included); another index gets its own
+ * lot size (`lotSize` when given, else instruments.js) and its symbol.
+ */
+function configFor(symbol = 'NIFTY', base = DEFAULTS, lotSize = null) {
+  const sym = String(symbol || 'NIFTY').toUpperCase();
+  if (!PAPER_SYMBOLS.includes(sym)) throw Object.assign(new Error(`Paper trading does not support ${symbol}`), { code: 'BAD_SYMBOL' });
+  if (sym === 'NIFTY') return base;
+  return { ...base, symbol: sym, lotSize: lotSize || INDICES[sym].lotSize };
+}
 
 const SIDES = new Set(['BUY', 'SELL']);
 const ORDER_TYPES = new Set(['MARKET', 'LIMIT', 'SL', 'SL-M']);
@@ -67,11 +86,11 @@ const onTick = (x, tick = DEFAULTS.tick) => Math.abs(x / tick - Math.round(x / t
 
 // ── instruments ──────────────────────────────────────────────────────────
 
-const instrumentKey = ({ expiry, strike, optionType }) => `NIFTY|${expiry}|${strike}|${optionType}`;
+const instrumentKey = ({ symbol = 'NIFTY', expiry, strike, optionType }) => `${symbol}|${expiry}|${strike}|${optionType}`;
 
 function parseInstrument(key) {
-  const m = /^NIFTY\|(\d{2}-[A-Za-z]{3}-\d{4})\|(\d{3,6})\|(CE|PE)$/.exec(String(key || ''));
-  return m ? { key: m[0], expiry: m[1], strike: Number(m[2]), optionType: m[3] } : null;
+  const m = /^(NIFTY|SENSEX)\|(\d{2}-[A-Za-z]{3}-\d{4})\|(\d{3,6})\|(CE|PE)$/.exec(String(key || ''));
+  return m ? { key: m[0], symbol: m[1], expiry: m[2], strike: Number(m[3]), optionType: m[4] } : null;
 }
 
 /** 15:30 IST on the expiry date, as epoch ms (null for a malformed expiry). */
@@ -109,10 +128,10 @@ function quoteFrom(leg, asOf) {
 }
 
 /**
- * One NSE option-chain payload (one expiry) as a book: { asOf, spot, stale, expiries, quotes: { key: quote } }.
- * quote: { ltp, bid, ask, iv, oi, asOf }, zero where NSE has no value.
+ * One option-chain payload (one expiry, NSE's shape) as a book: { symbol, asOf, spot, stale, expiries, quotes: { key: quote } }.
+ * quote: { ltp, bid, ask, iv, oi, asOf }, zero where the feed has no value.
  */
-function buildBook(raw, expiry, { stale = false } = {}) {
+function buildBook(raw, expiry, { stale = false, symbol = 'NIFTY' } = {}) {
   const rec = (raw && raw.records) || {};
   const asOf = parseNseTs(rec.timestamp);
   const spot = positive(rec.underlyingValue) ? rec.underlyingValue : null;
@@ -120,18 +139,19 @@ function buildBook(raw, expiry, { stale = false } = {}) {
   for (const row of strikesFor(raw, expiry)) {
     for (const optionType of ['CE', 'PE']) {
       const q = quoteFrom(row[optionType], asOf);
-      if (q) quotes[instrumentKey({ expiry, strike: row.strike, optionType })] = q;
+      if (q) quotes[instrumentKey({ symbol, expiry, strike: row.strike, optionType })] = q;
     }
   }
-  return { asOf, spot, stale: !!stale, expiries: [expiry], quotes };
+  return { symbol, asOf, spot, stale: !!stale, expiries: [expiry], quotes };
 }
 
-/** Several single-expiry books as one. Spot comes from the newest; stale if any part is. */
+/** Several single-expiry books of one index as one. Spot comes from the newest; stale if any part is. */
 function mergeBooks(books) {
   const list = books.filter(Boolean);
-  if (!list.length) return { asOf: null, spot: null, stale: true, expiries: [], quotes: {} };
+  if (!list.length) return { symbol: null, asOf: null, spot: null, stale: true, expiries: [], quotes: {} };
   const newest = list.reduce((a, b) => ((b.asOf || 0) > (a.asOf || 0) ? b : a));
   return {
+    symbol: newest.symbol || 'NIFTY',
     asOf: newest.asOf,
     spot: newest.spot,
     stale: list.some(b => b.stale),
@@ -144,6 +164,7 @@ function mergeBooks(books) {
 function bookHealth(book, nowMs, { marketOpen, cfg = DEFAULTS } = {}) {
   if (!marketOpen) return { ok: false, reason: 'MARKET_CLOSED' };
   if (!book || !book.asOf || !book.spot) return { ok: false, reason: 'NO_DATA' };
+  if (book.symbol && book.symbol !== symbolOf(cfg)) return { ok: false, reason: 'NO_DATA' }; // another index's prices
   if (book.stale) return { ok: false, reason: 'DATA_STALE' };
   if (nowMs - book.asOf > cfg.maxBookAgeMs) return { ok: false, reason: 'DATA_OLD' };
   return { ok: true, reason: null };
@@ -151,12 +172,13 @@ function bookHealth(book, nowMs, { marketOpen, cfg = DEFAULTS } = {}) {
 
 // ── accounts ─────────────────────────────────────────────────────────────
 
-function newAccount({ id, name, nowMs, startingCapital = DEFAULTS.startingCapital, kind = 'human' }) {
+function newAccount({ id, name, nowMs, startingCapital = DEFAULTS.startingCapital, kind = 'human', symbol = 'NIFTY' }) {
   return {
     v: 1,
     id,
     name: name || id,
     kind,
+    symbol,
     createdAt: nowMs,
     startingCapital,
     cash: startingCapital,
@@ -289,7 +311,9 @@ function err(code, message) {
 function validateOrderInput(input, cfg = DEFAULTS) {
   const o = input || {};
   const inst = parseInstrument(o.instrument);
-  if (!inst) return err('BAD_INSTRUMENT', 'instrument must look like NIFTY|28-Oct-2026|25000|CE.');
+  const sym = symbolOf(cfg);
+  if (!inst) return err('BAD_INSTRUMENT', `instrument must look like ${sym === 'SENSEX' ? 'SENSEX|29-Oct-2026|82000|CE' : 'NIFTY|28-Oct-2026|25000|CE'}.`);
+  if (inst.symbol !== sym) return err('WRONG_INDEX', `This account trades ${sym} options, not ${inst.symbol}.`);
   if (!SIDES.has(o.side)) return err('BAD_SIDE', 'side must be BUY or SELL.');
   const orderType = o.orderType || 'MARKET';
   if (!ORDER_TYPES.has(orderType)) return err('BAD_ORDER_TYPE', 'orderType must be MARKET, LIMIT, SL or SL-M.');
@@ -445,7 +469,7 @@ function messageFor(code) {
   return {
     MARKET_CLOSED: 'The market is closed. Orders are accepted 09:15 to 15:30 IST on trading days.',
     NO_DATA: 'No option chain data right now.',
-    DATA_STALE: 'The option chain is a leftover copy (NSE did not answer). Orders are paused until fresh data arrives.',
+    DATA_STALE: 'The option chain is a leftover copy (the data feed did not answer). Orders are paused until fresh data arrives.',
     DATA_OLD: 'The latest option chain snapshot is too old to trade on.'
   }[code] || 'Trading is paused.';
 }
@@ -511,7 +535,8 @@ function expireOrders(prev, nowMs) {
  * Returns { state, trades, changed }.
  */
 function settleExpiry(prev, expiry, settlementSpot, nowMs, { cfg = DEFAULTS } = {}) {
-  const held = Object.values(prev.positions).filter(p => p.expiry === expiry && p.qty);
+  const sym = symbolOf(cfg);
+  const held = Object.values(prev.positions).filter(p => p.expiry === expiry && p.qty && (parseInstrument(p.instrument) || {}).symbol === sym);
   if (!held.length || !positive(settlementSpot)) return { state: prev, trades: [], changed: false };
   const state = clone(prev);
   const trades = [];
@@ -522,7 +547,7 @@ function settleExpiry(prev, expiry, settlementSpot, nowMs, { cfg = DEFAULTS } = 
     const charges = p.qty > 0 && value > 0 ? exerciseCharges(value, qty, cfg.rates) : exerciseCharges(0, 0, cfg.rates);
     trades.push(applyFill(state, { instrument: p.instrument, side, qty, price: value, charges, at: nowMs, kind: 'settlement' }));
   }
-  for (const o of state.orders) if (o.expiry === expiry && LIVE.has(o.status)) closeOrder(o, 'CANCELLED', nowMs, 'EXPIRED_CONTRACT');
+  for (const o of state.orders) if (o.expiry === expiry && LIVE.has(o.status) && (parseInstrument(o.instrument) || {}).symbol === sym) closeOrder(o, 'CANCELLED', nowMs, 'EXPIRED_CONTRACT');
   state.settlements = [...(state.settlements || []), { expiry, spot: settlementSpot, at: nowMs }].slice(-50);
   return { state, trades, changed: true };
 }
@@ -566,6 +591,8 @@ function summarize(state, book = null, cfg = DEFAULTS) {
     id: state.id,
     name: state.name,
     kind: state.kind,
+    symbol: accountSymbol(state),
+    lotSize: cfg.lotSize,
     startingCapital: state.startingCapital,
     cash: state.cash,
     equity: r2(state.cash + value),
@@ -594,6 +621,9 @@ function recordEquity(prev, equity, nowMs) {
 
 module.exports = {
   DEFAULTS,
+  PAPER_SYMBOLS,
+  configFor,
+  accountSymbol,
   toTick,
   instrumentKey,
   parseInstrument,
