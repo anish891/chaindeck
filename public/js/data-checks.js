@@ -32,7 +32,7 @@ export const SPOT_TOLERANCE = { warn: 0.0015, fail: 0.004 }; // option chain spo
 export const FROZEN = { warn: 3, fail: 5 };                   // consecutive NEW snapshots with identical contents
 
 // The server sends a short reason code, never raw error text.
-const STALE_REASONS = { payload_rejected: 'Upstox sent data that failed validation', timeout: 'Upstox did not answer in time', fetch_failed: 'Upstox could not be reached' };
+const STALE_REASONS = { payload_rejected: p => `${p} sent data that failed validation`, timeout: p => `${p} did not answer in time`, fetch_failed: p => `${p} could not be reached` };
 
 const chk = (id, group, label, level, detail) => ({ id, group, label, level, detail });
 const fromFresh = (f, okText) => ({ level: f.level === 'bad' ? 'fail' : f.level === 'warn' ? 'warn' : 'pass', detail: f.level === 'idle' ? `${f.text} (market closed)` : f.text === 'no data' ? 'no data' : `${okText} ${f.text}` });
@@ -79,16 +79,17 @@ export function evaluateTrust({ now, marketOpen, chain = null, candles = null, s
   const checks = [];
   const F = 'Freshness';
 
-  // ── option chain ──
+  // ── option chain ── (check ids keep their old 'nse_' names; the labels name the provider actually in use)
+  const provider = chain && chain.d && chain.d.feed && chain.d.feed.source === 'nse' ? 'NSE' : 'Upstox';
   if (!chain || !chain.d) {
-    checks.push(chk('nse_fresh', F, 'Option chain from NSE is current', marketOpen ? 'fail' : 'skip', 'no option chain loaded'));
+    checks.push(chk('nse_fresh', F, 'Option chain is current', marketOpen ? 'fail' : 'skip', 'no option chain loaded'));
   } else {
     const f = freshness('chain', chain.ageSec, { stale: false, open: marketOpen, hasData: true });
     const r = fromFresh(f, 'last option chain update');
-    checks.push(chk('nse_fresh', F, 'Option chain from NSE is current', r.level, r.detail));
+    checks.push(chk('nse_fresh', F, `Option chain from ${provider} is current`, r.level, r.detail));
     // While trading a leftover copy means the screen is behind the market (fail, pauses signals). After the close nothing is
     // moving, so the last good copy is still the right picture and it only warns.
-    checks.push(chk('nse_stale_copy', F, 'Not showing a leftover copy', chain.stale ? (marketOpen ? 'fail' : 'warn') : 'pass', chain.stale ? `${STALE_REASONS[chain.staleReason] || 'NSE did not answer'}; showing the last good copy${marketOpen ? '' : '; the market is closed so nothing has changed'}` : 'live from NSE'));
+    checks.push(chk('nse_stale_copy', F, 'Not showing a leftover copy', chain.stale ? (marketOpen ? 'fail' : 'warn') : 'pass', chain.stale ? `${(STALE_REASONS[chain.staleReason] || STALE_REASONS.fetch_failed)(provider)}; showing the last good copy${marketOpen ? '' : '; the market is closed so nothing has changed'}` : `live from ${provider}`));
     const same = content ? content.sameCount : 0;
     checks.push(chk('nse_content', F, 'Snapshots are actually changing', !marketOpen ? 'skip' : same >= FROZEN.fail ? 'fail' : same >= FROZEN.warn ? 'warn' : 'pass',
       !marketOpen ? 'market closed' : same >= FROZEN.warn ? `${same + 1} new snapshots in a row with identical contents` : 'contents change between snapshots'));
