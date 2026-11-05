@@ -72,11 +72,15 @@ async function loadIndices() {
   return { nifty: pick(nifty), vix: vix ? pick(vix) : null, sectors, breadth };
 }
 
-/** Upstox v3 OHLC quote (interval 1d) -> { last, previousClose, open, high, low, percentChange }, or null. */
+/**
+ * Upstox quote -> { last, previousClose, open, high, low, percentChange }, or null.
+ * The previous close is `cp` from the v3 LTP reply (checked live: the v3 OHLC reply's prev_ohlc comes back null);
+ * today's open/high/low come from the v3 OHLC reply's live_ohlc when it was fetched (indices only).
+ */
 function fromUpstoxQuote(q) {
   if (!q) return null;
   const last = Number(q.last_price);
-  const prev = Number(q.prev_ohlc && q.prev_ohlc.close);
+  const prev = Number(q.cp ?? (q.prev_ohlc && q.prev_ohlc.close));
   const live = q.live_ohlc || {};
   if (!(last > 0)) return null;
   const pct = prev > 0 ? Number((((last - prev) / prev) * 100).toFixed(2)) : null;
@@ -106,14 +110,22 @@ async function loadIndicesUpstox({ get = upstox.get, getLists = () => constituen
   const keys = [NIFTY_KEY, SENSEX_KEY, VIX_KEY, ...SECTORS.map(s => s[2]), ...stockKeys];
   const batches = [];
   for (let i = 0; i < keys.length; i += QUOTE_BATCH) batches.push(keys.slice(i, i + QUOTE_BATCH));
-  const replies = await Promise.all(batches.map((b, i) => {
-    const call = get('/v3/market-quote/ohlc', { instrument_key: b, interval: '1d' });
-    // Only the first batch (indices) is essential; a failed stock batch just leaves breadth unknown.
-    return i === 0 ? call : call.catch(err => { console.error('stock quotes failed:', err.message); return {}; });
-  }));
+  // Last price and previous close for everything (light LTP calls), plus today's open/high/low for the headline indices.
+  const [ohlc, ...replies] = await Promise.all([
+    get('/v3/market-quote/ohlc', { instrument_key: [NIFTY_KEY, SENSEX_KEY, VIX_KEY], interval: '1d' })
+      .catch(err => { console.error('index OHLC failed:', err.message); return {}; }),
+    ...batches.map((b, i) => {
+      const call = get('/v3/market-quote/ltp', { instrument_key: b });
+      // Only the first batch (indices) is essential; a failed stock batch just leaves breadth unknown.
+      return i === 0 ? call : call.catch(err => { console.error('stock quotes failed:', err.message); return {}; });
+    })
+  ]);
   // Replies are keyed 'NSE_INDEX:Nifty 50'; instrument_token carries the 'NSE_INDEX|Nifty 50' form we asked with.
   const quotes = new Map();
   for (const data of replies) for (const q of Object.values(data || {})) if (q && q.instrument_token) quotes.set(q.instrument_token, q);
+  for (const q of Object.values(ohlc || {})) {
+    if (q && q.instrument_token && quotes.has(q.instrument_token)) quotes.set(q.instrument_token, { ...quotes.get(q.instrument_token), live_ohlc: q.live_ohlc });
+  }
 
   const nifty = fromUpstoxQuote(quotes.get(NIFTY_KEY));
   if (!nifty) throw new Error('NIFTY 50 missing from Upstox quotes');

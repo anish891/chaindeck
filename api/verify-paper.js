@@ -60,7 +60,7 @@ const identity = (state, b) => {
 
 // ── instruments and expiries ──
 {
-  assert.deepStrictEqual(E.parseInstrument(K(25000, 'CE')), { key: K(25000, 'CE'), expiry: EXP, strike: 25000, optionType: 'CE' });
+  assert.deepStrictEqual(E.parseInstrument(K(25000, 'CE')), { key: K(25000, 'CE'), symbol: 'NIFTY', expiry: EXP, strike: 25000, optionType: 'CE' });
   assert.strictEqual(E.parseInstrument('NIFTY|03-Nov-2026|25000|XX'), null);
   assert.strictEqual(E.parseInstrument('BANKNIFTY|03-Nov-2026|25000|CE'), null);
   assert.strictEqual(E.expiryCloseMs(EXP), at(3, 15, 30));

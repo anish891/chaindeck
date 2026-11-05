@@ -36,7 +36,7 @@ export function Report({ r }: { r: BacktestReport }) {
         <div className="table-scroll lab-trades">
           {r.trades ? (
             <table className="pt-table">
-              <thead><tr><th>Day</th><th>In</th><th>Out</th><th className="right">NIFTY</th><th>Legs (entry to exit)</th><th className="right">Net</th><th>Exit</th></tr></thead>
+              <thead><tr><th>Day</th><th>In</th><th>Out</th><th className="right">{r.strategy.symbol || 'NIFTY'}</th><th>Legs (entry to exit)</th><th className="right">Net</th><th>Exit</th></tr></thead>
               <tbody>
                 {r.tradeList.slice().reverse().map((t, i) => (
                   <tr key={`${t.day}-${t.entryT}-${i}`}>

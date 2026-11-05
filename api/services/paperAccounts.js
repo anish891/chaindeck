@@ -1,9 +1,12 @@
 // Paper trading accounts: storage, locking, market data and the per-minute tick around the pure engine (paperEngine.js).
 //
-//   pt:index          hash    id -> { id, name, kind, createdAt, active } (active = has positions or live orders)
+//   pt:index          hash    id -> { id, name, kind, symbol, createdAt, active } (active = has positions or live orders)
 //   pt:acct:{id}      string  the whole account state as JSON (small: capped order and trade history)
 //   pt:lock:{id}      string  short-lived lock so a page request and the cron tick never write over each other
-//   pt:settle:{expiry} string settlement price used for that expiry (so every account settles at the same price)
+//   pt:settle:{expiry} string NIFTY settlement price used for that expiry (so every account settles at the same price)
+//   pt:settle:SENSEX:{expiry}  the same for SENSEX
+//
+// Each account trades one index, NIFTY or SENSEX (state.symbol; accounts made before SENSEX have none and are NIFTY).
 //   pt:keys           hash    keyId -> agent API key record (only a SHA-256 of the key is stored, never the key)
 //   pt:q:{keyId}:...  string  order counters per key per minute and per day (fixed windows)
 //   pt:idem:{keyId}:{k} string the result of an agent request sent with an Idempotency-Key, kept a day
@@ -40,13 +43,22 @@ function codedError(code, message) {
 /**
  * deps:
  *   store        storage.js-compatible (get, set, setNx, del, hset, hgetall, hdel)
- *   loadRaw      (expiry | null) => { raw, allExpiries, targetExpiry, stale }   (optionChain.fetchRawOptionChain)
- *   loadSettle   (expiry) => settlement spot or null                             (daily close on the expiry date)
+ *   loadRaw      (expiry | null, symbol) => { raw, allExpiries, targetExpiry, stale }   (optionChain.fetchRawOptionChain)
+ *   loadSettle   (expiry, symbol) => settlement spot or null                     (the index's daily close on the expiry date)
+ *   lotSizeFor   (symbol) => lot size for an index other than NIFTY (NIFTY always uses cfg.lotSize)
  *   now          () => epoch ms
  *   isMarketOpen (ms) => boolean
  */
-function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpen = ms => calendar.isMarketOpenAt(ms), cfg = engine.DEFAULTS }) {
+function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpen = ms => calendar.isMarketOpenAt(ms), cfg = engine.DEFAULTS, lotSizeFor = () => null }) {
   const acctKey = id => `pt:acct:${id}`;
+  const symbolOf = s => engine.accountSymbol(s);
+  const normSymbol = sym => {
+    const s = String(sym === undefined || sym === null ? 'NIFTY' : sym).toUpperCase();
+    if (!engine.PAPER_SYMBOLS.includes(s)) throw codedError('BAD_SYMBOL', `index must be one of ${engine.PAPER_SYMBOLS.join(', ')}.`);
+    return s;
+  };
+  /** Engine config for an index; NIFTY is `cfg` itself, so NIFTY accounts behave exactly as before. */
+  const cfgFor = sym => (sym === 'NIFTY' ? cfg : engine.configFor(sym, cfg, lotSizeFor(sym)));
   const lockKey = id => `pt:lock:${id}`;
 
   // ── storage ──
@@ -65,7 +77,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
   async function save(state) {
     const active = Object.keys(state.positions).length > 0 || state.orders.some(engine.isLive);
     await store.set(acctKey(state.id), JSON.stringify(state));
-    await store.hset('pt:index', state.id, JSON.stringify({ id: state.id, name: state.name, kind: state.kind, createdAt: state.createdAt, active }));
+    await store.hset('pt:index', state.id, JSON.stringify({ id: state.id, name: state.name, kind: state.kind, symbol: symbolOf(state), createdAt: state.createdAt, active }));
   }
 
   /** Run `fn(state)` under the account lock; save whatever state it returns (or nothing when it returns null). */
@@ -89,14 +101,14 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 
   // ── market data ──
 
-  /** Books for the given expiries plus the tradable list. Unknown or expired expiries are skipped, not fetched. */
-  async function loadBook(expiries = []) {
-    const first = await loadRaw(null);
+  /** Books of one index for the given expiries plus the tradable list. Unknown or expired expiries are skipped, not fetched. */
+  async function loadBook(expiries = [], symbol = 'NIFTY') {
+    const first = await loadRaw(null, symbol);
     const t = now();
     const allowed = engine.tradableExpiries(first.allExpiries, t, cfg.maxExpiries);
     const wanted = [...new Set(expiries)].filter(e => allowed.includes(e) && e !== first.targetExpiry);
-    const rest = await Promise.all(wanted.map(e => loadRaw(e).then(r => engine.buildBook(r.raw, e, { stale: r.stale })).catch(() => null)));
-    const book = engine.mergeBooks([engine.buildBook(first.raw, first.targetExpiry, { stale: first.stale }), ...rest]);
+    const rest = await Promise.all(wanted.map(e => loadRaw(e, symbol).then(r => engine.buildBook(r.raw, e, { stale: r.stale, symbol })).catch(() => null)));
+    const book = engine.mergeBooks([engine.buildBook(first.raw, first.targetExpiry, { stale: first.stale, symbol }), ...rest]);
     // a requested expiry that failed to load must not look like "no orders to fill": mark the whole book stale
     if (rest.some(b => b === null)) book.stale = true;
     return { book, allowed, allExpiries: first.allExpiries };
@@ -106,21 +118,22 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 
   // ── account actions ──
 
-  async function createAccount({ id, name, startingCapital = cfg.startingCapital, kind = 'human' }) {
+  async function createAccount({ id, name, startingCapital = cfg.startingCapital, kind = 'human', symbol }) {
+    const sym = normSymbol(symbol);
     if (!ID_RE.test(String(id || ''))) throw codedError('BAD_ID', 'Account id: lowercase letters, digits and dashes, up to 24 characters.');
     if (!Number.isFinite(startingCapital) || startingCapital < 10000 || startingCapital > 1e8) throw codedError('BAD_CAPITAL', 'Starting capital must be between 10,000 and 10,00,00,000.');
     if (name !== undefined && (typeof name !== 'string' || name.length > 40)) throw codedError('BAD_NAME', 'Name must be at most 40 characters.');
     const existing = await listAccounts();
     if (existing.some(a => a.id === id)) throw codedError('EXISTS', 'That account id is taken.');
     if (existing.length >= MAX_ACCOUNTS) throw codedError('TOO_MANY_ACCOUNTS', `At most ${MAX_ACCOUNTS} paper accounts.`);
-    const state = engine.newAccount({ id, name, nowMs: now(), startingCapital: Math.round(startingCapital), kind });
+    const state = engine.newAccount({ id, name, nowMs: now(), startingCapital: Math.round(startingCapital), kind, symbol: sym });
     await save(state);
     return state;
   }
 
   async function resetAccount(id) {
     const out = await withAccount(id, state => ({
-      state: { ...engine.newAccount({ id: state.id, name: state.name, nowMs: now(), startingCapital: state.startingCapital, kind: state.kind }), agentsPaused: !!state.agentsPaused }
+      state: { ...engine.newAccount({ id: state.id, name: state.name, nowMs: now(), startingCapital: state.startingCapital, kind: state.kind, symbol: symbolOf(state) }), agentsPaused: !!state.agentsPaused }
     }));
     return out.state;
   }
@@ -135,9 +148,15 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
   /** Account summary at current prices (read only; no lock). */
   async function getSummary(id) {
     const state = await load(id);
+    const sym = symbolOf(state);
     let book = null;
-    try { book = (await loadBook(heldExpiries(state))).book; } catch (e) { book = null; }
-    return { summary: engine.summarize(state, book, cfg), state };
+    try { book = (await loadBook(heldExpiries(state), sym)).book; } catch (e) { book = null; }
+    return { summary: engine.summarize(state, book, cfgFor(sym)), state };
+  }
+
+  /** Which index an account trades. */
+  async function accountSymbol(id) {
+    return symbolOf(await load(id));
   }
 
   /**
@@ -146,11 +165,12 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
    */
   async function placeOrder(id, input, { agent = null, strategy = null } = {}) {
     const inst = engine.parseInstrument(input && input.instrument);
-    const { book, allowed } = await loadBook(inst ? [inst.expiry] : []);
+    // the instrument names the index; an order for another index than the account's is refused by the engine (WRONG_INDEX)
+    const { book, allowed } = await loadBook(inst ? [inst.expiry] : [], inst ? inst.symbol : 'NIFTY');
     return withAccount(id, state => {
       if (agent && state.agentsPaused) return { ok: false, error: { code: 'AGENTS_PAUSED', message: 'The owner has paused agent trading on this account.' }, state };
       const t = now();
-      const out = engine.placeOrder({ ...input, source: agent ? 'agent' : input && input.source }, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg });
+      const out = engine.placeOrder({ ...input, source: agent ? 'agent' : input && input.source }, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg: cfgFor(symbolOf(state)) });
       if (!out.ok) return out;
       const next = engine.recordMarks(out.state, book);
       if (agent) {
@@ -267,13 +287,15 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
   /** What placing this order would do (fill price, charges, free cash after), without saving anything. */
   async function previewOrder(id, input) {
     const state = await load(id);
+    const sym = symbolOf(state);
+    const acfg = cfgFor(sym);
     const inst = engine.parseInstrument(input && input.instrument);
-    const { book, allowed } = await loadBook(inst ? [inst.expiry] : []);
+    const { book, allowed } = await loadBook(inst && inst.symbol === sym ? [inst.expiry] : [], sym);
     const t = now();
-    const before = engine.summarize(state, book, cfg);
-    const out = engine.placeOrder(input, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg });
+    const before = engine.summarize(state, book, acfg);
+    const out = engine.placeOrder(input, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg: acfg });
     if (!out.ok) return { ok: false, error: out.error, availableBefore: before.available };
-    const after = engine.summarize(out.state, book, cfg);
+    const after = engine.summarize(out.state, book, acfg);
     return {
       ok: true,
       resting: !out.trade,
@@ -284,11 +306,13 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     };
   }
 
-  /** Option chain for the order ticket: the tradable expiries and strikes around the money for one of them. */
-  async function market(expiry, { width = 12 } = {}) {
-    let m = await loadBook(expiry ? [expiry] : []);
+  /** Option chain of one index for the order ticket: the tradable expiries and strikes around the money for one of them. */
+  async function market(expiry, { width = 12, symbol = 'NIFTY' } = {}) {
+    const sym = normSymbol(symbol);
+    const acfg = cfgFor(sym);
+    let m = await loadBook(expiry ? [expiry] : [], sym);
     const exp = expiry && m.allowed.includes(expiry) ? expiry : m.allowed[0];
-    if (exp && !m.book.expiries.includes(exp)) m = await loadBook([exp]);
+    if (exp && !m.book.expiries.includes(exp)) m = await loadBook([exp], sym);
     const t = now();
     const { book } = m;
     const byStrike = new Map();
@@ -305,13 +329,14 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     const strikes = rows.slice(Math.max(0, atm - width), atm + width + 1);
     const marketOpen = isMarketOpen(t);
     return {
+      symbol: sym,
       asOf: book.asOf,
       spot: book.spot,
       marketOpen,
-      health: engine.bookHealth(book, t, { marketOpen, cfg }),
+      health: engine.bookHealth(book, t, { marketOpen, cfg: acfg }),
       expiries: m.allowed,
       expiry: exp || null,
-      lotSize: cfg.lotSize,
+      lotSize: acfg.lotSize,
       atmStrike: rows[atm] ? rows[atm].strike : null,
       strikes
     };
@@ -319,13 +344,14 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 
   // ── settlement ──
 
-  /** One settlement price per expiry, shared by every account. */
-  async function settlementPrice(expiry) {
-    const saved = await store.get(`pt:settle:${expiry}`);
+  /** One settlement price per index and expiry, shared by every account. NIFTY keeps its original storage key. */
+  async function settlementPrice(expiry, symbol = 'NIFTY') {
+    const key = symbol === 'NIFTY' ? `pt:settle:${expiry}` : `pt:settle:${symbol}:${expiry}`;
+    const saved = await store.get(key);
     if (saved && Number(saved) > 0) return Number(saved);
-    const px = await loadSettle(expiry).catch(() => null);
+    const px = await loadSettle(expiry, symbol).catch(() => null);
     if (!(px > 0)) return null;
-    await store.set(`pt:settle:${expiry}`, String(px), 90 * 24 * 3600);
+    await store.set(key, String(px), 90 * 24 * 3600);
     return px;
   }
 
@@ -341,14 +367,21 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     const accounts = (await listAccounts()).filter(a => a.active);
     if (!accounts.length) return { accounts: 0, fills: 0, settled: 0 };
     const states = await Promise.all(accounts.map(a => load(a.id).catch(() => null)));
-    const expiries = [...new Set(states.filter(Boolean).flatMap(heldExpiries))];
-    let market = null;
-    try { market = await loadBook(expiries); } catch (e) { market = null; }
-
-    // expiries whose close has passed (and settlement window has opened) and that someone still holds
-    const due = expiries.filter(e => { const c = engine.expiryCloseMs(e); return c && t >= c + SETTLE_AFTER_MS; });
-    const prices = {};
-    for (const e of due) prices[e] = await settlementPrice(e);
+    // one book per index that some active account trades
+    const bySymbol = {};
+    for (const st of states.filter(Boolean)) {
+      const sym = symbolOf(st);
+      const g = bySymbol[sym] || (bySymbol[sym] = { expiries: new Set(), market: null, due: [], prices: {} });
+      for (const e of heldExpiries(st)) g.expiries.add(e);
+    }
+    for (const [sym, g] of Object.entries(bySymbol)) {
+      const expiries = [...g.expiries];
+      try { g.market = await loadBook(expiries, sym); } catch (e) { g.market = null; }
+      // expiries whose close has passed (and settlement window has opened) and that someone still holds
+      g.due = expiries.filter(e => { const c = engine.expiryCloseMs(e); return c && t >= c + SETTLE_AFTER_MS; });
+      for (const e of g.due) g.prices[e] = await settlementPrice(e, sym);
+    }
+    const groupOf = st => bySymbol[symbolOf(st)] || { market: null, due: [], prices: {} };
 
     const marketOpen = isMarketOpen(t);
     const afterClose = t >= engine.sessionCloseMs(t) && calendar.isTradingDay(t);
@@ -356,7 +389,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     // settle, or today's closing equity still to record. Holding positions alone needs nothing until the close.
     const needsWork = st => st && (
       st.orders.some(engine.isLive) ||
-      Object.values(st.positions).some(p => due.includes(p.expiry)) ||
+      Object.values(st.positions).some(p => groupOf(st).due.includes(p.expiry)) ||
       (afterClose && (!st.curve.length || st.curve[st.curve.length - 1].ymd !== istYmd(t)))
     );
     let fills = 0, settled = 0;
@@ -364,22 +397,24 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
       if (!needsWork(states[n])) continue;
       try {
         await withAccount(a.id, state => {
+          const { market, due, prices } = groupOf(state);
+          const acfg = cfgFor(symbolOf(state));
           let s = state;
           let changed = false;
           if (market) {
-            const m = engine.matchOrders(s, market.book, t, { marketOpen, cfg });
+            const m = engine.matchOrders(s, market.book, t, { marketOpen, cfg: acfg });
             if (m.changed) { s = m.state; changed = true; fills += m.trades.length; }
           }
           const ex = engine.expireOrders(s, t);
           if (ex.changed) { s = ex.state; changed = true; }
           for (const e of due) {
-            const st = engine.settleExpiry(s, e, prices[e], t, { cfg });
+            const st = engine.settleExpiry(s, e, prices[e], t, { cfg: acfg });
             if (st.changed) { s = st.state; changed = true; settled += st.trades.length; }
           }
           // one equity point per trading day, written from the close onward
           const last = s.curve[s.curve.length - 1];
           if (afterClose && (!last || last.ymd !== istYmd(t) || changed)) {
-            s = engine.recordEquity(s, engine.summarize(s, market && market.book, cfg).equity, t);
+            s = engine.recordEquity(s, engine.summarize(s, market && market.book, acfg).equity, t);
             changed = true;
           }
           // marks ride along with a real change; on their own they are not worth a write every minute
@@ -389,7 +424,8 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
         console.error(`paper tick: account ${a.id} failed:`, e.message);
       }
     }
-    return { accounts: accounts.length, fills, settled, dataOk: !!market && !market.book.stale };
+    const groups = Object.values(bySymbol);
+    return { accounts: accounts.length, fills, settled, dataOk: groups.length > 0 && groups.every(g => !!g.market && !g.market.book.stale) };
   }
 
   /** When any tick last ran (the cron job's, or a page's), in epoch ms; 0 if not within the last 10 minutes. */
@@ -398,23 +434,24 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
   }
 
   return {
-    lastTickAt, listAccounts, createAccount, resetAccount, deleteAccount, getSummary, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice,
+    lastTickAt, listAccounts, createAccount, resetAccount, deleteAccount, getSummary, accountSymbol, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice,
     setAgentsPaused, listKeys, createKey, revokeKey, authenticate, consumeOrderQuota, consumeBacktestQuota, idempotent
   };
 }
 
-/** The service wired to real storage, NSE and Yahoo. */
+/** The service wired to real storage, the option chain feed (Upstox, or NSE for NIFTY) and daily candles. */
 function defaultService() {
   const store = require('./storage');
   const { fetchRawOptionChain } = require('./optionChain');
   const candles = require('./candles');
-  const loadSettle = async expiry => {
+  const { lotSizeFor } = require('./upstoxChain');
+  const loadSettle = async (expiry, symbol = 'NIFTY') => {
     const ymd = calendar.nseDateToYmd(expiry);
-    const { candles: daily } = await candles.getCandles('1d');
+    const { candles: daily } = await candles.getCandles('1d', { symbol });
     const bar = (daily || []).find(c => candles.istDay(c.t) === ymd);
     return bar ? bar.c : null;
   };
-  return createService({ store, loadRaw: e => fetchRawOptionChain('NIFTY', e), loadSettle });
+  return createService({ store, loadRaw: (e, symbol = 'NIFTY') => fetchRawOptionChain(symbol, e), loadSettle, lotSizeFor: sym => lotSizeFor(sym) });
 }
 
 module.exports = { createService, defaultService, ID_RE, AGENT };

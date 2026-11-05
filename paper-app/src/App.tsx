@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, setSignedOutHandler } from './api';
-import { MARKET_REASONS, instrumentKey } from './format';
+import { INDEX_INFO, MARKET_REASONS, instrumentKey } from './format';
 import { readPref, writePref, applyTheme, loadTheme, saveTheme } from './theme';
 import type { Theme } from './theme';
 import { Login } from './components/Login';
@@ -75,7 +75,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
   const [accounts, setAccounts] = useState<AccountListItem[]>([]);
   const [accountId, setAccountId] = useState<string | null>(() => readPref('paper_account'));
   const [account, setAccount] = useState<AccountDetail | null>(null);
-  const [market, setMarket] = useState<Market | null>(null);
+  const [loadedMarket, setMarket] = useState<Market | null>(null);
   const [marketLoaded, setMarketLoaded] = useState(false);
   const [expiry, setExpiry] = useState<string | null>(null); // the user's choice; the server's current expiry is market.expiry
   const [view, setView] = useState<View>(savedView);
@@ -87,6 +87,11 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
   const [payoff, setPayoff] = useState(false);
   const [reload, setReload] = useState(0);
   const bump = useCallback(() => setReload(n => n + 1), []);
+  // each account trades one index; the order ticket's chain follows it
+  const symbolOf = (id: string | null) => { const a = accounts.find(x => x.id === id); return (a && a.symbol) || 'NIFTY'; };
+  const symbol = symbolOf(accountId);
+  // a market loaded for the other index (just after switching accounts) is never shown or traded on
+  const market = loadedMarket && (loadedMarket.symbol || 'NIFTY') === symbol ? loadedMarket : null;
 
   const loadAccounts = useCallback(async (selectId?: string) => {
     const r = await api<{ accounts: AccountListItem[] }>('/accounts');
@@ -108,7 +113,8 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const run = async () => {
-      const q = expiry ? `?expiry=${encodeURIComponent(expiry)}` : '';
+      const params = [expiry ? `expiry=${encodeURIComponent(expiry)}` : '', symbol !== 'NIFTY' ? `symbol=${symbol}` : ''].filter(Boolean);
+      const q = params.length ? `?${params.join('&')}` : '';
       const [m, a] = await Promise.all([api<Market>(`/market${q}`), api<AccountDetail>(`/accounts/${encodeURIComponent(accountId)}`)]);
       if (cancelled) return;
       if (m.status === 401 || a.status === 401) return; // the signed-out handler is already showing the sign-in form
@@ -119,7 +125,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
     };
     void run();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [accountId, expiry, reload]);
+  }, [accountId, expiry, reload, symbol]);
 
   useEffect(() => {
     const onVisible = () => { if (!document.hidden) bump(); };
@@ -137,11 +143,12 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
     writePref('paper_account', id);
     setAccount(null);
     setSelection({ instrument: null, side: 'BUY', nonce: 0 });
+    if (symbolOf(id) !== symbol) setExpiry(null); // the other index has other expiries
     setAccountId(id);
   };
   const pick = (strike: number, type: OptionType, side: Side) => {
     if (!market || !market.expiry) return;
-    setSelection(s => ({ instrument: instrumentKey(market.expiry as string, strike, type), side, nonce: s.nonce + 1 }));
+    setSelection(s => ({ instrument: instrumentKey(market.expiry as string, strike, type, market.symbol || 'NIFTY'), side, nonce: s.nonce + 1 }));
   };
 
   const h = market && market.health;
@@ -192,7 +199,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
             <Chain market={market} held={held} onPick={pick} onExpiry={setExpiry} />
           </div>
           <div className="section">
-            <Blotter account={account} accountId={accountId} lotSize={(market && market.lotSize) || 65} tab={tab} onTab={chooseTab} onChanged={bump} />
+            <Blotter account={account} accountId={accountId} lotSize={(account && account.summary.lotSize) || (market && (market.symbol || 'NIFTY') === symbol && market.lotSize) || INDEX_INFO[symbol].lotSize} tab={tab} onTab={chooseTab} onChanged={bump} />
           </div>
           {tab === 'positions' && account && account.summary.positions.length > 0 && (
             <div className="section">

@@ -1,13 +1,14 @@
-// Backtest a strategy (strategy.js) on NIFTY candles with modelled option prices. Pure: data in, report out.
+// Backtest a strategy (strategy.js) on NIFTY or SENSEX candles (strategy.symbol) with modelled option prices. Pure: data
+// in, report out.
 //
-// There is no history of NIFTY option prices here, so premiums are MODELLED:
+// There is no history of option prices here, so premiums are MODELLED:
 //   Black-Scholes on the candle's index level, with India VIX at that candle as the volatility, a simple skew (out of the
 //   money puts a little dearer, calls a little cheaper) and a 6% rate.
 //   Time: at entry the option carries the market's usual total variance (VIX squared times calendar time to the expiry
 //   close), and that variance is used up in proportion to TRADING minutes, because prices move (and options decay) while
 //   the market is open, not overnight. Pure calendar time would barely decay a weekly option between 09:20 and 15:15.
-//   Weekly expiries are Tuesdays (NSE's NIFTY weekly expiry day since September 2025), moved to the previous trading
-//   day for a holiday.
+//   Weekly expiries are Tuesdays for NIFTY (NSE's weekly expiry day since September 2025) and Thursdays for SENSEX (BSE's),
+//   moved to the previous trading day for a holiday. SENSEX uses India VIX too: there is no SENSEX volatility index.
 // Fills: buys pay the model price plus a half spread, sells receive the model price less it (0.05 or 0.3% of the price,
 // whichever is more), rounded to the tick. Charges are the live engine's (paperCosts.js), per leg, on entry and exit.
 //
@@ -26,7 +27,8 @@ const { detectAll } = require('./patterns');
 const { NOTABLE_TYPES, MARKER_MIN_QUALITY } = require('./signals');
 const calendar = require('./calendar');
 const engine = require('./paperEngine');
-const { STRIKE_STEP, toMins } = require('./strategy');
+const { strikeStepFor, toMins } = require('./strategy');
+const { INDICES } = require('./instruments');
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const YEAR_MS = 365 * 24 * 3600 * 1000;
@@ -34,6 +36,9 @@ const RATE = 0.06;
 const MIN_SAMPLES = 30;
 const BASELINE_RUNS = 50;
 const BAR_MIN = { '5m': 5, '15m': 15 };
+// weekly expiry weekday per index (0 = Sunday)
+const EXPIRY_DOW = { NIFTY: 2, SENSEX: 4 };
+const symbolOf = strategy => (strategy && strategy.symbol) || 'NIFTY';
 
 const r2 = x => Math.round(x * 100) / 100;
 const istYmd = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
@@ -83,14 +88,18 @@ function modelPrice(leg, S, tMs, vix) {
 const halfSpread = p => Math.max(0.05, p * 0.003);
 const fillPrice = (side, p) => (side === 'BUY' ? engine.toTick(p + halfSpread(p), +1) : Math.max(0.05, engine.toTick(p - halfSpread(p), -1)));
 
-/** Weekly expiry closes (epoch ms) covering the data: Tuesdays, or the trading day before when Tuesday is a holiday. */
-function weeklyExpiries(firstMs, lastMs) {
+/**
+ * Weekly expiry closes (epoch ms) covering the data: Tuesdays for NIFTY, Thursdays for SENSEX, or the trading day before
+ * when that day is a holiday.
+ */
+function weeklyExpiries(firstMs, lastMs, symbol = 'NIFTY') {
+  const dow = EXPIRY_DOW[symbol] === undefined ? EXPIRY_DOW.NIFTY : EXPIRY_DOW[symbol];
   const out = [];
   const day = 24 * 3600 * 1000;
   let t = Date.parse(`${istYmd(firstMs)}T00:00:00Z`);
   const end = Date.parse(`${istYmd(lastMs)}T00:00:00Z`) + 21 * day;
   for (; t <= end; t += day) {
-    if (new Date(t).getUTCDay() !== 2) continue;
+    if (new Date(t).getUTCDay() !== dow) continue;
     let ymd = new Date(t).toISOString().slice(0, 10);
     for (let back = 0; back < 5 && !calendar.isTradingDayYmd(ymd); back++) ymd = new Date(Date.parse(`${ymd}T00:00:00Z`) - day).toISOString().slice(0, 10);
     out.push(closeMsOf(ymd));
@@ -220,13 +229,14 @@ function simulateTrade(strategy, candles, prep, e, expiries, lotSize) {
   if (!vix) return null;
   const S0 = entryC.o;
   const t0 = entryC.t;
-  const atm = Math.round(S0 / STRIKE_STEP) * STRIKE_STEP;
+  const step = strikeStepFor(symbolOf(strategy));
+  const atm = Math.round(S0 / step) * step;
   const upcoming = expiries.filter(x => x > t0);
   if (upcoming.length < 2) return null;
   const legs = strategy.legs.map(l => {
     const expiryMs = l.expiry === 'next' ? upcoming[1] : upcoming[0];
     const leg = {
-      ...l, strike: atm + l.strikeOffset * STRIKE_STEP, expiryMs, qty: l.lots * lotSize, sgn: l.side === 'BUY' ? 1 : -1,
+      ...l, strike: atm + l.strikeOffset * step, expiryMs, qty: l.lots * lotSize, sgn: l.side === 'BUY' ? 1 : -1,
       t0, T0: Math.max(0, (expiryMs - t0) / YEAR_MS), tradingMin0: calendar.tradingMinutesBetween(t0, expiryMs)
     };
     const model = modelPrice(leg, S0, t0, vix);
@@ -366,11 +376,12 @@ function stats(trades, capitalBase) {
  * opts: { capital, lotSize, baselineRuns }
  */
 function runBacktest(strategy, { candles, vix }, opts = {}) {
-  const lotSize = opts.lotSize || engine.DEFAULTS.lotSize;
+  const symbol = symbolOf(strategy);
+  const lotSize = opts.lotSize || (symbol === 'NIFTY' ? engine.DEFAULTS.lotSize : INDICES[symbol].lotSize);
   const capital = opts.capital || engine.DEFAULTS.startingCapital;
   if (!candles || candles.length < 50) throw Object.assign(new Error('Not enough candles to backtest.'), { code: 'NO_DATA' });
   const prep = prepare(candles, vix, strategy.interval);
-  const expiries = weeklyExpiries(candles[0].t, candles[candles.length - 1].t);
+  const expiries = weeklyExpiries(candles[0].t, candles[candles.length - 1].t, symbol);
   const candidates = entryCandidates(strategy, candles, prep);
   const candidateSet = new Set(candidates);
 
@@ -419,12 +430,15 @@ function runBacktest(strategy, { candles, vix }, opts = {}) {
   return {
     strategy,
     data: {
+      symbol,
+      lotSize,
       interval: strategy.interval,
       sessions: prep.sessions.length,
       from: prep.sessions.length ? prep.sessions[0].ymd : null,
       to: prep.sessions.length ? prep.sessions[prep.sessions.length - 1].ymd : null,
       candles: candles.length,
-      volume: candles.some(c => c.v) ? 'Nifty ETF volume as a proxy' : 'none (VWAP conditions never hold)'
+      volume: candles.some(c => c.v) ? 'Nifty ETF volume as a proxy' : 'none (VWAP conditions never hold)',
+      volatility: symbol === 'NIFTY' ? 'India VIX' : 'India VIX (there is no SENSEX volatility index)'
     },
     ...result,
     baseline,
@@ -438,7 +452,7 @@ function runBacktest(strategy, { candles, vix }, opts = {}) {
       'Option prices are modelled (Black-Scholes with India VIX, a simple skew, and time decay counted in trading minutes), not real quotes. Real premiums, especially near expiry and far from the money, can differ a lot.',
       'Fills pay a modelled half spread on top of the model price, plus the same charges as live paper trading.',
       'Entries happen at the open of the candle after the conditions are met. Inside a candle, a stop and a target in the same candle count as a stop.',
-      'Weekly expiries are taken as Tuesdays (moved earlier for holidays). Every trade is closed the same day.',
+      `Weekly expiries are taken as ${symbol === 'SENSEX' ? 'Thursdays' : 'Tuesdays'} (moved earlier for holidays). Every trade is closed the same day.`,
       `About ${prep.sessions.length} sessions of history: most strategies will not reach ${MIN_SAMPLES} trades, and a short history can flatter or punish any rule.`
     ]
   };

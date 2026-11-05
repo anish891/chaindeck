@@ -18,7 +18,7 @@ const safeParse = s => { try { return JSON.parse(s); } catch (e) { return null; 
 const codedError = (code, message) => Object.assign(new Error(message), { code });
 const slug = name => String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'strategy';
 
-/** deps: store (storage.js-like), loadData (interval) => { candles, vix, fetchedAt }, now () => ms */
+/** deps: store (storage.js-like), loadData (interval, symbol) => { candles, vix, fetchedAt }, now () => ms */
 function createStrategyService({ store, loadData, now = Date.now }) {
   const cache = new Map();
 
@@ -55,7 +55,7 @@ function createStrategyService({ store, loadData, now = Date.now }) {
     const checked = validateStrategy(input);
     if (!checked.ok) throw codedError(checked.error.code, checked.error.message);
     const strategy = checked.value;
-    const data = await loadData(strategy.interval);
+    const data = await loadData(strategy.interval, strategy.symbol);
     const key = `${data.fetchedAt}|${capital || ''}|${JSON.stringify(strategy)}`;
     if (cache.has(key)) return { ...cache.get(key), cached: true };
     const report = runBacktest(strategy, data, { capital });
@@ -77,7 +77,7 @@ function createStrategyService({ store, loadData, now = Date.now }) {
 function defaultStrategyService() {
   const store = require('./storage');
   const candles = require('./candles');
-  return createStrategyService({ store, loadData: interval => candles.getBacktestData(interval) });
+  return createStrategyService({ store, loadData: (interval, symbol = 'NIFTY') => candles.getBacktestData(interval, { symbol }) });
 }
 
 module.exports = { createStrategyService, defaultStrategyService };

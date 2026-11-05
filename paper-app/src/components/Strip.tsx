@@ -18,12 +18,14 @@ export function Strip({ account, market }: { account: AccountDetail | null; mark
   const day = s.equity - previousClose(account);
   const total = s.equity - s.startingCapital;
   const stale = !!market && !market.health.ok && market.health.reason !== 'MARKET_CLOSED';
+  const symbol = s.symbol || 'NIFTY';
+  const spot = market && (market.symbol || 'NIFTY') === symbol ? market.spot : s.spot;
   return (
     <div className="keystrip">
       <Item label="Today" value={inr(day, true)} cls={pnlClass(day)} />
       <Item label="Total P&L" value={`${inr(total, true)} (${((total / s.startingCapital) * 100).toFixed(2)}%)`} cls={pnlClass(total)} />
       <Item label="Free cash" value={inr(s.available)} cls={s.available < 0 ? 'pt-neg' : ''} />
-      <Item label="NIFTY" value={market && market.spot ? market.spot.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : 'n/a'} />
+      <Item label={symbol} value={spot ? spot.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : 'n/a'} />
       <Item label="Prices as of" value={market && market.asOf ? dayTime(market.asOf) : 'n/a'} cls={stale ? 'stale' : ''} />
     </div>
   );

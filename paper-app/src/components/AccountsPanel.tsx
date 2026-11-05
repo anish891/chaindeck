@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { dayTime } from '../format';
+import { INDEX_INFO, INDEX_SYMBOLS, dayTime } from '../format';
 import { useConfirm } from '../hooks';
 import { ConfirmButton } from './ConfirmButton';
-import type { AccountDetail, AccountListItem, AgentKey } from '../types';
+import type { AccountDetail, AccountListItem, AgentKey, IndexSymbol } from '../types';
 
 /** The text to paste to an AI agent: where the API is, how to authenticate, and the rules it must follow. */
-export function agentPrompt(origin: string, token: string): string {
+export function agentPrompt(origin: string, token: string, symbol: IndexSymbol = 'NIFTY'): string {
   const base = `${origin}/api/paper/v1`;
   return [
-    'You can trade NIFTY options on my ChainDeck paper trading account. The money is simulated; the prices are real market prices from Upstox.',
+    `You can trade ${symbol} options on my ChainDeck paper trading account. The money is simulated; the prices are real market prices from Upstox.`,
     `API base URL: ${base}`,
     `Send this header on every request: Authorization: Bearer ${token}`,
     `Start with GET ${base} for the rules, endpoints and order format, then GET ${base}/account and ${base}/context.`,
@@ -31,6 +31,7 @@ export function AccountsPanel({ accounts, accountId, account, onAccountsChanged,
   const [newId, setNewId] = useState('');
   const [newName, setNewName] = useState('');
   const [newCap, setNewCap] = useState('100000');
+  const [newSymbol, setNewSymbol] = useState<IndexSymbol>('NIFTY');
   const [manageError, setManageError] = useState('');
   const [keys, setKeys] = useState<AgentKey[]>([]);
   const [keyLabel, setKeyLabel] = useState('');
@@ -52,7 +53,7 @@ export function AccountsPanel({ accounts, accountId, account, onAccountsChanged,
 
   async function createAccount() {
     setManageError('');
-    const r = await api<{ account: { id: string } }>('/accounts', { method: 'POST', body: { id: newId.trim(), name: newName.trim() || undefined, startingCapital: Number(newCap) } });
+    const r = await api<{ account: { id: string } }>('/accounts', { method: 'POST', body: { id: newId.trim(), name: newName.trim() || undefined, startingCapital: Number(newCap), symbol: newSymbol } });
     if (!r.ok) { setManageError(r.error || 'Could not create the account.'); return; }
     setNewId(''); setNewName('');
     onAccountsChanged(r.account.id);
@@ -75,7 +76,7 @@ export function AccountsPanel({ accounts, accountId, account, onAccountsChanged,
     const r = await api<{ token: string }>(`/accounts/${encodeURIComponent(accountId)}/keys`, { method: 'POST', body: { label: keyLabel.trim(), scope: keyScope } });
     if (!r.ok) { setKeyError(r.error || 'Could not create the key.'); return; }
     setKeyLabel('');
-    setFresh({ token: r.token, prompt: agentPrompt(window.location.origin, r.token) });
+    setFresh({ token: r.token, prompt: agentPrompt(window.location.origin, r.token, (current && current.symbol) || 'NIFTY') });
     await loadKeys();
   }
 
@@ -113,12 +114,12 @@ export function AccountsPanel({ accounts, accountId, account, onAccountsChanged,
       <div className="panel">
         <div className="panel-head">
           <div className="panel-title">Accounts</div>
-          <span className="panel-note">Separate accounts keep strategies and AI agents apart. Each has its own cash and history.</span>
+          <span className="panel-note">Separate accounts keep strategies and AI agents apart. Each has its own cash and history, and trades one index: NIFTY or SENSEX.</span>
         </div>
         <div className="pt-account-list">
           {accounts.map(a => (
             <div className="pt-account-row" key={a.id}>
-              <span><b>{a.name}</b> <span className="pt-muted">{a.id}{a.active ? ', has open positions or orders' : ''}</span></span>
+              <span><b>{a.name}</b> <span className="pt-muted">{a.id}, {a.symbol || 'NIFTY'}{a.active ? ', has open positions or orders' : ''}</span></span>
               <span>
                 <ConfirmButton armed={confirm.isArmed(`reset|${a.id}`)} label="Reset" confirmLabel="Confirm reset" onClick={() => act('reset', a.id)} />
                 {accounts.length > 1 && <ConfirmButton armed={confirm.isArmed(`delete|${a.id}`)} label="Delete" confirmLabel="Confirm delete" onClick={() => act('delete', a.id)} />}
@@ -130,6 +131,9 @@ export function AccountsPanel({ accounts, accountId, account, onAccountsChanged,
           <input placeholder="id, e.g. scalping" maxLength={24} aria-label="New account id" value={newId} onChange={e => setNewId(e.target.value)} />
           <input placeholder="Name" maxLength={40} aria-label="New account name" value={newName} onChange={e => setNewName(e.target.value)} />
           <input type="number" min={10000} step={10000} aria-label="Starting capital" value={newCap} onChange={e => setNewCap(e.target.value)} />
+          <select aria-label="Index the new account trades" value={newSymbol} onChange={e => setNewSymbol(e.target.value as IndexSymbol)}>
+            {INDEX_SYMBOLS.map(s => <option key={s} value={s}>{INDEX_INFO[s].name} options</option>)}
+          </select>
           <button type="button" onClick={createAccount}>Create account</button>
         </div>
         <div className="pt-error" role="alert">{manageError}</div>

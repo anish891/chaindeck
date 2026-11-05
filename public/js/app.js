@@ -517,12 +517,15 @@ function updateKeyStrip(d) {
   set('ksSpot', fmt(d.spot));
   set('ksAtm', fmt(d.atm));
   set('ksPcr', d.pcr.toFixed(2));
-  set('ksVix', d.vix ? `${d.vix.last.toFixed(2)} ${d.vix.percentChange >= 0 ? '▲' : '▼'}${Math.abs(d.vix.percentChange).toFixed(1)}%` : 'n/a');
-  set('ksDay', d.day ? `${d.day.percentChange >= 0 ? '+' : ''}${d.day.percentChange.toFixed(2)}%` : 'n/a');
+  // A provider can omit a previous close for a refresh: show n/a for that piece rather than failing the whole render.
+  const vixPct = d.vix && Number.isFinite(d.vix.percentChange) ? d.vix.percentChange : null;
+  const dayPct = d.day && Number.isFinite(d.day.percentChange) ? d.day.percentChange : null;
+  set('ksVix', d.vix && Number.isFinite(d.vix.last) ? `${d.vix.last.toFixed(2)}${vixPct === null ? '' : ` ${vixPct >= 0 ? '▲' : '▼'}${Math.abs(vixPct).toFixed(1)}%`}` : 'n/a');
+  set('ksDay', dayPct === null ? 'n/a' : `${dayPct >= 0 ? '+' : ''}${dayPct.toFixed(2)}%`);
   set('ksPain', fmt(d.maxPain));
   set('ksFut', d.impliedFuture ? `${fmt(d.impliedFuture)} (${d.basis >= 0 ? '+' : ''}${d.basis})` : 'n/a');
   const dayEl = document.getElementById('ksDay');
-  if (dayEl && d.day) dayEl.style.color = d.day.percentChange >= 0 ? 'var(--bull)' : 'var(--bear)';
+  if (dayEl) dayEl.style.color = dayPct === null ? '' : dayPct >= 0 ? 'var(--bull)' : 'var(--bear)';
   set('ksRegime', d.compositeRegime ? d.compositeRegime.regimeLabel : 'n/a');
   document.body.classList.remove('is-loading');
   updateAge();

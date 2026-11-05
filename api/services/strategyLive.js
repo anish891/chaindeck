@@ -1,4 +1,5 @@
-// Live (forward-tested) strategies: a saved strategy deployed to a paper account trades by itself on real NSE prices.
+// Live (forward-tested) strategies: a saved strategy deployed to a paper account trades by itself on real option prices.
+// The strategy's index (strategy.symbol, NIFTY when absent) must be the account's index.
 //
 // Every cron tick (once a minute while the market is open) each active deployment:
 //   - with a position open: marks it at real prices and exits with market orders on the stop, target, index move or
@@ -16,7 +17,7 @@ const crypto = require('crypto');
 const B = require('./strategyBacktest');
 const engine = require('./paperEngine');
 const calendar = require('./calendar');
-const { STRIKE_STEP, toMins, LAST_EXIT_MIN } = require('./strategy');
+const { strikeStepFor, toMins, LAST_EXIT_MIN } = require('./strategy');
 
 const MAX_DEPLOYMENTS = 10;
 const MAX_LIVE_TRADES = 500;
@@ -27,6 +28,7 @@ const istYmd = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
 const r2 = x => Math.round(x * 100) / 100;
 const safeParse = s => { try { return JSON.parse(s); } catch (e) { return null; } };
 const codedError = (code, message) => Object.assign(new Error(message), { code });
+const symbolOf = strategy => (strategy && strategy.symbol) || 'NIFTY';
 
 // ── pure decisions ───────────────────────────────────────────────────────
 
@@ -57,13 +59,15 @@ function entryDue(strategy, candles, vix, nowMs) {
   return { due: true, candleT, why: 'conditions met', vix: prep.ctx[last].vix };
 }
 
-/** The strategy's legs as orders at today's ATM (spot rounded to the 50-point grid) and the tradable expiries. */
+/** The strategy's legs as orders at today's ATM (spot rounded to the index's strike grid) and the tradable expiries. */
 function legOrders(strategy, spot, tradable) {
-  const atm = Math.round(spot / STRIKE_STEP) * STRIKE_STEP;
+  const symbol = symbolOf(strategy);
+  const step = strikeStepFor(symbol);
+  const atm = Math.round(spot / step) * step;
   return strategy.legs.map(l => {
     const expiry = l.expiry === 'next' ? tradable[1] : tradable[0];
-    const strike = atm + l.strikeOffset * STRIKE_STEP;
-    return { instrument: expiry ? engine.instrumentKey({ expiry, strike, optionType: l.optionType }) : null, side: l.side, lots: l.lots, optionType: l.optionType, strike, expiry };
+    const strike = atm + l.strikeOffset * step;
+    return { instrument: expiry ? engine.instrumentKey({ symbol, expiry, strike, optionType: l.optionType }) : null, side: l.side, lots: l.lots, optionType: l.optionType, strike, expiry };
   });
 }
 
@@ -122,7 +126,7 @@ function liveReport(deployment, capital) {
 // ── service ──────────────────────────────────────────────────────────────
 
 /**
- * deps: store, accounts (paperAccounts service), loadLive (interval) => { candles, vix, stale }, now
+ * deps: store, accounts (paperAccounts service), loadLive (interval, symbol) => { candles, vix, stale }, now
  */
 function createLiveService({ store, accounts, loadLive, now = Date.now }) {
   const all = async () => Object.values(await store.hgetall('pt:deploy')).map(safeParse).filter(Boolean).sort((a, b) => a.createdAt - b.createdAt);
@@ -140,7 +144,9 @@ function createLiveService({ store, accounts, loadLive, now = Date.now }) {
   }
 
   async function deploy({ strategy, strategyId = null, accountId }) {
-    await accounts.getSummary(accountId); // the account must exist
+    const { summary } = await accounts.getSummary(accountId); // the account must exist
+    const symbol = symbolOf(strategy);
+    if ((summary.symbol || 'NIFTY') !== symbol) throw codedError('WRONG_INDEX', `This strategy trades ${symbol} but account ${accountId} trades ${summary.symbol || 'NIFTY'}. Deploy it to a ${symbol} account.`);
     const live = (await all()).filter(d => d.status !== 'stopped');
     if (live.length >= MAX_DEPLOYMENTS) throw codedError('TOO_MANY_DEPLOYMENTS', `At most ${MAX_DEPLOYMENTS} running deployments. Stop one first.`);
     if (live.some(d => d.accountId === accountId)) throw codedError('ACCOUNT_IN_USE', 'Another strategy is already running on that account. Use a separate account per strategy so results stay apart.');
@@ -240,7 +246,7 @@ function createLiveService({ store, accounts, loadLive, now = Date.now }) {
     }
     d.open = { day: istYmd(t), entryT: t, entrySpot: spot, legs: filled, ...thresholds(d.strategy, filled) };
     d.tradesToday += 1;
-    log(d, `Entered ${filled.map(f => `${f.side} ${f.strike} ${f.optionType}`).join(', ')} at NIFTY ${spot}.`);
+    log(d, `Entered ${filled.map(f => `${f.side} ${f.strike} ${f.optionType}`).join(', ')} at ${symbolOf(d.strategy)} ${spot}.`);
   }
 
   /** One pass over every running deployment. opts.only limits it to one deployment. */
@@ -258,7 +264,7 @@ function createLiveService({ store, accounts, loadLive, now = Date.now }) {
         const { summary } = await accounts.getSummary(d.accountId);
         const spot = summary.spot;
         let live = null;
-        try { live = await loadLive(d.strategy.interval); } catch (e) { live = null; }
+        try { live = await loadLive(d.strategy.interval, symbolOf(d.strategy)); } catch (e) { live = null; }
         const vixNow = live && live.vix.length ? live.vix[live.vix.length - 1].c : null;
 
         if (d.open) {
@@ -276,7 +282,7 @@ function createLiveService({ store, accounts, loadLive, now = Date.now }) {
           if (sig.candleT && sig.candleT !== d.lastCandleT) {
             d.lastCandleT = sig.candleT;
             if (sig.due) {
-              const { allowed } = await accounts.loadBook([]);
+              const { allowed } = await accounts.loadBook([], symbolOf(d.strategy));
               await openPosition(d, spot, sig.vix || vixNow, allowed);
               if (d.open) entered += 1;
             }

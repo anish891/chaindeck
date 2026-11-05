@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { inr, instLabel, px } from '../format';
+import { INDEX_INFO, inr, instLabel, instSymbol, px } from '../format';
 import { buildOrder, emptyForm, quoteFor } from '../ticket';
 import type { Selection, TicketForm } from '../ticket';
 import type { Market, OrderType, PlaceResult, PreviewResult, Side } from '../types';
@@ -30,7 +30,8 @@ export function OrderSheet({ accountId, market, selection, onSide, onClose, onPl
   const open = !!selection.instrument;
   const quote = quoteFor(market, selection.instrument);
   const lots = parseInt(form.lots, 10) || 0;
-  const lotSize = (market && market.lotSize) || 65;
+  const symbol = selection.instrument ? instSymbol(selection.instrument) : (market && market.symbol) || 'NIFTY';
+  const lotSize = (market && (market.symbol || 'NIFTY') === symbol && market.lotSize) || INDEX_INFO[symbol].lotSize;
 
   // every pick starts a fresh order: 1 lot, market, the limit price set to the current price
   useEffect(() => {
@@ -91,10 +92,10 @@ export function OrderSheet({ accountId, market, selection, onSide, onClose, onPl
 
   return (
     <div className="pt-overlay" onClick={onClose}>
-      <div className="pt-sheet" role="dialog" aria-modal="true" aria-label={`${verb} NIFTY ${instLabel(selection.instrument)}`} tabIndex={-1} ref={ref} onClick={e => e.stopPropagation()}>
+      <div className="pt-sheet" role="dialog" aria-modal="true" aria-label={`${verb} ${symbol} ${instLabel(selection.instrument)}`} tabIndex={-1} ref={ref} onClick={e => e.stopPropagation()}>
         <div className="pt-sheet-head">
           <div>
-            <div className="pt-sheet-title">NIFTY {instLabel(selection.instrument)}</div>
+            <div className="pt-sheet-title">{symbol} {instLabel(selection.instrument)}</div>
             <div className="pt-muted">{quote && quote.ltp ? `Price ${px(quote.ltp)}` : 'No price right now'}{quote && (quote.bid || quote.ask) ? ` · bid ${px(quote.bid)} · ask ${px(quote.ask)}` : ''}</div>
           </div>
           <button type="button" className="pt-small" onClick={onClose} aria-label="Close">Close</button>

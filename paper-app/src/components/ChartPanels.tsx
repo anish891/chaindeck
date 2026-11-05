@@ -11,16 +11,19 @@ export function PayoffPanel({ account, market }: { account: AccountDetail | null
   const expiries = useMemo(() => [...new Set(positions.map(p => p.expiry))], [positions]);
   const [chosen, setChosen] = useState('');
   const exp = expiries.includes(chosen) ? chosen : expiries[0] || '';
-  const spot = (market && market.spot) || (account && account.summary.spot) || 0;
+  const symbol = (account && account.summary.symbol) || 'NIFTY';
+  // the ticket's market belongs to the account's index; never price one index's positions off the other's spot
+  const sameIndex = !!market && (market.symbol || 'NIFTY') === symbol;
+  const spot = (sameIndex && market!.spot) || (account && account.summary.spot) || 0;
 
   const series = useMemo(() => {
     if (!exp) return null;
     const legs: PayoffLeg[] = positions.filter(p => p.expiry === exp).map(p => {
-      const q = market && market.expiry === p.expiry ? quoteFor(market, p.instrument) : null;
+      const q = sameIndex && market!.expiry === p.expiry ? quoteFor(market, p.instrument) : null;
       return { strike: p.strike, optionType: p.optionType, qty: p.qty, avgPrice: p.avgPrice, iv: q && q.iv ? q.iv : null };
     });
     return payoffSeries(legs, { spot, expiryMs: expiryCloseMs(exp), nowMs: Date.now() });
-  }, [positions, exp, market, spot]);
+  }, [positions, exp, market, spot, sameIndex]);
 
   const note = !series ? 'Open a position to see its payoff.' : (() => {
     const bits = [
@@ -43,14 +46,14 @@ export function PayoffPanel({ account, market }: { account: AccountDetail | null
       </div>
       {series ? (
         <LineChart
-          label="Profit and loss at expiry and today, across NIFTY levels"
+          label={`Profit and loss at expiry and today, across ${symbol} levels`}
           xs={series.xs}
           series={[
             { label: 'At expiry', values: series.atExpiry, color: 'var(--accent)', splitAtZero: true },
             { label: 'Today', values: series.today, color: 'var(--warn)', dashed: true, width: 1.5 }
           ]}
           yFormat={inrWhole}
-          xFormat={x => `NIFTY ${x}`}
+          xFormat={x => `${symbol} ${x}`}
           zeroLine
         />
       ) : <div className="pt-chart" />}

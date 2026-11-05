@@ -47,11 +47,15 @@ export function Lab({ accounts, accountId, marketOpen, active }: Props) {
   usePoll(loadDeployments, 15000, marketOpen && active); // live positions move only while trading
 
   const busy = new Set(deployments.filter(d => d.status !== 'stopped').map(d => d.accountId));
+  // a strategy runs only on an account of its own index
+  const want = (current && current.strategy.symbol) || 'NIFTY';
+  const fits = (a: AccountListItem) => (a.symbol || 'NIFTY') === want;
   useEffect(() => {
-    const free = accounts.find(a => !busy.has(a.id));
-    if (free && (!deployAccount || busy.has(deployAccount) || !accounts.some(a => a.id === deployAccount))) setDeployAccount(free.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- recompute when accounts or deployments change
-  }, [accounts, deployments]);
+    const free = accounts.find(a => !busy.has(a.id) && fits(a));
+    const ok = (id: string) => accounts.some(a => a.id === id && fits(a)) && !busy.has(id);
+    if (!ok(deployAccount)) setDeployAccount(free ? free.id : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recompute when accounts, deployments or the index change
+  }, [accounts, deployments, want]);
 
   const open = (c: Current | null) => { setCurrent(c); setReport(null); setError(''); confirm.clear(); };
   const edit = (strategy: Strategy) => setCurrent(c => (c ? { ...c, strategy } : c));
@@ -130,7 +134,7 @@ export function Lab({ accounts, accountId, marketOpen, active }: Props) {
           <div className="panel-head"><div className="panel-title">Strategies</div></div>
           <div className="lab-list">
             <div className="pt-label">Saved</div>
-            {saved.length ? saved.map(r => item(r.strategy.name, !!current && current.id === r.id, () => open({ id: r.id, strategy: cloneStrategy(r.strategy) }), r.strategy.interval, r.id)) : <div className="empty-note">Nothing saved yet.</div>}
+            {saved.length ? saved.map(r => item(r.strategy.name, !!current && current.id === r.id, () => open({ id: r.id, strategy: cloneStrategy(r.strategy) }), r.strategy.symbol === 'SENSEX' ? `SENSEX ${r.strategy.interval}` : r.strategy.interval, r.id)) : <div className="empty-note">Nothing saved yet.</div>}
             <div className="pt-label lab-gap">Presets</div>
             {presets.map((p, i) => item(p.name, false, () => open({ id: null, strategy: cloneStrategy(p) }), p.interval, `preset-${i}`))}
             <button type="button" className="lab-item lab-new" onClick={() => open({ id: null, strategy: blankStrategy() })}>New blank strategy</button>
@@ -155,11 +159,11 @@ export function Lab({ accounts, accountId, marketOpen, active }: Props) {
               <div className="pt-label">Run it live on a paper account: real market prices, checked every minute by the paper cron job</div>
               <div className="pt-form-row">
                 <select aria-label="Account to run the strategy on" value={deployAccount} onChange={e => setDeployAccount(e.target.value)}>
-                  {accounts.map(a => <option key={a.id} value={a.id} disabled={busy.has(a.id)}>{a.name}{busy.has(a.id) ? ' (strategy running)' : ''}</option>)}
+                  {accounts.map(a => <option key={a.id} value={a.id} disabled={busy.has(a.id) || !fits(a)}>{a.name}{!fits(a) ? ` (${a.symbol || 'NIFTY'} account)` : busy.has(a.id) ? ' (strategy running)' : ''}</option>)}
                 </select>
                 <button type="button" onClick={deploy} disabled={!deployAccount || busy.has(deployAccount)}>Deploy</button>
               </div>
-              <div className="pt-muted">One strategy per account keeps results apart: create a fresh account under Accounts first.</div>
+              <div className="pt-muted">One strategy per account keeps results apart: create a fresh {want} account under Accounts first.</div>
             </div>
           )}
         </div>

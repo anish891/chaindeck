@@ -24,6 +24,12 @@ const STATUS = {
   NOT_FOUND: 404, BUSY: 409, IN_PROGRESS: 409, RATE_LIMITED: 429, BAD_IDEMPOTENCY_KEY: 400, BAD_STRATEGY: 400
 };
 
+// What the docs say about each index an account can trade.
+const INDEX_DOCS = {
+  NIFTY: { example: 'NIFTY|03-Nov-2026|25000|CE', step: 50, exchange: 'NSE' },
+  SENSEX: { example: 'SENSEX|05-Nov-2026|82000|CE', step: 100, exchange: 'BSE' }
+};
+
 /** Small fixed-window limiter keyed by the agent key (per instance; the order quota itself is shared via storage). */
 function perKeyLimiter(max, windowMs = 60000) {
   const hits = new Map();
@@ -41,14 +47,15 @@ function perKeyLimiter(max, windowMs = 60000) {
   };
 }
 
-/** Compact market context from the dashboard's analytics: what the page shows, as numbers. Not a forecast. */
-async function marketContext() {
-  const { raw, allExpiries, targetExpiry, stale } = await fetchRawOptionChain('NIFTY', null);
-  const d = await processOptionChainData(raw, allExpiries, targetExpiry);
+/** Compact market context from the dashboard's analytics for one index: what the page shows, as numbers. Not a forecast. */
+async function marketContext(symbol = 'NIFTY') {
+  const { raw, allExpiries, targetExpiry, stale } = await fetchRawOptionChain(symbol, null);
+  const d = await processOptionChainData(raw, allExpiries, targetExpiry, { symbol });
   let checksOk = false;
   try { checksOk = !integrity.hasFailure(integrity.verifyProcessed(raw, d, targetExpiry)); } catch (e) { checksOk = false; }
   const rg = d.compositeRegime || {};
   return {
+    symbol,
     asOf: d.dataAsOf,
     dataOk: !stale && checksOk,
     spot: d.spot,
@@ -80,19 +87,20 @@ async function marketContext() {
   };
 }
 
-function docs(agent) {
+function docs(agent, symbol = 'NIFTY') {
+  const ix = INDEX_DOCS[symbol] || INDEX_DOCS.NIFTY;
   return {
     ok: true,
     name: 'ChainDeck paper trading API',
     version: 'v1',
-    you: { account: agent.accountId, key: agent.keyId, label: agent.label, scope: agent.scope },
-    money: 'Simulated. Prices are real NSE option prices, delayed about a minute. Nothing here reaches a broker.',
-    instruments: 'NIFTY index options in the nearest four expiries. Instrument id: NIFTY|<expiry DD-Mon-YYYY>|<strike>|<CE or PE>, e.g. NIFTY|03-Nov-2026|25000|CE. Lot size is in /market.',
-    hours: 'Orders are accepted 09:15 to 15:30 IST on NSE trading days, and only while the price feed is fresh.',
+    you: { account: agent.accountId, key: agent.keyId, label: agent.label, scope: agent.scope, index: symbol },
+    money: `Simulated. Prices are real ${ix.exchange} option prices, delayed about a minute. Nothing here reaches a broker.`,
+    instruments: `This account trades ${symbol} index options in the nearest four expiries (strikes ${ix.step} points apart). Instrument id: ${symbol}|<expiry DD-Mon-YYYY>|<strike>|<CE or PE>, e.g. ${ix.example}. Lot size is in /market. Orders for another index are refused (WRONG_INDEX).`,
+    hours: 'Orders are accepted 09:15 to 15:30 IST on trading days, and only while the price feed is fresh.',
     fills: [
       'MARKET buys fill at the ask and sells at the bid (empty book: last price plus or minus 1%).',
       'A LIMIT order that is marketable fills at once at the ask (buy) or bid (sell); otherwise it waits.',
-      'Waiting orders fill only on a newer NSE snapshot (about once a minute), never on the quote you just saw.',
+      'Waiting orders fill only on a newer option chain snapshot (about once a minute), never on the quote you just saw.',
       'SL and SL-M trigger when the last traded price reaches triggerPrice.',
       'All orders are day orders, cancelled at 15:30. Positions carry overnight and expired options cash-settle at intrinsic value.',
       'Charges are a discount broker\'s (brokerage, STT, exchange, SEBI, stamp duty, GST). Margin for short options is an estimate.'
@@ -106,8 +114,8 @@ function docs(agent) {
     endpoints: {
       'GET /api/paper/v1': 'this document',
       'GET /api/paper/v1/account': 'cash, equity, margin, free cash, P&L, positions, open orders',
-      'GET /api/paper/v1/market?expiry=DD-Mon-YYYY': 'tradable expiries, spot, lot size, health, and strikes near the money with ltp / bid / ask / iv / oi',
-      'GET /api/paper/v1/context': 'market readings from the dashboard: PCR, max pain, OI walls, IV, VIX, GEX, CPR, regime, dataOk',
+      'GET /api/paper/v1/market?expiry=DD-Mon-YYYY': `${symbol}: tradable expiries, spot, lot size, health, and strikes near the money with ltp / bid / ask / iv / oi`,
+      'GET /api/paper/v1/context': `${symbol} market readings from the dashboard: PCR, max pain, OI walls, IV, VIX, GEX, CPR, regime, dataOk`,
       'GET /api/paper/v1/positions': 'open positions at current marks',
       'GET /api/paper/v1/orders?status=open|all&limit=50': 'orders, newest first',
       'GET /api/paper/v1/orders/:id': 'one order',
@@ -120,7 +128,7 @@ function docs(agent) {
       'POST /api/paper/v1/backtest': `{ strategy } backtest on about 60 sessions of history, at most ${AGENT.backtestsPerMinute} a minute (any scope)`
     },
     strategy: {
-      format: '{ name, interval: 5m|15m, entry: { window: { from: HH:MM, to: HH:MM }, weekdays: [1..5], maxTradesPerDay: 1..5, conditions: [...] }, legs: [ { side, optionType, strikeOffset (strikes from ATM, 50 points each), lots, expiry: weekly|next } ], exits: { stopLoss: { unit: pct|rupees, value } | null, target: same | null, exitAt: HH:MM (by 15:25), indexMovePts: number | null } }',
+      format: '{ name, symbol: NIFTY|SENSEX (default NIFTY), interval: 5m|15m, entry: { window: { from: HH:MM, to: HH:MM }, weekdays: [1..5], maxTradesPerDay: 1..5, conditions: [...] }, legs: [ { side, optionType, strikeOffset (strikes from ATM: 50 points each for NIFTY, 100 for SENSEX), lots, expiry: weekly|next } ], exits: { stopLoss: { unit: pct|rupees, value } | null, target: same | null, exitAt: HH:MM (by 15:25), indexMovePts: number | null } }',
       conditions: {
         gap: '{ type: gap, op: above|below, pct } open against previous close',
         dayMove: '{ type: dayMove, op: above|below, pct } close against today\'s open',
@@ -133,7 +141,7 @@ function docs(agent) {
       honesty: 'Option prices in backtests are MODELLED from India VIX (no historical option quotes exist here). A verdict of edge needs 30+ trades, a positive expectancy interval and beating 95% of random-entry runs; most strategies will say insufficient or none.'
     },
     order: {
-      instrument: 'NIFTY|03-Nov-2026|25000|CE',
+      instrument: ix.example,
       side: 'BUY | SELL',
       lots: 'whole number, 1 to 20',
       orderType: 'MARKET (default) | LIMIT | SL | SL-M',
@@ -143,7 +151,7 @@ function docs(agent) {
       reason: 'required: why you are placing this order',
       tag: 'optional label, up to 40 characters (e.g. a strategy name)'
     },
-    errors: 'JSON { ok: false, code, error }. 401 bad key, 403 read-only key, 422 order refused (code says why: MARKET_CLOSED, DATA_STALE, DATA_OLD, INSUFFICIENT_FUNDS, NO_QUOTE, EXPIRY_NOT_ALLOWED, TRIGGER_CROSSED, BAD_*, AGENTS_PAUSED), 429 slow down.'
+    errors: 'JSON { ok: false, code, error }. 401 bad key, 403 read-only key, 422 order refused (code says why: MARKET_CLOSED, DATA_STALE, DATA_OLD, INSUFFICIENT_FUNDS, NO_QUOTE, EXPIRY_NOT_ALLOWED, TRIGGER_CROSSED, WRONG_INDEX, BAD_*, AGENTS_PAUSED), 429 slow down.'
   };
 }
 
@@ -174,7 +182,13 @@ module.exports = function agentRouter(svc, strategies) {
   const tradeScope = (req, res, next) => (req.agent.scope === 'trade' ? next() : res.status(403).json({ ok: false, code: 'READ_ONLY_KEY', error: 'This key can read but not trade.' }));
   const id = req => req.agent.accountId;
 
-  router.get('/', (req, res) => res.json(docs(req.agent)));
+  router.get('/', async (req, res) => {
+    try {
+      res.json(docs(req.agent, await svc().accountSymbol(id(req))));
+    } catch (err) {
+      return fail(res, err, 'Agent: error reading docs');
+    }
+  });
 
   router.get('/account', async (req, res) => {
     try {
@@ -189,7 +203,7 @@ module.exports = function agentRouter(svc, strategies) {
     const { expiry } = req.query;
     if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 03-Nov-2026.' });
     try {
-      res.json({ ok: true, ...(await svc().market(expiry || null)) });
+      res.json({ ok: true, ...(await svc().market(expiry || null, { symbol: await svc().accountSymbol(id(req)) })) });
     } catch (err) {
       return fail(res, err, 'Agent: error loading market');
     }
@@ -197,7 +211,7 @@ module.exports = function agentRouter(svc, strategies) {
 
   router.get('/context', async (req, res) => {
     try {
-      res.json({ ok: true, context: await marketContext() });
+      res.json({ ok: true, context: await marketContext(await svc().accountSymbol(id(req))) });
     } catch (err) {
       return fail(res, err, 'Agent: error building context');
     }
