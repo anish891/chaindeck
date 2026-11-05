@@ -64,7 +64,7 @@ test/
   helpers/paperUi.js
 scripts/check-upstox-live.js
 public/  paper-app/       (unchanged)
-.github/workflows/ci.yml  .github/workflows/security.yml  .github/dependabot.yml
+.github/workflows/ci.yml  .github/workflows/security.yml
 ```
 
 ## Move and rename map
@@ -84,7 +84,7 @@ No file was renamed; every file kept its name and only changed folder.
 | `api/services/{storage,history}.js` | `api/services/storage/` |
 | `api/services/retry.js` | `api/services/util/` |
 
-Added: `test/run.js`, `.github/workflows/security.yml`, `.github/dependabot.yml`, this report.
+Added: `test/run.js`, `.github/workflows/security.yml`, this report. (A `dependabot.yml` was added and later removed at the owner's request.)
 Edited for paths only: `api/index.js`, the three routers, every moved service, the tests, `package.json` (`test`
 script), `paper-app/src/test-entry.ts` and two `public/js` files (comments only), and the README (new layout section).
 
@@ -96,7 +96,6 @@ script), `paper-app/src/test-entry.ts` and two `public/js` files (comments only)
 | `persist-credentials: false` on checkout | Later steps never push, so the token shouldn't sit in `.git/config` |
 | `timeout-minutes` and `concurrency` with cancel-in-progress | Stops runaway jobs; an old run doesn't race a newer push |
 | New `security.yml`: gitleaks (a PR's own commits, the commits in a push, and the whole history weekly or when run by hand) and CodeQL (`security-extended`) | Secret scanning and static analysis in CI. The workflow starts with `permissions: {}` and each job asks only for what it needs |
-| New `dependabot.yml` (npm grouped minor/patch weekly, majors separately; GitHub Actions weekly) | Keeps pinned SHAs and dependencies current through reviewable PRs. Nothing updates automatically |
 | `vercel.json` | **Unchanged.** It builds `api/index.js`, which didn't move, and Vercel traces the moved modules from there |
 | CI steps (`npm ci`, `npm test`, `build:paper`, bundle check, `npm audit`) | Unchanged |
 
@@ -105,8 +104,8 @@ script), `paper-app/src/test-entry.ts` and two `public/js` files (comments only)
 | Severity | Finding | Location | Fix / action |
 |---|---|---|---|
 | None | Secret scan of all 175 commits (every added line; JWT, AWS, GitHub, Slack, private key, Vercel OIDC, Upstash and assigned-secret patterns). The only hits are made-up test values such as `owner-secret-for-tests`. No `.env`, key or token file was ever tracked; `.env.local` and `.vercel/` are git-ignored | `test/verify-{live,strategy,paper-agent,paper-api,security}.js` (test values) | **Nothing to rotate** |
-| Medium | `main` has no branch protection | GitHub settings | **Manual:** protect `main`, require the `CI` and `Security` checks, and block force-pushes |
-| Medium | Dependabot security updates are switched off | GitHub settings | `dependabot.yml` added; **manual:** turn on "Dependabot security updates" in Settings → Code security |
+| Medium | `main` has no branch protection | GitHub settings | **Owner decision: leave unprotected.** Merges are not gated on the `CI` and `Security` checks, so check them before merging |
+| Medium | Dependabot is not used (owner decision) | n/a | Dependencies and pinned action SHAs are updated by hand; `npm audit` in CI and the weekly CodeQL/gitleaks runs still flag known issues |
 | Low | Actions pinned to movable tags | `ci.yml` | Fixed: pinned to SHAs |
 | Low | Checkout kept the token; no job timeout or concurrency limit | `ci.yml` | Fixed |
 | Low | No secret scanning or static analysis in CI (GitHub's own secret scanning and push protection are already on) | `.github/` | Fixed: `security.yml` |
@@ -142,12 +141,12 @@ npm ci && npm test && npm run build:paper && git diff --exit-code -- public/pape
 
 ## Recommended follow-ups (not done: they would change behaviour or add dependencies)
 
-1. Turn on branch protection for `main` and Dependabot security updates (settings, above).
+1. Update dependencies and pinned action SHAs by hand from time to time (no Dependabot, by choice); `npm outdated` lists what is behind.
 2. Add ESLint (flat config) as a dev dependency, starting with `no-unused-vars` and `no-undef`; it needs your sign-off
    as a new tool.
 3. Replace `node-fetch` v2 with Node's built-in `fetch` (Node 22+). Abort and header behaviour differ slightly, so it
    needs its own PR and tests.
-4. Express 5 and dotenv 18 are new major versions. Leave them to Dependabot's separate PRs, reviewed one at a time.
+4. Express 5, dotenv 18 and node-fetch 3 are new major versions; upgrade each in its own PR, with tests, if you want them.
 5. Move the remaining `innerHTML` uses that build markup from data to `textContent` / DOM builders, as most panels
    already do.
 6. Make `vercel.json` use the newer `functions` and `rewrites` keys instead of the legacy `builds` key; this changes
