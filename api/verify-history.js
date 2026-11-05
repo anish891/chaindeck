@@ -33,6 +33,21 @@ const mk = (minOffset, callOI) => {
   assert.deepStrictEqual(Object.keys(out.baselines.m5.strikes), ['22250']);
   assert.strictEqual(out.baselines.m5.strikes[22250][0], (3e6 + 35 * 1e4) / 100);
 
+  // SENSEX lives in its own namespace: same expiry and timestamp, no clash, no dedupe across indices
+  assert.strictEqual(history.ns('NIFTY'), 'oi');
+  assert.strictEqual(history.ns('SENSEX'), 'oi:sensex');
+  const sx = { ...mk(10, 9e6), symbol: 'SENSEX', spot: 80000, strikes: [{ strike: 80000, CE: { openInterest: 777, changeinOpenInterest: 1, lastPrice: 300, impliedVolatility: 13 }, PE: { openInterest: 888, changeinOpenInterest: 1, lastPrice: 310, impliedVolatility: 14 } }] };
+  assert.strictEqual((await history.recordSnapshot(sx, null)).recorded, true, 'a NIFTY snapshot at the same time does not block SENSEX');
+  const sxDay = await history.getIntraday('13-Oct-2026', null, 'SENSEX');
+  assert.strictEqual(sxDay.points.length, 1);
+  assert.strictEqual(sxDay.points[0].spot, 80000);
+  assert.strictEqual((await history.getIntraday('13-Oct-2026')).points.length, 41, 'NIFTY series untouched');
+  const sxStrike = await history.getStrikeHistory('13-Oct-2026', 80000, null, 60, 'SENSEX');
+  assert.strictEqual(sxStrike.samples[0].ceOI, 777);
+  await history.saveSession({ date: '2026-10-08', pcr: 1.1 }, 'SENSEX');
+  assert.deepStrictEqual((await history.getSessions(10, 'SENSEX')).map(r => r.pcr), [1.1]);
+  assert.ok(!(await history.getSessions(10)).some(r => r.pcr === 1.1), 'sessions are per index');
+
   // too little history → baseline is null, not a wrong value
   await history.recordSnapshot({ ...mk(0, 1e6), expiry: '20-Oct-2026' }, null);
   const young = await history.getIntraday('20-Oct-2026');

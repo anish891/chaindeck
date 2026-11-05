@@ -1,4 +1,4 @@
-# ChainDeck: NIFTY Options Analytics
+# ChainDeck: NIFTY and SENSEX Options Analytics
 
 A live NIFTY 50 options dashboard. ChainDeck reads the NIFTY option chain from the Upstox API during market hours and turns it into
 open interest structure, gamma exposure, volatility, positioning and intraday history in one page, with alerts and
@@ -12,6 +12,7 @@ ChainDeck is for information and education only. It does not give investment adv
 
 - **Key numbers strip** (stays on screen while you scroll): spot, ATM strike, day change, PCR, India VIX, max pain,
   implied future, market regime and the age of the data.
+- **Index picker:** NIFTY 50 or SENSEX (also `?index=sensex` in the address; the choice is remembered in this browser).
 - **Expiry selector** for every open weekly and monthly expiry.
 - **Auto-refresh** every 3, 5, 10 or 30 seconds while the market is open (every 60 seconds once it closes),
   plus a manual refresh button.
@@ -308,7 +309,7 @@ spreadsheet would treat as formulas are neutralised).
 ## Operations
 
 - **Requirements:** Node 22 or newer. `npm test` runs the whole suite (no network or storage needed) and CI runs it on every push (`.github/workflows/ci.yml`).
-- **Per-minute recorder:** point cron-job.org (or similar) at `/api/cron/snapshot` with `Authorization: Bearer <CRON_SECRET>` during market hours.
+- **Per-minute recorder:** point cron-job.org (or similar) at `/api/cron/snapshot` with `Authorization: Bearer <CRON_SECRET>` during market hours. To keep SENSEX history too, add a second job for `/api/cron/snapshot?symbol=SENSEX` (it roughly doubles the recorder's storage commands).
 - **Is the recorder alive?** `GET /api/snapshot-age` returns HTTP 503 when the last saved snapshot is more than 5 minutes old during market hours, and 200 otherwise. Point an uptime monitor at it to be alerted when the cron job stops. It reveals only that age.
 - **Trading holidays:** the list comes from Upstox's market holidays, counting days the F&O segment is shut (refreshed at most daily, falling back to a built-in 2026 list), so holidays are treated as closed everywhere: the market-hours checks, time to expiry and the trust light.
 - **Storage:** with Upstash configured, history uses roughly 5 to 7 commands a minute from the recorder, plus about 6 per open dashboard per minute. The free plan allows 500K commands a month, so check usage in the Upstash dashboard if you leave several tabs open all day.
@@ -324,6 +325,21 @@ spreadsheet would treat as formulas are neutralised).
   rewritten during the session.
 - **Upstox token:** create a read-only Analytics Token (Upstox Developer Apps, Analytics tab, Generate Token; valid one year, no daily login) and set it as `UPSTOX_ACCESS_TOKEN` in `.env.local` and in the Vercel environment. See `.env.example`. `GET /api/health` reports which source is in use. `DATA_SOURCE=nse` switches back to the old NSE scraper and Yahoo candles; without a token that fallback is used automatically and a warning is logged.
 - **Data sources and use:** option chain, quotes, candles and holidays come from the Upstox API under your own account; FII/DII positions from NSE's public end-of-day file; index constituents (for breadth) from the index provider's public lists; overnight cues from Yahoo Finance. All are subject to the providers' terms; this project is for personal analysis, is not investment advice, and should not be offered as a paid or public service without licensed data and the appropriate registrations.
+
+---
+
+### SENSEX
+
+SENSEX (BSE, options on BSE's F&O segment) is read from Upstox exactly like NIFTY and goes through the same analytics,
+with its own strike step (100 points), lot size (20, or Upstox's live value) and history. What differs:
+
+- The price chart, support and resistance ladder, reversal signals, level scorecard and live track record are built
+  from NIFTY candles, so they are hidden on the SENSEX view. Alerts run on the NIFTY view only.
+- Breadth is counted for NIFTY 50 only; the sector heatmap shows NSE sector indices on both views.
+- India VIX is NSE's volatility index; it is shown on the SENSEX view as general market context.
+- FII / DII positions are NSE's market-wide participant data and are the same on both views.
+- Paper trading and the strategy lab are NIFTY only.
+- SENSEX needs the Upstox source: with `DATA_SOURCE=nse` (or no token) the SENSEX view says so.
 
 ---
 

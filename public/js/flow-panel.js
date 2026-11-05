@@ -97,7 +97,7 @@ export function renderGlance(host, { d, flow, levels }) {
   // 1. price
   const day = d.day;
   const chg = day && Number.isFinite(day.percentChange) ? day.percentChange : null;
-  host.append(card('NIFTY', num(d.spot), chg === null ? '' : chg >= 0 ? 'bull' : 'bear', [
+  host.append(card(d.indexName || 'NIFTY', num(d.spot), chg === null ? '' : chg >= 0 ? 'bull' : 'bear', [
     [chg === null ? 'Day change n/a' : `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% today`, chg === null ? '' : chg >= 0 ? 'bull' : 'bear'],
     [day && Number.isFinite(day.low) && Number.isFinite(day.high) ? `Range ${num(day.low)} to ${num(day.high)}` : '', 'muted']
   ].filter(l => l[0])));

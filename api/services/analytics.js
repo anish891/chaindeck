@@ -2,12 +2,15 @@ const { getIndexSnapshot, getPivotBasis } = require('./market');
 const history = require('./history');
 const { toTradingTimeIv, expiryCloseMs, ivPercentile } = require('./volatility');
 const calendar = require('./calendar');
+const instruments = require('./instruments');
 
 // ── Tunables (override via env) ──────────────────────────────────────────
 const RISK_FREE_RATE = parseFloat(process.env.RISK_FREE_RATE) || 0.065;
-// NIFTY lot size changes by NSE circular. GEX magnitude scales linearly with it
-// (sign, regime and zero-gamma level do not). Verify against the current contract spec.
-const LOT_SIZE = parseInt(process.env.NIFTY_LOT_SIZE, 10) || 65;
+// Lot size and strike step come per index from instruments.js (the lot size from Upstox's live contract list when known).
+// GEX magnitude scales linearly with the lot size (sign, regime and zero-gamma level do not).
+const lotSizeFor = symbol => {
+  try { return require('./upstoxChain').lotSizeFor(symbol); } catch (e) { return instruments.getIndex(symbol).lotSize; }
+};
 const PCR_BULL = 1.2;
 const PCR_BEAR = 0.8;
 
@@ -427,25 +430,30 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise(resolve => setTimeout(() => resolve(null), ms))]);
 }
 
-let cache = { data: null, ts: 0, expiry: null };
+const caches = new Map(); // symbol -> { data, ts, expiry }: one per index, so viewing SENSEX never evicts NIFTY
 const CACHE_TTL = 5000; // 5s TTL (NSE data refreshes every ~30-60s)
 
-async function processOptionChainData(raw, allExpiries, targetExpiry) {
+async function processOptionChainData(raw, allExpiries, targetExpiry, { symbol = 'NIFTY' } = {}) {
   const now = Date.now();
-  if (cache.data && now - cache.ts < CACHE_TTL && cache.expiry === targetExpiry) {
+  const idx = instruments.getIndex(symbol);
+  symbol = idx.symbol;
+  const STEP = idx.strikeStep;
+  const LOT_SIZE = lotSizeFor(symbol);
+  const cache = caches.get(symbol);
+  if (cache && cache.data && now - cache.ts < CACHE_TTL && cache.expiry === targetExpiry) {
     return cache.data;
   }
 
   const [indices, pivotBasis, sessions] = await Promise.all([
     getIndexSnapshot({ timeoutMs: 2500 }),
-    withTimeout(getPivotBasis(), 2500),
-    withTimeout(history.getSessions(252).catch(() => []), 2000)
+    withTimeout(getPivotBasis(symbol), 2500),
+    withTimeout(history.getSessions(252, symbol).catch(() => []), 2000)
   ]);
 
   const spot = raw.records.underlyingValue || raw.records.data?.[0]?.CE?.underlyingValue || raw.records.data?.[0]?.PE?.underlyingValue || 0;
-  const atm = Math.round(spot / 50) * 50;
-  const MIN_STRIKE = atm - 500;
-  const MAX_STRIKE = atm + 500;
+  const atm = Math.round(spot / STEP) * STEP;
+  const MIN_STRIKE = atm - 10 * STEP;   // NIFTY: ±500
+  const MAX_STRIKE = atm + 10 * STEP;
   // When NSE quoted these prices (falls back to now); option maths is anchored to it.
   const nseTs = raw.records.timestamp || null;
   const snapMs = Date.parse(parseNseTimestamp(nseTs) || '') || now;
@@ -471,8 +479,9 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   const unusualFlowAlerts = [];
 
   // New NSE snapshot? Only then do increments mean anything.
-  const isNewSnapshot = nseTs === null || flowState.lastTs[targetExpiry] !== nseTs;
-  flowState.lastTs[targetExpiry] = nseTs;
+  const flowExpiryKey = `${symbol}|${targetExpiry}`;
+  const isNewSnapshot = nseTs === null || flowState.lastTs[flowExpiryKey] !== nseTs;
+  flowState.lastTs[flowExpiryKey] = nseTs;
 
   // Increments are only meaningful between *adjacent* snapshots. A serverless instance that sat idle
   // (or a restart after a long gap) would otherwise treat 30 minutes of volume as one minute's and
@@ -484,7 +493,7 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
 
   const trackSide = (s, side, leg) => {
     const isCall = side === 'CE';
-    const key = `${targetExpiry}|${s.strike}|${side}`;
+    const key = `${symbol}|${targetExpiry}|${s.strike}|${side}`;
     const chg = leg.changeinOpenInterest || 0;
     const vol = leg.totalTradedVolume || 0;
 
@@ -562,8 +571,8 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
 
   // Stateless day change: NSE gives each leg's change vs previous close, so we can rebuild
   // yesterday's ATM straddle (at yesterday's ATM strike) and compare like with like.
-  const day = indices?.nifty || null;
-  const prevAtmStrike = day?.previousClose ? Math.round(day.previousClose / 50) * 50 : atm;
+  const day = (symbol === 'SENSEX' ? indices?.sensex : indices?.nifty) || null;
+  const prevAtmStrike = day?.previousClose ? Math.round(day.previousClose / STEP) * STEP : atm;
   const prevAtmObj = allExpiryStrikes.find(s => s.strike === prevAtmStrike) || atmStrikeObj;
   const pCE = prevAtmObj?.CE || {};
   const pPE = prevAtmObj?.PE || {};
@@ -652,7 +661,7 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   const totalGexCr = currentGex / 1e7;
   const callGexCr = callGexTotal / 1e7;
   const putGexCr = putGexTotal / 1e7;
-  const zeroGammaLevel = findZeroGamma(S => computeGexForSpot(S).totalGex, spot, Math.max(1000, atm - 1500), atm + 1500, 10);
+  const zeroGammaLevel = findZeroGamma(S => computeGexForSpot(S).totalGex, spot, Math.max(1000, atm - 30 * STEP), atm + 30 * STEP, STEP / 5);
 
   strikes.forEach(s => {
     if (s.CE) s.CE.greeks = calculateOptionGreeks(spot, s.strike, T, (s.CE.impliedVolatility || 0) / 100, true);
@@ -690,6 +699,9 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
   const r1 = n => Number(n.toFixed(1));
 
   const result = {
+    symbol,
+    indexName: idx.name,
+    strikeStep: STEP,
     spot,
     atm,
     expiry: targetExpiry,
@@ -733,7 +745,7 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
     atmIvPercentile,
     vix: indices?.vix ? { last: indices.vix.last, previousClose: indices.vix.previousClose, percentChange: indices.vix.percentChange } : null,
     sectors: indices?.sectors || [],
-    breadth: indices?.breadth || null,
+    breadth: symbol === 'NIFTY' ? indices?.breadth || null : null, // constituent breadth is only counted for NIFTY 50
     day: day ? { open: day.open, high: day.high, low: day.low, previousClose: day.previousClose, percentChange: day.percentChange } : null,
     volatilityRegime,
     compositeRegime,
@@ -776,7 +788,7 @@ async function processOptionChainData(raw, allExpiries, targetExpiry) {
     fetchedAt: new Date().toISOString()
   };
 
-  cache = { data: result, ts: now, expiry: targetExpiry };
+  caches.set(symbol, { data: result, ts: now, expiry: targetExpiry });
 
   // Persist for the intraday buffer / session history. Never let storage trouble break the response.
   try {
@@ -1013,8 +1025,10 @@ function computeIntradayMLPredictions(spot, maxPain, zeroGammaLevel, gexTotalCr,
   };
 }
 
-function getCacheData() {
-  return cache.data;
+/** The last result computed for an index (NIFTY by default), or null. */
+function getCacheData(symbol = 'NIFTY') {
+  const c = caches.get(symbol);
+  return c ? c.data : null;
 }
 
 module.exports = {

@@ -3,6 +3,7 @@ const calendar = require('./calendar');
 const nse = require('./nse');
 const upstox = require('./upstox');
 const upstoxChain = require('./upstoxChain');
+const instruments = require('./instruments');
 
 // The option chain every route reads, with the caching around it:
 //   - a fresh copy (5 s) is served from memory
@@ -51,6 +52,13 @@ const rawCache = new Map();          // `${symbol}|${expiry}` -> { value, ts }
 const inflight = new Map();          // key -> Promise
 
 async function fetchRawOptionChain(symbol = 'NIFTY', expiryDate = null) {
+  symbol = instruments.getIndex(symbol).symbol; // throws BAD_SYMBOL for anything unknown
+  if (symbol !== 'NIFTY' && source.name === 'nse') {
+    // The NSE scraper only knows NSE's own indices; SENSEX trades on BSE.
+    const err = new Error(`${symbol} needs the Upstox source`);
+    err.code = 'UNSUPPORTED_SYMBOL';
+    throw err;
+  }
   const known = source.knownExpiries(symbol);
   if (expiryDate && known && !known.includes(expiryDate)) {
     // Stale / mistyped expiry (e.g. from an old shared link): fail fast instead of burning upstream timeouts.

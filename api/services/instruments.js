@@ -6,6 +6,7 @@ const calendar = require('./calendar');
 //   underlyingKey  Upstox instrument key of the index (used for the option chain, contracts and quotes)
 //   lotSize        contract multiplier; the live value from the option-contract list wins when Upstox returns one
 //   strikeStep     gap between listed strikes (ATM rounding)
+//   exchange       where the index and its options trade (SENSEX options are on BSE's F&O segment, BFO)
 
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -16,12 +17,24 @@ const INDICES = {
     name: 'NIFTY 50',
     underlyingKey: 'NSE_INDEX|Nifty 50',
     lotSize: parseInt(process.env.NIFTY_LOT_SIZE, 10) || 65,
-    strikeStep: 50
+    strikeStep: 50,
+    exchange: 'NSE'
+  },
+  SENSEX: {
+    symbol: 'SENSEX',
+    name: 'SENSEX',
+    underlyingKey: 'BSE_INDEX|SENSEX',
+    lotSize: parseInt(process.env.SENSEX_LOT_SIZE, 10) || 20,
+    strikeStep: 100,
+    exchange: 'BSE'
   }
 };
 
+const SYMBOLS = Object.keys(INDICES);
+const isSymbol = s => typeof s === 'string' && Object.prototype.hasOwnProperty.call(INDICES, s.toUpperCase());
+
 function getIndex(symbol = 'NIFTY') {
-  const cfg = INDICES[String(symbol || '').toUpperCase()];
+  const cfg = isSymbol(symbol) ? INDICES[symbol.toUpperCase()] : null;
   if (!cfg) {
     const err = new Error(`Unknown index ${symbol}`);
     err.code = 'BAD_SYMBOL';
@@ -80,4 +93,4 @@ async function fetchContracts(symbol = 'NIFTY', { get = upstox.get, nowMs = Date
   return out;
 }
 
-module.exports = { INDICES, getIndex, expiryYmd, ymdToNseDate, nseDateToYmd, parseContracts, fetchContracts, istYmd };
+module.exports = { INDICES, SYMBOLS, isSymbol, getIndex, expiryYmd, ymdToNseDate, nseDateToYmd, parseContracts, fetchContracts, istYmd };

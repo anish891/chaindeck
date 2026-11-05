@@ -120,7 +120,7 @@ export function renderGamma(host, x) {
   const g = x && x.gamma;
   if (!g) return;
   host.append(stats([
-    ['ATM delta per 50 pts', g.deltaPer50 === null ? 'n/a' : g.deltaPer50.toFixed(2)],
+    [`ATM delta per ${g.strikeStep || 50} pts`, g.deltaPer50 === null ? 'n/a' : g.deltaPer50.toFixed(2)],
     ['ATM gamma vs open', g.gammaVsOpen === null ? 'n/a' : `${g.gammaVsOpen.toFixed(1)}x`],
     ['Near-money share', g.nearSharePct === null ? 'n/a' : `${g.nearSharePct.toFixed(0)}%`],
     ['Net GEX', cr(g.netGexCr)],

@@ -838,6 +838,11 @@ td.muted {
   display: none;
 }
 
+/* a hidden section stays hidden whatever display its layout class sets (pair-grid is a grid) */
+.section[hidden] {
+  display: none;
+}
+
 .spinner {
   width: 28px;
   height: 28px;
@@ -855,6 +860,13 @@ td.muted {
 
 .overlay-msg {
   color: var(--muted);
+  font-size: 13px;
+  max-width: min(420px, calc(100vw - 32px));
+  text-align: center;
+}
+
+.overlay-link {
+  color: var(--accent);
   font-size: 13px;
 }
 

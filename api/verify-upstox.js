@@ -59,6 +59,11 @@ const sleep = async () => {};
   const instruments = require('./services/instruments');
   assert.strictEqual(instruments.getIndex('nifty').underlyingKey, 'NSE_INDEX|Nifty 50');
   assert.throws(() => instruments.getIndex('FOO'), e => e.code === 'BAD_SYMBOL');
+  assert.deepStrictEqual(instruments.SYMBOLS, ['NIFTY', 'SENSEX']);
+  const sx = instruments.getIndex('sensex');
+  assert.deepStrictEqual([sx.underlyingKey, sx.lotSize, sx.strikeStep, sx.exchange], ['BSE_INDEX|SENSEX', 20, 100, 'BSE']);
+  assert.throws(() => instruments.getIndex('constructor'), e => e.code === 'BAD_SYMBOL', 'no prototype keys');
+  assert.throws(() => instruments.getIndex(null), e => e.code === 'BAD_SYMBOL');
   assert.strictEqual(instruments.ymdToNseDate('2026-11-10'), '10-Nov-2026');
   assert.strictEqual(instruments.ymdToNseDate('2026-13-10'), null);
   assert.strictEqual(instruments.ymdToNseDate('10-Nov-2026'), null);
@@ -148,6 +153,42 @@ const sleep = async () => {};
     assert.deepStrictEqual(fromUpstox[k], fromNative[k], `analytics ${k}`);
   }
   assert.ok(Number.isFinite(fromUpstox.pcr) && fromUpstox.totalCallOI > 0, 'analytics produced real numbers');
+  assert.strictEqual(fromUpstox.symbol, 'NIFTY');
+  assert.strictEqual(fromUpstox.strikeStep, 50);
+
+  // SENSEX: same maths on a chain around 80,000 with 100-point strikes and lot size 20
+  const SX = 80030, SXEXP = '12-Nov-2026';
+  const sxRowsA = [];
+  for (let k = 77000; k <= 83000; k += 100) {
+    const time = 200 * Math.exp(-Math.pow((k - SX) / 900, 2));
+    const ce = Math.round((Math.max(0, SX - k) + time) * 100) / 100, pe = Math.round((Math.max(0, k - SX) + time) * 100) / 100;
+    const ceOI = Math.round(20000 + 90000 * Math.exp(-Math.pow((k - 81000) / 600, 2)));
+    const peOI = Math.round(20000 + 95000 * Math.exp(-Math.pow((k - 79000) / 600, 2)));
+    const side = (ltp, oi, iv) => ({ market_data: { ltp, close_price: ltp - 5, volume: 4000 * 20, oi: oi * 20, prev_oi: (oi - 100) * 20, bid_price: ltp - 1, bid_qty: 20, ask_price: ltp + 1, ask_qty: 40 }, option_greeks: { iv } });
+    sxRowsA.push({ expiry: '2026-11-12', strike_price: k, underlying_spot_price: SX, call_options: side(ce, ceOI, 13.5), put_options: side(pe, peOI, 14.5) });
+  }
+  const sxRaw = toChainRaw(sxRowsA, { expiries: [SXEXP], asOfMs: asOf, quantityPerContract: 20 });
+  assert.deepStrictEqual(integrity.validateRaw(sxRaw, null, asOf), { ok: true, reasons: [] });
+  const sxOut = await analytics.processOptionChainData(sxRaw, [SXEXP], SXEXP, { symbol: 'SENSEX' });
+  assert.notStrictEqual(sxOut, fromUpstox, 'the 5 s cache never hands one index the other\'s result');
+  assert.strictEqual(sxOut.symbol, 'SENSEX');
+  assert.strictEqual(sxOut.indexName, 'SENSEX');
+  assert.strictEqual(sxOut.strikeStep, 100);
+  assert.strictEqual(sxOut.atm, 80000, 'ATM rounds to 100');
+  assert.strictEqual(sxOut.gex.lotSize, 20);
+  assert.ok(sxOut.strikes.every(r => Math.abs(r.strike - 80000) <= 1000) && sxOut.strikes.length === 21, '10 strikes either side');
+  assert.strictEqual(sxOut.maxCallOIStrike, 81000);
+  assert.strictEqual(sxOut.maxPutOIStrike, 79000);
+  assert.strictEqual(sxOut.breadth, null, 'NIFTY 50 breadth is not shown as SENSEX breadth');
+  assert.ok(sxOut.gex.zeroGammaLevel === null || Math.abs(sxOut.gex.zeroGammaLevel - SX) < 3000, 'zero gamma searched around SENSEX, not NIFTY');
+  assert.ok(!integrity.hasFailure(integrity.verifyProcessed(sxRaw, sxOut, SXEXP)), 'independent recomputation agrees for SENSEX');
+  await assert.rejects(analytics.processOptionChainData(sxRaw, [SXEXP], SXEXP, { symbol: 'FOO' }), e => e.code === 'BAD_SYMBOL');
+  // spot at a midpoint: ATM 80100 vs nearest 80000 is one SENSEX strike apart, which is fine
+  const mid = integrity.verifyProcessed(sxRaw, { ...sxOut, spot: 80050, atm: 80100 }, SXEXP).find(c => c.id === 'atm_strike');
+  assert.strictEqual(mid.level, 'pass', `one 100-point strike is not an ATM error: ${mid.detail}`);
+  const off = integrity.verifyProcessed(sxRaw, { ...sxOut, atm: 80400 }, SXEXP).find(c => c.id === 'atm_strike');
+  assert.strictEqual(off.level, 'fail', 'a wrong ATM is still caught');
+
   const checks = integrity.verifyProcessed(adapted, fromUpstox, EXP);
   assert.ok(!integrity.hasFailure(checks), `integrity: ${checks.filter(c => c.level === 'fail').map(c => c.id).join(',')}`);
 
@@ -210,6 +251,23 @@ const sleep = async () => {};
   await assert.rejects(chain.loadChain('NIFTY', '11-Nov-2026', { get: fakeGet, nowMs: now }), e => e.code === 'BAD_EXPIRY');
   assert.deepStrictEqual(log, ['/v2/option/contract']);
 
+  // SENSEX: BSE instrument key, its own lot size for the unit conversion, its own cached expiry list
+  const sxContracts = [{ expiry: '2026-11-12', lot_size: 20 }, { expiry: '2026-11-19', lot_size: 20 }];
+  const sxRows = upstoxRows.map(r => ({ ...r, expiry: '2026-11-12', underlying_key: 'BSE_INDEX|SENSEX' }));
+  const sxAsked = [];
+  const sxGet = async (path, q2) => {
+    sxAsked.push([path, q2.instrument_key]);
+    if (path === '/v2/option/contract') return sxContracts;
+    if (path === '/v2/option/chain') return sxRows;
+    return {};
+  };
+  const sxLoaded = await chain.loadChain('SENSEX', null, { get: sxGet, nowMs: now });
+  assert.strictEqual(sxLoaded.targetExpiry, '12-Nov-2026');
+  assert.ok(sxAsked.every(([, k]) => k === 'BSE_INDEX|SENSEX'));
+  assert.strictEqual(sxLoaded.raw.records.data[10].CE.openInterest, Math.round(upstoxRows[10].call_options.market_data.oi / 20), 'converted with lot 20');
+  assert.deepStrictEqual(chain.knownExpiries('SENSEX', now), ['12-Nov-2026', '19-Nov-2026']);
+  assert.deepStrictEqual(chain.knownExpiries('NIFTY', now), parsed.expiries, 'NIFTY list untouched');
+
   // the cached list is dropped once its nearest expiry has passed
   assert.strictEqual(chain.knownExpiries('NIFTY', Date.parse('2026-11-06T09:30:00+05:30')), null);
 
@@ -257,6 +315,14 @@ const sleep = async () => {};
   Date.now = realNow;
   assert.strictEqual(stale.stale, true);
   assert.strictEqual(oc.staleReasonCode(stale.staleReason), 'timeout');
+  // SENSEX: only through Upstox; unknown symbols are refused before any upstream call
+  oc._setSource({ name: 'nse', knownExpiries: () => null, load: async () => { throw new Error('should not be called'); } });
+  await assert.rejects(oc.fetchRawOptionChain('SENSEX', null), e => e.code === 'UNSUPPORTED_SYMBOL');
+  await assert.rejects(oc.fetchRawOptionChain('BANKNIFTY', null), e => e.code === 'BAD_SYMBOL');
+  let sxLoad = null;
+  oc._setSource({ name: 'upstox', knownExpiries: () => null, load: async (sym, exp) => { sxLoad = sym; return { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: Date.now(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: EXP }; } });
+  await oc.fetchRawOptionChain('sensex', null);
+  assert.strictEqual(sxLoad, 'SENSEX', 'symbol normalised before it reaches the loader and the cache key');
   oc._setSource(null);
 
   // ── index snapshot from Upstox quotes ───────────────────────────────
@@ -281,6 +347,7 @@ const sleep = async () => {};
       const colon = key.replace('|', ':');
       if (key === 'NSE_INDEX|Nifty 50') out[colon] = q(key, 22770, 22700);
       else if (key === 'NSE_INDEX|India VIX') out[colon] = q(key, 13.2, 13.8);
+      else if (key === 'BSE_INDEX|SENSEX') out[colon] = q(key, 80400, 80000);
       else if (key === 'NSE_INDEX|Nifty Bank') out[colon] = q(key, 50100, 50000);
       else if (key.startsWith('NSE_EQ|') && stockQ[key.slice(7)]) out[colon] = q(key, ...stockQ[key.slice(7)]);
     }
@@ -290,10 +357,11 @@ const sleep = async () => {};
   assert.strictEqual(snap.source, 'upstox');
   assert.strictEqual(snap.nifty.last, 22770);
   assert.strictEqual(snap.vix.percentChange, -4.35);
+  assert.strictEqual(snap.sensex.percentChange, 0.5, 'SENSEX day stats in the same quote call');
   assert.deepStrictEqual(snap.breadth, { advances: 2, declines: 1, unchanged: 1 });
   assert.strictEqual(snap.sectors.length, 1, 'sectors without a quote are left out, as before');
   assert.deepStrictEqual(snap.sectors[0], { name: 'Bank', index: 'NIFTY BANK', last: 50100, percentChange: 0.2, advances: 1, declines: 1 });
-  assert.deepStrictEqual(quoteCalls, [2 + mkt.SECTORS.length + 4], 'one quote call for indices and stocks together');
+  assert.deepStrictEqual(quoteCalls, [3 + mkt.SECTORS.length + 4], 'one quote call for indices and stocks together');
 
   // breadth unknown when constituents are unavailable; NIFTY missing is an error (the old copy is then served)
   const noLists = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => { throw new Error('down'); } });
@@ -308,7 +376,7 @@ const sleep = async () => {};
   let n = 0;
   const flakyStocks = async (p, query) => { n += 1; if (n > 1) throw new Error('boom'); return quoteGet(p, query); };
   const big = await mkt.loadIndicesUpstox({ get: flakyStocks, getLists: async () => many });
-  assert.strictEqual(n, 3, '468 keys -> 3 calls of at most 200');
+  assert.strictEqual(n, 3, '469 keys -> 3 calls of at most 200');
   assert.strictEqual(big.nifty.last, 22770);
 
   // ── constituent lists ───────────────────────────────────────────────
@@ -417,6 +485,60 @@ const sleep = async () => {};
   console.error = errLog;
   assert.ok(kept.holidays.includes('2026-11-10'), 'a failed refresh keeps the list in memory');
   hol._reset();
+
+  // ── routes: ?symbol= ────────────────────────────────────────────────
+  {
+    const http = require('http');
+    const app = require('./index');
+    const server = await new Promise(r => { const sv = http.createServer(app).listen(0, () => r(sv)); });
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+    const getJson = async path => { const r = await fetch(base + path); return { status: r.status, body: await r.json() }; };
+    const seen = [];
+    oc._setSource({
+      name: 'upstox',
+      knownExpiries: () => null,
+      load: async (sym) => {
+        seen.push(sym);
+        return sym === 'SENSEX'
+          ? { raw: toChainRaw(sxRowsA, { expiries: [SXEXP], asOfMs: Date.now(), quantityPerContract: 20 }), allExpiries: [SXEXP], targetExpiry: SXEXP }
+          : { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: Date.now(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: EXP };
+      }
+    });
+    const sxRes = await getJson('/option-chain?symbol=sensex');
+    assert.strictEqual(sxRes.status, 200, JSON.stringify(sxRes.body).slice(0, 200));
+    assert.strictEqual(sxRes.body.data.symbol, 'SENSEX');
+    assert.strictEqual(sxRes.body.data.strikeStep, 100);
+    assert.strictEqual(sxRes.body.data.feed.source, 'upstox');
+    const nfRes = await getJson('/option-chain');
+    assert.strictEqual(nfRes.body.data.symbol, 'NIFTY', 'NIFTY stays the default');
+    assert.deepStrictEqual(seen, ['SENSEX', 'NIFTY']);
+    for (const path of ['/option-chain?symbol=banknifty', '/intraday?expiry=12-Nov-2026&symbol=x', '/expiry-replay?symbol=%3Cb%3E', '/similar-sessions?symbol=nifty50', '/strike-history?expiry=12-Nov-2026&strike=80000&symbol=']) {
+      const r = await getJson(path);
+      assert.strictEqual(r.status, 400, `${path} -> ${r.status}`);
+      assert.ok(!/<b>/.test(JSON.stringify(r.body)), 'input never echoed');
+    }
+    assert.strictEqual((await getJson('/intraday?expiry=12-Nov-2026&symbol=SENSEX')).status, 200);
+    oc._setSource({ name: 'nse', knownExpiries: () => null, load: async () => { throw new Error('unused'); } });
+    const fallback = await getJson('/option-chain?symbol=SENSEX');
+    assert.strictEqual(fallback.status, 503);
+    assert.ok(/Upstox/.test(fallback.body.error));
+    oc._setSource(null);
+    await new Promise(r => server.close(r));
+  }
+
+  // ── browser: index choice and URLs ──────────────────────────────────
+  {
+    const src = require('fs').readFileSync(require('path').join(__dirname, '../public/js/api-client.js'), 'utf8');
+    const ac = await import('data:text/javascript;base64,' + Buffer.from(src).toString('base64'));
+    assert.strictEqual(ac.SYMBOL, 'NIFTY', 'NIFTY without a choice');
+    assert.strictEqual(ac.readSymbol('?index=sensex', null), 'SENSEX');
+    assert.strictEqual(ac.readSymbol('', 'SENSEX'), 'SENSEX', 'remembered choice');
+    assert.strictEqual(ac.readSymbol('?index=nifty', 'SENSEX'), 'NIFTY', 'the address wins over the saved choice');
+    assert.strictEqual(ac.readSymbol('?index=<script>', null), 'NIFTY', 'anything else falls back to NIFTY');
+    assert.strictEqual(ac.withSymbol('/api/option-chain', 'NIFTY'), '/api/option-chain', 'NIFTY URLs unchanged');
+    assert.strictEqual(ac.withSymbol('/api/option-chain', 'SENSEX'), '/api/option-chain?symbol=SENSEX');
+    assert.strictEqual(ac.withSymbol('/api/intraday?expiry=12-Nov-2026', 'SENSEX'), '/api/intraday?expiry=12-Nov-2026&symbol=SENSEX');
+  }
 
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });
