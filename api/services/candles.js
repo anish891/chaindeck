@@ -2,7 +2,7 @@ const fetch = require('node-fetch');
 const calendar = require('./calendar');
 const upstoxCandles = require('./upstoxCandles');
 
-// OHLC candles for the Nifty 50 index from Upstox (or Yahoo Finance when DATA_SOURCE=nse / no Upstox token), with volume
+// OHLC candles for the Nifty 50 index (and SENSEX, see seriesFor) from Upstox (or Yahoo Finance when DATA_SOURCE=nse / no Upstox token), with volume
 // borrowed from the Nifty 50 ETF (NIFTYBEES).
 // The index itself carries no volume, so the ETF's traded volume on the same candle is used as a proxy. It is a proxy:
 // it includes arbitrage and creation/redemption activity, and the UI says so.
@@ -13,7 +13,22 @@ const YAHOO = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 const SYMBOLS = { index: '^NSEI', etf: 'NIFTYBEES.NS', vix: '^INDIAVIX' };
 // The same three series on Upstox (NIFTYBEES is keyed by its ISIN).
 const UPSTOX_KEYS = { index: 'NSE_INDEX|Nifty 50', etf: 'NSE_EQ|INF204KB14I2', vix: 'NSE_INDEX|India VIX' };
+// SENSEX: the index only. There is no volume proxy (so VWAP conditions never hold), and India VIX stands in for its
+// volatility (there is no SENSEX VIX); the two indices move closely together.
+const SENSEX_SERIES = { yahoo: '^BSESN', upstox: 'BSE_INDEX|SENSEX' };
 const YAHOO_SYMBOL_TO_SERIES = Object.fromEntries(Object.entries(SYMBOLS).map(([k, v]) => [v, k]));
+const YAHOO_TO_UPSTOX = { ...Object.fromEntries(Object.entries(YAHOO_SYMBOL_TO_SERIES).map(([y, k]) => [y, UPSTOX_KEYS[k]])), [SENSEX_SERIES.yahoo]: SENSEX_SERIES.upstox };
+
+/** The Yahoo symbols of an index's series: { index, etf (null when there is none), vix }. */
+function seriesFor(symbol = 'NIFTY') {
+  const sym = String(symbol || 'NIFTY').toUpperCase();
+  if (sym === 'NIFTY') return SYMBOLS;
+  if (sym === 'SENSEX') return { index: SENSEX_SERIES.yahoo, etf: null, vix: SYMBOLS.vix };
+  throw Object.assign(new Error(`No candles for ${symbol}`), { code: 'BAD_SYMBOL' });
+}
+/** Cache keys: NIFTY keeps its original ones. */
+const ck = (symbol, key) => (String(symbol || 'NIFTY').toUpperCase() === 'NIFTY' ? key : `${String(symbol).toUpperCase()}|${key}`);
+const noEtf = () => Promise.resolve([]);
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 6000;
 
@@ -85,8 +100,8 @@ const candleSource = () => (require('./optionChain').sourceName() === 'upstox' ?
  * Yahoo path and its tests are unchanged; with Upstox the symbol is mapped to the matching Upstox instrument.
  */
 async function fetchSeries(symbol, interval, range, fetchImpl = fetch) {
-  const series = YAHOO_SYMBOL_TO_SERIES[symbol];
-  if (candleSource() === 'upstox' && series) return upstoxCandles.fetchUpstoxCandles(UPSTOX_KEYS[series], interval, range);
+  const upstoxKey = YAHOO_TO_UPSTOX[symbol];
+  if (candleSource() === 'upstox' && upstoxKey) return upstoxCandles.fetchUpstoxCandles(upstoxKey, interval, range);
   return fetchYahooCandles(symbol, interval, range, fetchImpl);
 }
 
@@ -171,7 +186,8 @@ async function cached(key, ttl, loader, staleMax = ttl * 4) {
  * `fallbackPoints` (optional) are stored { t, spot } values used when Yahoo cannot be reached: either the array itself
  * or an async function returning it, which is only called if Yahoo fails (so storage is not read on every request).
  */
-async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch } = {}) {
+async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch, symbol = 'NIFTY' } = {}) {
+  const S = seriesFor(symbol);
   const preset = PRESETS[interval];
   if (!preset) throw new Error(`Unsupported interval ${interval}`);
   const open = marketOpenNow();
@@ -180,10 +196,10 @@ async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch }
   const daily = interval === '1d';
 
   try {
-    const result = await cached(`chart|${interval}`, ttl, async () => {
+    const result = await cached(ck(symbol, `chart|${interval}`), ttl, async () => {
       const [idx, etf] = await Promise.all([
-        fetchSeries(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
-        fetchSeries(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => [])
+        fetchSeries(S.index, preset.yahooInterval, preset.range, fetchImpl),
+        S.etf ? fetchSeries(S.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => []) : noEtf()
       ]);
       if (!idx.length) throw new Error('No index candles returned');
       const merged = mergeVolume(idx, etf, daily);
@@ -206,10 +222,11 @@ async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch }
 }
 
 /** Long history for backtests (index only; volume is not needed to detect patterns). Cached for hours. */
-async function getHistoryCandles(interval, { fetchImpl = fetch } = {}) {
+async function getHistoryCandles(interval, { fetchImpl = fetch, symbol = 'NIFTY' } = {}) {
+  const S = seriesFor(symbol);
   const preset = HISTORY_PRESETS[interval];
   if (!preset) throw new Error(`Unsupported interval ${interval}`);
-  const r = await cached(`history|${interval}`, TTL_HISTORY_MS, () => fetchSeries(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl), TTL_HISTORY_MS * 4);
+  const r = await cached(ck(symbol, `history|${interval}`), TTL_HISTORY_MS, () => fetchSeries(S.index, preset.yahooInterval, preset.range, fetchImpl), TTL_HISTORY_MS * 4);
   return r.value;
 }
 
@@ -231,14 +248,15 @@ async function getHistoryWithVolume({ fetchImpl = fetch } = {}) {
  * Everything a strategy backtest needs for one interval (5m or 15m): 60 sessions of index candles with the ETF's volume
  * merged in (for VWAP), and India VIX on the same grid (for option prices). Cached for hours.
  */
-async function getBacktestData(interval, { fetchImpl = fetch } = {}) {
+async function getBacktestData(interval, { fetchImpl = fetch, symbol = 'NIFTY' } = {}) {
+  const S = seriesFor(symbol);
   const preset = HISTORY_PRESETS[interval];
   if (!preset || interval === '1d') throw new Error(`Unsupported interval ${interval}`);
-  const r = await cached(`backtest|${interval}`, TTL_HISTORY_MS, async () => {
+  const r = await cached(ck(symbol, `backtest|${interval}`), TTL_HISTORY_MS, async () => {
     const [idx, etf, vix] = await Promise.all([
-      fetchSeries(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
-      fetchSeries(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => []),
-      fetchSeries(SYMBOLS.vix, preset.yahooInterval, preset.range, fetchImpl)
+      fetchSeries(S.index, preset.yahooInterval, preset.range, fetchImpl),
+      S.etf ? fetchSeries(S.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => []) : noEtf(),
+      fetchSeries(S.vix, preset.yahooInterval, preset.range, fetchImpl)
     ]);
     if (!idx.length) throw new Error('No index candles returned');
     if (!vix.length) throw new Error('No India VIX candles returned');
@@ -251,12 +269,13 @@ async function getBacktestData(interval, { fetchImpl = fetch } = {}) {
  * What a live (deployed) strategy needs right now: the chart's recent candles for the interval (with ETF volume) and
  * India VIX on the same grid, both refreshed every 20 seconds while the market is open.
  */
-async function getLiveData(interval, { fetchImpl = fetch } = {}) {
+async function getLiveData(interval, { fetchImpl = fetch, symbol = 'NIFTY' } = {}) {
+  seriesFor(symbol);
   const preset = PRESETS[interval];
   if (!preset || interval === '1d') throw new Error(`Unsupported interval ${interval}`);
   const ttl = marketOpenNow() ? TTL_OPEN_MS : TTL_CLOSED_MS;
   const [chart, vix] = await Promise.all([
-    getCandles(interval, { fetchImpl }),
+    getCandles(interval, { fetchImpl, symbol }),
     cached(`livevix|${interval}`, ttl, () => fetchSeries(SYMBOLS.vix, preset.yahooInterval, '5d', fetchImpl), STALE_MAX_OPEN_MS)
   ]);
   return { candles: chart.candles, vix: vix.value.map(c => ({ t: c.t, c: c.c })), stale: !!(chart.stale || vix.stale), source: chart.source };
@@ -269,6 +288,8 @@ function clearCache() {
 
 module.exports = {
   SYMBOLS,
+  SENSEX_SERIES,
+  seriesFor,
   PRESETS,
   HISTORY_PRESETS,
   istDay,
