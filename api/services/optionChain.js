@@ -1,6 +1,8 @@
 const integrity = require('./integrity');
 const calendar = require('./calendar');
 const nse = require('./nse');
+const upstox = require('./upstox');
+const upstoxChain = require('./upstoxChain');
 
 // The option chain every route reads, with the caching around it:
 //   - a fresh copy (5 s) is served from memory
@@ -15,10 +17,30 @@ const STALE_MAX_OPEN = 2 * 60 * 1000;      // while the market moves: a leftover
 const STALE_MAX_CLOSED = 6 * 3600 * 1000; // nothing changes after the close, so an old copy is still the right picture
 
 const SOURCES = {
-  nse: { load: nse.loadFromNSE, knownExpiries: () => nse.getCachedExpiries() }
+  upstox: { name: 'upstox', load: (symbol, expiry) => upstoxChain.loadChain(symbol, expiry), knownExpiries: symbol => upstoxChain.knownExpiries(symbol) },
+  nse: { name: 'nse', load: nse.loadFromNSE, knownExpiries: () => nse.getCachedExpiries() }
 };
 
-let source = SOURCES.nse;
+/**
+ * Upstox by default. DATA_SOURCE=nse switches back to the old NSE scraper (kept as a fallback while Upstox beds in).
+ * Without an Upstox token and no explicit choice, NSE is used and a warning is logged, so a local run still works.
+ */
+function pickSource(env = process.env) {
+  const wanted = String(env.DATA_SOURCE || '').toLowerCase();
+  if (SOURCES[wanted]) return SOURCES[wanted];
+  if (upstox.isConfigured()) return SOURCES.upstox;
+  console.warn('UPSTOX_ACCESS_TOKEN is not set: reading the option chain from NSE instead');
+  return SOURCES.nse;
+}
+
+let source = pickSource();
+const sourceName = () => source.name;
+/** Test hook: swap the loader ({ name, load, knownExpiries }) and clear the cache. */
+function _setSource(s) {
+  source = s || pickSource();
+  rawCache.clear();
+  inflight.clear();
+}
 
 /** How long a leftover copy may be served after a failed refresh, depending on whether the market is trading. */
 function staleLimitMs(nowMs = Date.now()) {
@@ -79,4 +101,4 @@ function staleReasonCode(message) {
   return 'fetch_failed';
 }
 
-module.exports = { fetchRawOptionChain, staleReasonCode, staleLimitMs, SOURCES };
+module.exports = { fetchRawOptionChain, staleReasonCode, staleLimitMs, SOURCES, pickSource, sourceName, _setSource };

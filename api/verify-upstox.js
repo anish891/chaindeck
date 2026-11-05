@@ -201,5 +201,51 @@ const sleep = async () => {};
   // the cached list is dropped once its nearest expiry has passed
   assert.strictEqual(chain.knownExpiries('NIFTY', Date.parse('2026-11-06T09:30:00+05:30')), null);
 
+  // ── option chain source and cache in front of Upstox ────────────────
+  const oc = require('./services/optionChain');
+  assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'nse' }).name, 'nse', 'DATA_SOURCE=nse switches back');
+  assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'UPSTOX' }).name, 'upstox');
+  const saved = process.env.UPSTOX_ACCESS_TOKEN;
+  process.env.UPSTOX_ACCESS_TOKEN = 'x';
+  assert.strictEqual(oc.pickSource({}).name, 'upstox', 'Upstox is the default when a token is set');
+  process.env.UPSTOX_ACCESS_TOKEN = '';
+  const warn = console.warn; console.warn = () => {};
+  assert.strictEqual(oc.pickSource({}).name, 'nse', 'no token: NSE, with a warning');
+  console.warn = warn;
+  if (saved === undefined) delete process.env.UPSTOX_ACCESS_TOKEN; else process.env.UPSTOX_ACCESS_TOKEN = saved;
+
+  let loads = 0, failNext = false;
+  oc._setSource({
+    name: 'upstox',
+    knownExpiries: () => ['10-Nov-2026'],
+    load: async (sym, exp) => {
+      loads += 1;
+      if (failNext) throw Object.assign(new Error('Upstox did not answer within 6000 ms'), { code: 'UPSTOX_TIMEOUT' });
+      return { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: Date.now(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: exp || EXP };
+    }
+  });
+  const [a, b] = await Promise.all([oc.fetchRawOptionChain('NIFTY', null), oc.fetchRawOptionChain('NIFTY', null)]);
+  assert.strictEqual(loads, 1, 'concurrent requests share one Upstox call');
+  assert.strictEqual(a, b);
+  assert.strictEqual(a.stale, false);
+  await oc.fetchRawOptionChain('NIFTY', null);
+  assert.strictEqual(loads, 1, 'served from the 5 s cache');
+  await assert.rejects(oc.fetchRawOptionChain('NIFTY', '17-Nov-2026'), e => e.code === 'BAD_EXPIRY');
+  assert.strictEqual(loads, 1, 'unknown expiry refused without an upstream call');
+
+  // a broken payload is not cached; a failed refresh serves the last copy flagged stale
+  oc._setSource({ name: 'upstox', knownExpiries: () => null, load: async () => ({ raw: toChainRaw([]), allExpiries: [EXP], targetExpiry: EXP }) });
+  await assert.rejects(oc.fetchRawOptionChain('NIFTY', null), /payload rejected/);
+  const realNow = Date.now;
+  oc._setSource({ name: 'upstox', knownExpiries: () => ['10-Nov-2026'], load: async () => { loads += 1; if (failNext) throw new Error('Upstox did not answer within 6000 ms'); return { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: realNow(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: EXP }; } });
+  await oc.fetchRawOptionChain('NIFTY', null);
+  failNext = true;
+  Date.now = () => realNow() + 6000;
+  const stale = await oc.fetchRawOptionChain('NIFTY', null);
+  Date.now = realNow;
+  assert.strictEqual(stale.stale, true);
+  assert.strictEqual(oc.staleReasonCode(stale.staleReason), 'timeout');
+  oc._setSource(null);
+
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

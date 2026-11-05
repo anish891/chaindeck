@@ -8,7 +8,7 @@ const { withRetry } = require('../services/retry');
 const integrity = require('../services/integrity');
 const { istNow } = require('../services/market');
 const { refreshHolidays } = require('../services/nse');
-const { fetchRawOptionChain, staleReasonCode } = require('../services/optionChain');
+const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/optionChain');
 const calendar = require('../services/calendar');
 const premarket = require('../services/premarket');
 const paperRoutes = require('./paper');
@@ -312,7 +312,7 @@ router.get('/similar-sessions', async (req, res) => {
 });
 
 router.get('/health', (req, res) => {
-  res.json({ ok: true, ts: new Date().toISOString() });
+  res.json({ ok: true, ts: new Date().toISOString(), source: sourceName() });
 });
 
 module.exports = router;
