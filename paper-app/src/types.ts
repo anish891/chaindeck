@@ -3,6 +3,8 @@
 export type Side = 'BUY' | 'SELL';
 export type OptionType = 'CE' | 'PE';
 export type OrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M';
+/** The index an account (or strategy) trades. Missing means NIFTY: accounts and strategies made before SENSEX have none. */
+export type IndexSymbol = 'NIFTY' | 'SENSEX';
 
 export interface ApiError {
   ok: false;
@@ -41,6 +43,7 @@ export interface MarketHealth {
 }
 
 export interface Market {
+  symbol?: IndexSymbol;
   asOf: number | string | null;
   spot: number;
   marketOpen: boolean;
@@ -55,6 +58,7 @@ export interface Market {
 export interface AccountListItem {
   id: string;
   name: string;
+  symbol?: IndexSymbol;
   active?: boolean;
 }
 
@@ -104,6 +108,8 @@ export interface Trade {
 export interface Summary {
   id: string;
   name: string;
+  symbol?: IndexSymbol;
+  lotSize?: number;
   startingCapital: number;
   cash: number;
   equity: number;
@@ -193,6 +199,7 @@ export interface ExitRule {
 
 export interface Strategy {
   name: string;
+  symbol?: IndexSymbol;
   interval: Interval;
   entry: {
     window: { from: string; to: string };

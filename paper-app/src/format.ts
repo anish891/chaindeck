@@ -1,5 +1,7 @@
 // Number, money and time formatting shared by the whole page. Pure functions (no DOM), so they can be unit-tested.
 
+import type { IndexSymbol } from './types';
+
 export function inr(x: number | null | undefined, signed = false): string {
   if (x === null || x === undefined || !Number.isFinite(x)) return 'n/a';
   const s = Math.abs(x).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -22,13 +24,23 @@ export interface InstrumentParts {
   optionType: 'CE' | 'PE';
 }
 
-/** 'NIFTY|03-Nov-2026|22700|CE' -> its parts. */
+/** 'NIFTY|03-Nov-2026|22700|CE' (or 'SENSEX|...') -> its parts. */
 export function instParts(key: string): InstrumentParts {
   const [, expiry = '', strike = '0', type = 'CE'] = String(key).split('|');
   return { expiry, strike: Number(strike), optionType: type === 'PE' ? 'PE' : 'CE' };
 }
 
-export const instrumentKey = (expiry: string, strike: number, type: 'CE' | 'PE'): string => `NIFTY|${expiry}|${strike}|${type}`;
+export const instrumentKey = (expiry: string, strike: number, type: 'CE' | 'PE', symbol: IndexSymbol = 'NIFTY'): string => `${symbol}|${expiry}|${strike}|${type}`;
+
+/** 'SENSEX|05-Nov-2026|82000|CE' -> 'SENSEX'; anything else is NIFTY. */
+export const instSymbol = (key: string): IndexSymbol => (String(key).startsWith('SENSEX|') ? 'SENSEX' : 'NIFTY');
+
+/** Index facts the page needs: lot size before the server says otherwise, and the strike gap. */
+export const INDEX_INFO: Record<IndexSymbol, { name: string; lotSize: number; strikeStep: number }> = {
+  NIFTY: { name: 'NIFTY 50', lotSize: 65, strikeStep: 50 },
+  SENSEX: { name: 'SENSEX', lotSize: 20, strikeStep: 100 }
+};
+export const INDEX_SYMBOLS: IndexSymbol[] = ['NIFTY', 'SENSEX'];
 
 /** '03-Nov-2026' -> '03 Nov' */
 export const shortExpiry = (e: string): string => e.slice(0, 6).replace('-', ' ');
