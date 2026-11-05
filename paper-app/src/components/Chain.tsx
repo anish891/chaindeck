@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { instrumentKey, shortExpiry } from '../format';
-import type { Market, OptionType, Quote, Side } from '../types';
+import type { IndexSymbol, Market, OptionType, Quote, Side } from '../types';
 
 interface Props {
   market: Market | null;
@@ -12,9 +12,9 @@ interface Props {
 const ltp = (q: Quote | null) => (q && q.ltp ? q.ltp.toFixed(2) : 'n/a');
 
 /** One tappable price. Tapping opens the order sheet on Buy; the sheet has the Sell switch. */
-function Price({ strike, type, expiry, q, held, onPick }: { strike: number; type: OptionType; expiry: string; q: Quote | null } & Pick<Props, 'held' | 'onPick'>) {
+function Price({ strike, type, expiry, symbol, q, held, onPick }: { strike: number; type: OptionType; expiry: string; symbol: IndexSymbol; q: Quote | null } & Pick<Props, 'held' | 'onPick'>) {
   if (!q) return <span className="pt-muted">n/a</span>;
-  const isHeld = held.has(instrumentKey(expiry, strike, type));
+  const isHeld = held.has(instrumentKey(expiry, strike, type, symbol));
   return (
     <button type="button" className={`pt-px${isHeld ? ' held' : ''}`} aria-label={`Trade ${strike} ${type}${isHeld ? ' (you hold this)' : ''}`} onClick={() => onPick(strike, type, 'BUY')}>
       {ltp(q)}
@@ -37,7 +37,7 @@ export function Chain({ market, held, onPick, onExpiry }: Props) {
   return (
     <div className="panel">
       <div className="panel-head">
-        <div className="panel-title">Option chain</div>
+        <div className="panel-title">{market && market.symbol === 'SENSEX' ? 'SENSEX option chain' : 'Option chain'}</div>
         <div className="seg" role="group" aria-label="Expiry">
           {market && market.expiries.map(e => (
             <button type="button" key={e} className={`seg-btn${e === market.expiry ? ' active' : ''}`} onClick={() => onExpiry(e)}>{shortExpiry(e)}</button>
@@ -54,11 +54,12 @@ export function Chain({ market, held, onPick, onExpiry }: Props) {
             {market && market.strikes.length === 0 && <tr><td colSpan={3} className="empty-note">No strikes for this expiry.</td></tr>}
             {market && market.expiry && market.strikes.map(r => {
               const expiry = market.expiry as string;
+              const symbol = market.symbol || 'NIFTY';
               return (
                 <tr key={r.strike} className={r.strike === market.atmStrike ? 'pt-atm' : ''}>
-                  <td className={`center${market.spot > r.strike ? ' pt-itm' : ''}`}><Price strike={r.strike} type="CE" expiry={expiry} q={r.CE} held={held} onPick={onPick} /></td>
+                  <td className={`center${market.spot > r.strike ? ' pt-itm' : ''}`}><Price strike={r.strike} type="CE" expiry={expiry} symbol={symbol} q={r.CE} held={held} onPick={onPick} /></td>
                   <td className="center pt-strike">{r.strike}</td>
-                  <td className={`center${market.spot < r.strike ? ' pt-itm' : ''}`}><Price strike={r.strike} type="PE" expiry={expiry} q={r.PE} held={held} onPick={onPick} /></td>
+                  <td className={`center${market.spot < r.strike ? ' pt-itm' : ''}`}><Price strike={r.strike} type="PE" expiry={expiry} symbol={symbol} q={r.PE} held={held} onPick={onPick} /></td>
                 </tr>
               );
             })}
