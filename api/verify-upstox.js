@@ -59,6 +59,11 @@ const sleep = async () => {};
   const instruments = require('./services/instruments');
   assert.strictEqual(instruments.getIndex('nifty').underlyingKey, 'NSE_INDEX|Nifty 50');
   assert.throws(() => instruments.getIndex('FOO'), e => e.code === 'BAD_SYMBOL');
+  assert.deepStrictEqual(instruments.SYMBOLS, ['NIFTY', 'SENSEX']);
+  const sx = instruments.getIndex('sensex');
+  assert.deepStrictEqual([sx.underlyingKey, sx.lotSize, sx.strikeStep, sx.exchange], ['BSE_INDEX|SENSEX', 20, 100, 'BSE']);
+  assert.throws(() => instruments.getIndex('constructor'), e => e.code === 'BAD_SYMBOL', 'no prototype keys');
+  assert.throws(() => instruments.getIndex(null), e => e.code === 'BAD_SYMBOL');
   assert.strictEqual(instruments.ymdToNseDate('2026-11-10'), '10-Nov-2026');
   assert.strictEqual(instruments.ymdToNseDate('2026-13-10'), null);
   assert.strictEqual(instruments.ymdToNseDate('10-Nov-2026'), null);
@@ -210,6 +215,23 @@ const sleep = async () => {};
   await assert.rejects(chain.loadChain('NIFTY', '11-Nov-2026', { get: fakeGet, nowMs: now }), e => e.code === 'BAD_EXPIRY');
   assert.deepStrictEqual(log, ['/v2/option/contract']);
 
+  // SENSEX: BSE instrument key, its own lot size for the unit conversion, its own cached expiry list
+  const sxContracts = [{ expiry: '2026-11-12', lot_size: 20 }, { expiry: '2026-11-19', lot_size: 20 }];
+  const sxRows = upstoxRows.map(r => ({ ...r, expiry: '2026-11-12', underlying_key: 'BSE_INDEX|SENSEX' }));
+  const sxAsked = [];
+  const sxGet = async (path, q2) => {
+    sxAsked.push([path, q2.instrument_key]);
+    if (path === '/v2/option/contract') return sxContracts;
+    if (path === '/v2/option/chain') return sxRows;
+    return {};
+  };
+  const sxLoaded = await chain.loadChain('SENSEX', null, { get: sxGet, nowMs: now });
+  assert.strictEqual(sxLoaded.targetExpiry, '12-Nov-2026');
+  assert.ok(sxAsked.every(([, k]) => k === 'BSE_INDEX|SENSEX'));
+  assert.strictEqual(sxLoaded.raw.records.data[10].CE.openInterest, Math.round(upstoxRows[10].call_options.market_data.oi / 20), 'converted with lot 20');
+  assert.deepStrictEqual(chain.knownExpiries('SENSEX', now), ['12-Nov-2026', '19-Nov-2026']);
+  assert.deepStrictEqual(chain.knownExpiries('NIFTY', now), parsed.expiries, 'NIFTY list untouched');
+
   // the cached list is dropped once its nearest expiry has passed
   assert.strictEqual(chain.knownExpiries('NIFTY', Date.parse('2026-11-06T09:30:00+05:30')), null);
 
@@ -257,6 +279,14 @@ const sleep = async () => {};
   Date.now = realNow;
   assert.strictEqual(stale.stale, true);
   assert.strictEqual(oc.staleReasonCode(stale.staleReason), 'timeout');
+  // SENSEX: only through Upstox; unknown symbols are refused before any upstream call
+  oc._setSource({ name: 'nse', knownExpiries: () => null, load: async () => { throw new Error('should not be called'); } });
+  await assert.rejects(oc.fetchRawOptionChain('SENSEX', null), e => e.code === 'UNSUPPORTED_SYMBOL');
+  await assert.rejects(oc.fetchRawOptionChain('BANKNIFTY', null), e => e.code === 'BAD_SYMBOL');
+  let sxLoad = null;
+  oc._setSource({ name: 'upstox', knownExpiries: () => null, load: async (sym, exp) => { sxLoad = sym; return { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: Date.now(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: EXP }; } });
+  await oc.fetchRawOptionChain('sensex', null);
+  assert.strictEqual(sxLoad, 'SENSEX', 'symbol normalised before it reaches the loader and the cache key');
   oc._setSource(null);
 
   // ── index snapshot from Upstox quotes ───────────────────────────────
