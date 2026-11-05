@@ -1,5 +1,4 @@
 const fetch = require('node-fetch');
-const integrity = require('./integrity');
 const calendar = require('./calendar');
 
 const NSE_HEADERS = {
@@ -75,20 +74,10 @@ async function fetchWithTimeout(url, cookies, attempt = 0) {
   }
 }
 
-// --- Caching layers -------------------------------------------------------
+// --- Expiry list cache -------------------------------------------------
 const EXPIRY_TTL = 60 * 60 * 1000;   // expiry list changes ~daily
-const RAW_TTL = 5000;                // NSE itself only updates every ~30-60s
-const STALE_MAX_OPEN = 2 * 60 * 1000;      // while the market moves: a leftover copy lives 2 min at most (flagged stale), then fail loudly
-const STALE_MAX_CLOSED = 6 * 3600 * 1000; // nothing changes after the close, so an old copy is still the right picture
-
-/** How long a leftover copy may be served after a failed refresh, depending on whether NSE is trading. */
-function staleLimitMs(nowMs = Date.now()) {
-  return calendar.isMarketOpenAt(nowMs, { before: 5, after: 10 }) ? STALE_MAX_OPEN : STALE_MAX_CLOSED;
-}
 
 let expiryCache = { list: null, ts: 0 };
-const rawCache = new Map();          // `${symbol}|${expiry}` -> { value, ts }
-const inflight = new Map();          // key -> Promise
 
 function parseNseDate(str) {
   const d = new Date(`${str.replace(/-/g, ' ')} 23:59:59 GMT+0530`);
@@ -150,56 +139,6 @@ async function loadFromNSE(symbol, expiryDate) {
   return { raw, allExpiries, targetExpiry };
 }
 
-async function fetchRawNSEOptionChain(symbol = 'NIFTY', expiryDate = null) {
-  const known = getCachedExpiries();
-  if (expiryDate && known && !known.includes(expiryDate)) {
-    // Stale / mistyped expiry (e.g. from an old shared link): fail fast instead of burning NSE timeouts.
-    const err = new Error(`Unknown expiry ${expiryDate}`);
-    err.code = 'BAD_EXPIRY';
-    throw err;
-  }
-  const resolved = expiryDate || (known && known[0]) || null;
-  const key = `${symbol}|${resolved || 'nearest'}`;
-
-  const hit = rawCache.get(key);
-  if (hit && Date.now() - hit.ts < RAW_TTL) return hit.value;
-
-  // Coalesce concurrent requests into one NSE call
-  if (inflight.has(key)) return inflight.get(key);
-
-  const p = loadFromNSE(symbol, expiryDate)
-    .then(value => {
-      // Reject a structurally broken or non-sensical payload BEFORE it is cached: the last good copy is kept (and flagged).
-      const verdict = integrity.validateRaw(value.raw, hit ? hit.value : null);
-      if (!verdict.ok) throw new Error(`NSE payload rejected: ${verdict.reasons.join('; ')}`);
-      const ts = Date.now();
-      const stamped = { ...value, fetchedMs: ts, stale: false };
-      rawCache.set(key, { value: stamped, ts });
-      while (rawCache.size > 20) rawCache.delete(rawCache.keys().next().value); // bounded: keys come from callers
-      return stamped;
-    })
-    .catch(err => {
-      // Stale-on-error: better old data than a "Disconnected" dashboard
-      if (hit && Date.now() - hit.ts < staleLimitMs()) {
-        console.error('NSE fetch failed, serving stale data:', err.message);
-        return { ...hit.value, stale: true, staleReason: err.message };
-      }
-      throw err;
-    })
-    .finally(() => inflight.delete(key));
-
-  inflight.set(key, p);
-  return p;
-}
-
-/** Short public reason for a leftover copy: the real error text stays in the server log, never in the response. */
-function staleReasonCode(message) {
-  const m = String(message || '');
-  if (/payload rejected/i.test(m)) return 'payload_rejected';
-  if (/abort|timeout|timed out/i.test(m)) return 'timeout';
-  return 'fetch_failed';
-}
-
 const HOLIDAY_TTL_MS = 24 * 3600 * 1000;
 let holidayRefresh = { ts: 0, inflight: null };
 
@@ -227,12 +166,11 @@ async function refreshHolidays({ force = false, fetcher = fetchWithTimeout, cook
 
 module.exports = {
   formatNseDate,
-  staleReasonCode,
   refreshHolidays,
-  staleLimitMs,
   NSE_HEADERS,
   getCookies,
   fetchWithTimeout,
-  fetchRawNSEOptionChain
+  loadFromNSE,
+  getCachedExpiries
 };
 

@@ -222,14 +222,14 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   const routes = read('api/routes/index.js');
   assert(/integrity\.verifyProcessed\(/.test(routes) && /integrity: \{ checks \}/.test(routes), 'the option-chain response must carry the integrity checks');
   assert(/forwardLog\.run\(data\)/.test(routes) && /healthy/.test(routes), 'the forward log must only record from healthy data');
-  assert(/validateRaw\(/.test(read('api/services/nse.js')), 'NSE payloads must be validated before they are cached');
+  assert(/validateRaw\(/.test(read('api/services/optionChain.js')), 'option chain payloads must be validated before they are cached');
 }
 
 // ── 13. holiday-aware market hours ──
 {
   assert(/fetchCalendar/.test(app) && /nseHolidays\.has\(ymd\)/.test(app), 'the page must treat NSE holidays as closed');
   assert(/router\.get\('\/calendar'/.test(read('api/routes/index.js')), 'the calendar endpoint must exist');
-  assert(/calendar\.isMarketOpenAt/.test(read('api/services/nse.js')) && /calendar\.isMarketOpenAt/.test(read('api/services/candles.js')), 'server market-hours checks must use the holiday calendar');
+  assert(/calendar\.isMarketOpenAt/.test(read('api/services/optionChain.js')) && /calendar\.isMarketOpenAt/.test(read('api/services/candles.js')), 'server market-hours checks must use the holiday calendar');
 }
 
 // ── 14. honest labels ──

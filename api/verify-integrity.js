@@ -53,11 +53,11 @@ const byId = checks => Object.fromEntries(checks.map(c => [c.id, c]));
   assert.ok(I.validateRaw(mkRaw({ mutate: r => { r.records.data[4].CE.change = null; r.records.data[5].PE.underlyingValue = undefined; } })).ok, 'null and missing optional fields are fine');
 
   // SEC-004: public stale reasons are short codes, never raw error text
-  const nse = require('./services/nse');
-  assert.strictEqual(nse.staleReasonCode('NSE payload rejected: spot jumped 12% (secret-host.internal)'), 'payload_rejected');
-  assert.strictEqual(nse.staleReasonCode('The user aborted a request.'), 'timeout');
-  assert.strictEqual(nse.staleReasonCode('connect ECONNREFUSED 10.0.0.5:443'), 'fetch_failed');
-  assert.strictEqual(nse.staleReasonCode(undefined), 'fetch_failed');
+  const optionChain = require('./services/optionChain');
+  assert.strictEqual(optionChain.staleReasonCode('NSE payload rejected: spot jumped 12% (secret-host.internal)'), 'payload_rejected');
+  assert.strictEqual(optionChain.staleReasonCode('The user aborted a request.'), 'timeout');
+  assert.strictEqual(optionChain.staleReasonCode('connect ECONNREFUSED 10.0.0.5:443'), 'fetch_failed');
+  assert.strictEqual(optionChain.staleReasonCode(undefined), 'fetch_failed');
 
   // ── verifyProcessed on clean, processed data: everything passes ──
   const raw = mkRaw();

@@ -12,7 +12,7 @@
 
 const express = require('express');
 const { paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../security');
-const { fetchRawNSEOptionChain } = require('../services/nse');
+const { fetchRawOptionChain } = require('../services/optionChain');
 const { processOptionChainData } = require('../services/analytics');
 const integrity = require('../services/integrity');
 const { AGENT } = require('../services/paperAccounts');
@@ -43,7 +43,7 @@ function perKeyLimiter(max, windowMs = 60000) {
 
 /** Compact market context from the dashboard's analytics: what the page shows, as numbers. Not a forecast. */
 async function marketContext() {
-  const { raw, allExpiries, targetExpiry, stale } = await fetchRawNSEOptionChain('NIFTY', null);
+  const { raw, allExpiries, targetExpiry, stale } = await fetchRawOptionChain('NIFTY', null);
   const d = await processOptionChainData(raw, allExpiries, targetExpiry);
   let checksOk = false;
   try { checksOk = !integrity.hasFailure(integrity.verifyProcessed(raw, d, targetExpiry)); } catch (e) { checksOk = false; }
