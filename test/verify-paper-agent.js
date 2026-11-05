@@ -4,11 +4,11 @@ const assert = require('assert');
 const http = require('http');
 const fetch = require('node-fetch');
 
-const app = require('./index');
-const paperRouter = require('./routes/paper');
-const { createService, AGENT } = require('./services/paperAccounts');
-const { formatNseDate } = require('./services/nse');
-const storage = require('./services/storage');
+const app = require('../api/index');
+const paperRouter = require('../api/routes/paper');
+const { createService, AGENT } = require('../api/services/paperAccounts');
+const { formatNseDate } = require('../api/services/nse');
+const storage = require('../api/services/storage');
 
 const DAY = 24 * 3600 * 1000;
 const EXPIRIES = [3, 10, 17, 24, 31].map(d => formatNseDate(Date.now() + d * DAY));

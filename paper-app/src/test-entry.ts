@@ -1,5 +1,5 @@
 // Everything the Node tests need from the app, in one place. The tests build this file with Vite (see
-// api/lib/paperUi.js), so it is compiled and bundled exactly as the real app is. It is never part of the shipped bundle.
+// test/helpers/paperUi.js), so it is compiled and bundled exactly as the real app is. It is never part of the shipped bundle.
 export * from './format';
 export * from './payoff';
 export * from './ticket';

@@ -8,10 +8,10 @@ const fetch = require('node-fetch');
 
 const root = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
-const app = require('./index');
-const paperRouter = require('./routes/paper');
-const { createService } = require('./services/paperAccounts');
-const { formatNseDate } = require('./services/nse');
+const app = require('../api/index');
+const paperRouter = require('../api/routes/paper');
+const { createService } = require('../api/services/paperAccounts');
+const { formatNseDate } = require('../api/services/nse');
 
 const listen = a => new Promise(res => { const s = http.createServer(a).listen(0, () => res(s)); });
 const DAY = 24 * 3600 * 1000;
@@ -58,7 +58,7 @@ function sxFeed(expiry) {
 
 (async () => {
   // ── payoff maths: the app's TypeScript module, compiled by Vite the way the shipped bundle is ──
-  const P = await require('./lib/paperUi').loadPaperUi();
+  const P = await require('./helpers/paperUi').loadPaperUi();
   {
     const S = 25000, K = 25000, T = 7 / 365, sig = 0.12, r = 0.06;
     const parity = P.bsPrice('CE', S, K, T, sig, r) - P.bsPrice('PE', S, K, T, sig, r) - (S - K * Math.exp(-r * T));

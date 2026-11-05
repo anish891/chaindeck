@@ -1,8 +1,8 @@
 // BUG-002 / MATH-004: the app must know about NSE holidays (weekday closures), not just weekends.
 const assert = require('assert');
-const cal = require('./services/calendar');
-const nse = require('./services/nse');
-const vol = require('./services/volatility');
+const cal = require('../api/services/calendar');
+const nse = require('../api/services/nse');
+const vol = require('../api/services/volatility');
 
 const IST = 330 * 60000;
 const at = (y, m, d, h, mi) => Date.UTC(y, m - 1, d, h, mi) - IST; // an IST wall-clock time
@@ -37,8 +37,8 @@ const at = (y, m, d, h, mi) => Date.UTC(y, m - 1, d, h, mi) - IST; // an IST wal
   cal.setHolidays(cal.FALLBACK_HOLIDAYS);
 
   // NSE's leftover-copy limit is the long one on a holiday and the short one on a normal trading day
-  assert.strictEqual(require('./services/optionChain').staleLimitMs(at(2026, 10, 20, 11, 0)), 6 * 3600 * 1000, 'holiday');
-  assert.strictEqual(require('./services/optionChain').staleLimitMs(at(2026, 10, 21, 11, 0)), 2 * 60 * 1000, 'trading day');
+  assert.strictEqual(require('../api/services/optionChain').staleLimitMs(at(2026, 10, 20, 11, 0)), 6 * 3600 * 1000, 'holiday');
+  assert.strictEqual(require('../api/services/optionChain').staleLimitMs(at(2026, 10, 21, 11, 0)), 2 * 60 * 1000, 'trading day');
 
   // parsing NSE's holiday master
   assert.strictEqual(cal.nseDateToYmd('26-Jan-2026'), '2026-01-26');
@@ -73,8 +73,8 @@ const at = (y, m, d, h, mi) => Date.UTC(y, m - 1, d, h, mi) - IST; // an IST wal
   assert.strictEqual(nse.formatNseDate(Date.UTC(2026, 9, 24, 6, 0)), '24-Oct-2026');
   assert.strictEqual(nse.formatNseDate(Date.UTC(2026, 11, 31, 20, 0)), '01-Jan-2027', '20:00 UTC on 31 Dec is already 1 Jan in IST');
   assert.strictEqual(nse.formatNseDate(Date.UTC(2027, 1, 5, 0, 0)), '05-Feb-2027');
-  assert.ok(require('./security').isValidExpiry(nse.formatNseDate(Date.now())));
-  assert.ok(!/30-Jun-2026/.test(require('fs').readFileSync(require('path').join(__dirname, 'services/nse.js'), 'utf8')), 'no hard-coded probe date');
+  assert.ok(require('../api/security').isValidExpiry(nse.formatNseDate(Date.now())));
+  assert.ok(!/30-Jun-2026/.test(require('fs').readFileSync(require('path').join(__dirname, '../api/services/nse.js'), 'utf8')), 'no hard-coded probe date');
 
   console.log('calendar checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

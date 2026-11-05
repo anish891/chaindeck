@@ -125,7 +125,7 @@ const {
   calculateOptionGreeks, computeImpliedProbabilityDistribution, computeIntradayMLPredictions,
   computeCPR, classifyCPR, findZeroGamma, computeRiskReversal25, computeCompositeRegime,
   updateWelfordZScore, updateAndDetectUnusualFlow
-} = require('./services/analytics');
+} = require('../api/services/analytics');
 
 // Symmetric day: pivot == BC == TC, zero width
 const cprRes = computeCPR(24100, 23900, 24000);
@@ -155,7 +155,7 @@ console.log('✓ Test 4 Passed: Black-Scholes Option Greeks Engine (Delta, Gamma
 // ── TEST 5: STRADDLE → EXPECTED MOVE, DERIVED INDEPENDENTLY FROM BLACK-SCHOLES ──
 // Not a re-multiplication of the code's own constant: price a real ATM straddle, then compare the implementation's
 // moves with the true one-standard-deviation move S * sigma * sqrt(T).
-const { expectedMoves } = require('./services/analytics');
+const { expectedMoves } = require('../api/services/analytics');
 const cdfRef = x => { let n = 40000, a = -12, h = (x - a) / n, s = 0; for (let i = 0; i <= n; i++) { const xi = a + i * h; s += ((i === 0 || i === n) ? 1 : (i % 2 ? 4 : 2)) * Math.exp(-0.5 * xi * xi); } return s * h / 3 / Math.sqrt(2 * Math.PI); };
 const bsPrice = (S, K, T, v, r, call) => { const d1 = (Math.log(S / K) + (r + 0.5 * v * v) * T) / (v * Math.sqrt(T)), d2 = d1 - v * Math.sqrt(T); const C = S * cdfRef(d1) - K * Math.exp(-r * T) * cdfRef(d2); return call ? C : C - S + K * Math.exp(-r * T); };
 for (const [S, v, T] of [[22700, 0.14, 7 / 365], [22700, 0.20, 30 / 365], [24000, 0.12, 2 / 365]]) {
@@ -175,7 +175,7 @@ console.log('✓ Test 5 Passed: expected move derived from Black-Scholes (0.85x 
 
 // ── TEST 4b: GREEKS AGAINST NUMERICAL DERIVATIVES OF AN INDEPENDENT PRICER ──
 {
-  const { calculateOptionGreeks } = require('./services/analytics');
+  const { calculateOptionGreeks } = require('../api/services/analytics');
   for (const [S, K, T, v, call] of [[22700, 22700, 7 / 365, 0.14, true], [22700, 22900, 7 / 365, 0.16, true], [22700, 22500, 30 / 365, 0.18, false], [22700, 22700, 2 / 365, 0.12, false]]) {
     const r = 0.065, g = calculateOptionGreeks(S, K, T, v, call, r);
     const P = (s, t, vol) => bsPrice(s, K, t, vol, r, call);
@@ -295,7 +295,7 @@ console.log('✓ Test 7 Passed: Intraday ML Trend & Breakout Prediction Engine v
 
 // ── TEST 13: SESSION SIMILARITY (MATH-002) — must discriminate, unlike cosine on the raw mixed-unit vector ──
 {
-  const { computeSessionSimilarities: sim, computeCosineSimilarity: cosine, readableSessions } = require('./services/analytics');
+  const { computeSessionSimilarities: sim, computeCosineSimilarity: cosine, readableSessions } = require('../api/services/analytics');
   const base = [0.9, 1, 0.2, 0.5, 0.04, 0.03];
   const cases = {
     identical: [0.9, 1, 0.2, 0.5, 0.04, 0.03],

@@ -1,5 +1,5 @@
 const assert = require('assert');
-const F = require('./services/forwardlog');
+const F = require('../api/services/forwardlog');
 
 const IST = 330 * 60 * 1000;
 const t0 = Date.UTC(2026, 9, 12, 9, 15) - IST; // 09:15 IST Monday

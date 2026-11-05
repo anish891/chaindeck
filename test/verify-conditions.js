@@ -1,6 +1,6 @@
 const assert = require('assert');
-const K = require('./services/conditions');
-const { HORIZONS } = require('./services/backtest');
+const K = require('../api/services/conditions');
+const { HORIZONS } = require('../api/services/backtest');
 
 const IST = 330 * 60 * 1000;
 const bar = 5 * 60000;

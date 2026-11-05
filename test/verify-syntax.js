@@ -23,8 +23,10 @@ const out = execFileSync(process.execPath, ['--experimental-vm-modules', '--no-w
 const bad = JSON.parse(out.trim().split('\n').pop());
 assert.deepStrictEqual(bad, [], `browser modules with syntax errors: ${bad.join(' | ')}`);
 
-// CommonJS parse for the server (and these test scripts)
-const server = ['api', 'api/services', 'api/routes'].flatMap(d => fs.readdirSync(path.join(root, d)).filter(n => n.endsWith('.js')).map(n => path.join(root, d, n)));
+// CommonJS parse for the server, the tests and the scripts (every .js file under these folders, at any depth)
+const walkJs = dir => (fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : []).flatMap(e =>
+  e.isDirectory() ? walkJs(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []);
+const server = ['api', 'test', 'scripts'].flatMap(d => walkJs(path.join(root, d)));
 for (const f of server) {
   try { new (require('vm').Script)(`(function (exports, require, module, __filename, __dirname) {${fs.readFileSync(f, 'utf8').replace(/^#!.*/, '')}\n})`, { filename: f }); }
   catch (e) { assert.fail(`${path.relative(root, f)}: ${e.message}`); }

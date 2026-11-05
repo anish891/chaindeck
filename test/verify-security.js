@@ -10,8 +10,8 @@ const express = require('express');
 
 const root = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
-const sec = require('./security');
-const app = require('./index');
+const sec = require('../api/security');
+const app = require('../api/index');
 
 const listen = a => new Promise(res => { const s = http.createServer(a).listen(0, () => res(s)); });
 const url = (s, p) => `http://127.0.0.1:${s.address().port}${p}`;

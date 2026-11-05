@@ -1,6 +1,6 @@
 // Tests for the India VIX / index snapshot cache in services/market.js (no network: the NSE loader is replaced).
 const assert = require('assert');
-const market = require('./services/market');
+const market = require('../api/services/market');
 
 const realNow = Date.now;
 let clock = Date.UTC(2026, 9, 12, 5, 0);

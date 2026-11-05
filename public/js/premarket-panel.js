@@ -1,5 +1,5 @@
 // Pre-market panel: overnight cues from /api/premarket, shown only in the 120 minutes before the open (07:15-09:15 IST)
-// on NSE trading days. DOM built with textContent only. Window logic is pure so api/verify-premarket.js can test it.
+// on NSE trading days. DOM built with textContent only. Window logic is pure so test/verify-premarket.js can test it.
 
 const IST_OFFSET_MS = 330 * 60000;
 export const PREMARKET_FROM_MIN = 7 * 60 + 15;

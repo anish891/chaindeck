@@ -1,7 +1,7 @@
 // Upstox client checks: no network, every reply comes from a fake fetch.
 const assert = require('assert');
-const upstox = require('./services/upstox');
-const market = require('./services/market');
+const upstox = require('../api/services/upstox');
+const market = require('../api/services/market');
 market.getIndexSnapshot = async () => null; // offline
 market.getPivotBasis = async () => null;
 
@@ -56,7 +56,7 @@ const sleep = async () => {};
   await assert.rejects(upstox.get('/x', {}, { fetchImpl: async () => ({ status: 200, ok: true, json: async () => { throw new Error('html'); } }), accessToken: 't', sleep }), e => e.code === 'UPSTOX_BAD_REPLY');
 
   // ── index config and expiries ───────────────────────────────────────
-  const instruments = require('./services/instruments');
+  const instruments = require('../api/services/instruments');
   assert.strictEqual(instruments.getIndex('nifty').underlyingKey, 'NSE_INDEX|Nifty 50');
   assert.throws(() => instruments.getIndex('FOO'), e => e.code === 'BAD_SYMBOL');
   assert.deepStrictEqual(instruments.SYMBOLS, ['NIFTY', 'SENSEX']);
@@ -101,9 +101,9 @@ const sleep = async () => {};
   await assert.rejects(instruments.fetchContracts('NIFTY', { get: async () => [], nowMs: now }), /no open expiries/);
 
   // ── adapter: Upstox chain -> ChainDeck chain ────────────────────────
-  const { toChainRaw, formatIstTimestamp } = require('./services/upstoxAdapter');
-  const integrity = require('./services/integrity');
-  const analytics = require('./services/analytics');
+  const { toChainRaw, formatIstTimestamp } = require('../api/services/upstoxAdapter');
+  const integrity = require('../api/services/integrity');
+  const analytics = require('../api/services/analytics');
   assert.strictEqual(formatIstTimestamp(Date.parse('2026-11-05T04:45:07Z')), '05-Nov-2026 10:15:07');
 
   // One synthetic chain, written twice: in ChainDeck's own shape (contracts) and as Upstox would send it (units).
@@ -211,7 +211,7 @@ const sleep = async () => {};
   assert.throws(() => toChainRaw(null), /not a list/);
 
   // ── chain loader ────────────────────────────────────────────────────
-  const chain = require('./services/upstoxChain');
+  const chain = require('../api/services/upstoxChain');
   chain._clearCache();
   const log = [];
   const fakeGet = async (path, q) => {
@@ -272,7 +272,7 @@ const sleep = async () => {};
   assert.strictEqual(chain.knownExpiries('NIFTY', Date.parse('2026-11-06T09:30:00+05:30')), null);
 
   // ── option chain source and cache in front of Upstox ────────────────
-  const oc = require('./services/optionChain');
+  const oc = require('../api/services/optionChain');
   assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'nse' }).name, 'nse', 'DATA_SOURCE=nse switches back');
   assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'UPSTOX' }).name, 'upstox');
   const saved = process.env.UPSTOX_ACCESS_TOKEN;
@@ -326,7 +326,7 @@ const sleep = async () => {};
   oc._setSource(null);
 
   // ── index snapshot from Upstox quotes ───────────────────────────────
-  const mkt = require('./services/market');
+  const mkt = require('../api/services/market');
   // Shapes as Upstox really sends them (checked live 2026-11-05): v3 LTP carries the previous close as `cp`;
   // v3 OHLC (interval 1d) has today's live_ohlc but prev_ohlc: null.
   const ltpQ = (key, last, prev) => ({ instrument_token: key, last_price: last, ltq: 0, volume: 0, cp: prev });
@@ -389,7 +389,7 @@ const sleep = async () => {};
   assert.strictEqual(big.nifty.last, 22770);
 
   // ── constituent lists ───────────────────────────────────────────────
-  const cons = require('./services/constituents');
+  const cons = require('../api/services/constituents');
   const csv = 'Company Name,Industry,Symbol,Series,ISIN Code\nA Ltd.,X,AAA,EQ,INE423A01024\nB Ltd.,Y,BBB,EQ,INE742F01042\nbad,row,,,\n';
   assert.deepStrictEqual(cons.parseConstituentCsv(csv), ['INE423A01024', 'INE742F01042']);
   assert.strictEqual(cons.parseConstituentCsv('<html>blocked</html>'), null);
@@ -409,7 +409,7 @@ const sleep = async () => {};
   cons._clear();
 
   // ── candles from Upstox ─────────────────────────────────────────────
-  const uc = require('./services/upstoxCandles');
+  const uc = require('../api/services/upstoxCandles');
   assert.deepStrictEqual(uc.parseRange('60d'), { sessions: 60, calendarDays: 95 });
   assert.deepStrictEqual(uc.parseRange('5y'), { sessions: null, calendarDays: 1830 });
   assert.throws(() => uc.parseRange('max'), /Unsupported range/);
@@ -461,13 +461,13 @@ const sleep = async () => {};
   await assert.rejects(uc.fetchUpstoxCandles('X|Y', '2h', '5d', { get: histGet }), /Unsupported interval/);
 
   // the candle module maps its Yahoo symbols to Upstox instruments
-  const candlesMod = require('./services/candles');
+  const candlesMod = require('../api/services/candles');
   assert.deepStrictEqual(Object.keys(candlesMod.UPSTOX_KEYS).sort(), Object.keys(candlesMod.SYMBOLS).sort());
   assert.strictEqual(candlesMod.UPSTOX_KEYS.etf, 'NSE_EQ|INF204KB14I2', 'NIFTYBEES by ISIN');
 
   // ── holidays from Upstox ────────────────────────────────────────────
-  const cal = require('./services/calendar');
-  const hol = require('./services/holidays');
+  const cal = require('../api/services/calendar');
+  const hol = require('../api/services/holidays');
   const shut = (date, closed = ['NSE', 'NFO', 'BSE', 'BFO']) => ({ date, description: 'x', holiday_type: 'TRADING_HOLIDAY', closed_exchanges: closed, open_exchanges: [] });
   const upHolidays = [
     shut('2027-01-26'), shut('2027-03-22'), shut('2027-04-14'), shut('2027-05-01'), shut('2027-08-15'), shut('2027-10-02'),
@@ -498,7 +498,7 @@ const sleep = async () => {};
   // ── routes: ?symbol= ────────────────────────────────────────────────
   {
     const http = require('http');
-    const app = require('./index');
+    const app = require('../api/index');
     const server = await new Promise(r => { const sv = http.createServer(app).listen(0, () => r(sv)); });
     const base = `http://127.0.0.1:${server.address().port}/api`;
     const getJson = async path => { const r = await fetch(base + path); return { status: r.status, body: await r.json() }; };

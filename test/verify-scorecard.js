@@ -1,5 +1,5 @@
 const assert = require('assert');
-const S = require('./services/scorecard');
+const S = require('../api/services/scorecard');
 
 const IST = 330 * 60 * 1000;
 const t0 = Date.UTC(2026, 9, 12, 9, 15) - IST;

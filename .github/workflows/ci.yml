@@ -26,5 +26,5 @@ jobs:
       - run: npm run build:paper
       - run: git diff --exit-code -- public/paper && test -z "$(git ls-files --others --exclude-standard public/paper)"
       # Known-vulnerable runtime dependencies fail the build (the vendored browser libraries are pinned by hash in
-      # api/verify-security.js and are not covered by npm audit).
+      # test/verify-security.js and are not covered by npm audit).
       - run: npm audit --omit=dev --audit-level=high

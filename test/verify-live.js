@@ -3,11 +3,11 @@
 const assert = require('assert');
 const http = require('http');
 const fetch = require('node-fetch');
-const L = require('./services/strategyLive');
-const A = require('./services/paperAnalytics');
-const { validateStrategy } = require('./services/strategy');
-const { createService } = require('./services/paperAccounts');
-const E = require('./services/paperEngine');
+const L = require('../api/services/strategyLive');
+const A = require('../api/services/paperAnalytics');
+const { validateStrategy } = require('../api/services/strategy');
+const { createService } = require('../api/services/paperAccounts');
+const E = require('../api/services/paperEngine');
 
 const IST = 330 * 60 * 1000;
 const at = (d, h, m, s = 0) => Date.UTC(2026, 10, d, h, m, s) - IST; // November 2026, IST wall clock
@@ -190,8 +190,8 @@ const strategy = over => validateStrategy({
   }
 
   // ── endpoints ──
-  const app = require('./index');
-  const router = require('./routes/paper');
+  const app = require('../api/index');
+  const router = require('../api/routes/paper');
   router.setService(accounts);
   router.setLiveService(live);
   const strategiesStore = { list: async () => [{ id: 'saved-1', strategy: strategy() }], presets: () => [], backtest: async () => ({}) };

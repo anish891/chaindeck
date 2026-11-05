@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { parseParticipantCsv, candidateDates, summarize } = require('./services/participants');
+const { parseParticipantCsv, candidateDates, summarize } = require('../api/services/participants');
 
 // Shape of NSE's file: a title row, a header with stray padding, one row per participant, then TOTAL
 const csv = [
@@ -50,7 +50,7 @@ console.log('participant OI checks passed');
 
 // BUG-003: a recent 404 is not remembered forever; an old one is
 (async () => {
-  const { getParticipantHistory, shouldPersistNone } = require('./services/participants');
+  const { getParticipantHistory, shouldPersistNone } = require('../api/services/participants');
   assert.strictEqual(shouldPersistNone('2026-10-22', '2026-10-24'), false, 'two days ago: may just be unpublished or a hiccup');
   assert.strictEqual(shouldPersistNone('2026-10-20', '2026-10-24'), true, 'four days ago: a holiday');
   const hash = {};

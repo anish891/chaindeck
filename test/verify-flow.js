@@ -4,10 +4,10 @@
 const assert = require('assert');
 
 // Keep the test offline and fast: stub the network-backed market lookups BEFORE loading analytics.
-const market = require('./services/market');
+const market = require('../api/services/market');
 market.getIndexSnapshot = async () => null;
 market.getPivotBasis = async () => null;
-const analytics = require('./services/analytics');
+const analytics = require('../api/services/analytics');
 
 const EXPIRY = '13-Oct-2026';
 const mkRaw = (minuteOffset, perMinVol) => {

@@ -2,15 +2,15 @@
 // owner and agent market endpoints, backtests and live strategies. Fake store, feeds and candles only; no network.
 // NIFTY accounts (including ones stored before SENSEX existed, with no symbol) must behave exactly as before.
 const assert = require('assert');
-const E = require('./services/paperEngine');
-const { createService } = require('./services/paperAccounts');
-const { validateStrategy, strikeStepFor } = require('./services/strategy');
-const B = require('./services/strategyBacktest');
-const L = require('./services/strategyLive');
-const C = require('./services/candles');
-const upstoxCandles = require('./services/upstoxCandles');
-const optionChain = require('./services/optionChain');
-const calendar = require('./services/calendar');
+const E = require('../api/services/paperEngine');
+const { createService } = require('../api/services/paperAccounts');
+const { validateStrategy, strikeStepFor } = require('../api/services/strategy');
+const B = require('../api/services/strategyBacktest');
+const L = require('../api/services/strategyLive');
+const C = require('../api/services/candles');
+const upstoxCandles = require('../api/services/upstoxCandles');
+const optionChain = require('../api/services/optionChain');
+const calendar = require('../api/services/calendar');
 
 const IST = 330 * 60 * 1000;
 const at = (d, h, m, s = 0) => Date.UTC(2026, 10, d, h, m, s) - IST; // November 2026, IST wall clock
@@ -278,7 +278,7 @@ function fakeStore() {
     assert(rep.assumptions.some(a => /Thursdays/.test(a)));
 
     // the strategy service loads the strategy's own index's data
-    const { createStrategyService } = require('./services/paperStrategies');
+    const { createStrategyService } = require('../api/services/paperStrategies');
     const asked = [];
     const strategies = createStrategyService({ store: fakeStore(), loadData: async (interval, symbol) => { asked.push(symbol); return { candles, vix: candles.map(c => ({ t: c.t, c: 13 })), fetchedAt: 1 }; } });
     await strategies.backtest(base({ symbol: 'SENSEX' }));
