@@ -246,7 +246,7 @@ traders read it, with an English and हिन्दी toggle. The language cho
 
 ## Paper trading
 
-A separate app (`/paper`) for practising NIFTY option trades with simulated money on real market prices from Upstox, testing
+A separate app (`/paper`) for practising NIFTY and SENSEX option trades with simulated money on real market prices from Upstox, testing
 strategies, and letting AI agents trade. It is owner only: sign in once with `PAPER_SECRET`. The dashboard shows a
 "Paper trading" button only while that owner session is active; the server enforces the same rule on every route.
 
@@ -258,34 +258,42 @@ It is a React + TypeScript app built with Vite. Source is in `paper-app/`, the b
 
 ### Trade
 - **Accounts:** up to 20, each with its own cash (₹1,00,000 by default), history and equity curve. Reset or delete any time.
-- **Instruments:** NIFTY options in the nearest four expiries. Lot size 65.
+  Each account trades one index, picked when it is created: NIFTY (the default, and every account made before SENSEX
+  existed) or SENSEX. Margin, spot and settlement always refer to that one index.
+- **Instruments:** options in the nearest four expiries. NIFTY: lot size 65, strikes 50 points apart, instrument ids like
+  `NIFTY|03-Nov-2026|25000|CE`. SENSEX: lot size 20 (or Upstox's live value), strikes 100 points apart, ids like
+  `SENSEX|05-Nov-2026|82000|CE`. An order for the other index is refused (`WRONG_INDEX`).
 - **Orders:** market, limit, stop limit (SL) and stop market (SL-M), with an optional target and stop that become
   exits cancelling each other once the entry fills. A preview shows the fill price, charges and free cash before you place it.
 - **Fills:** market buys pay the ask and sells receive the bid (last price plus or minus 1% when the book is empty).
   Waiting orders fill only on a newer option chain snapshot than the one they were placed against, never on the quote just seen.
   Stops trigger on the last traded price. All orders are day orders, cancelled at 15:30; positions carry overnight.
 - **Charges:** brokerage ₹20 an order, STT 0.15% of premium on sells and of intrinsic value on exercise, NSE
-  transaction charge, SEBI fee, stamp duty and GST (rates as of 2026, in `api/services/paperCosts.js`).
+  transaction charge, SEBI fee, stamp duty and GST (rates as of 2026, in `api/services/paperCosts.js`). SENSEX trades
+  use the same rates; BSE's own transaction charge differs slightly.
 - **Margin:** an estimate, not SPAN. A naked short option needs about 9% of spot (less for out of the money), and a
   spread needs only its maximum loss. With ₹1,00,000 you can buy options and trade spreads, not sell naked.
-- **Expiry:** open options cash-settle at intrinsic value against the NIFTY close, 15 minutes after the expiry close.
+- **Expiry:** open options cash-settle at intrinsic value against the index's close (NIFTY or SENSEX), 15 minutes after
+  the expiry close.
 - **Paused trading:** orders are refused outside 09:15 to 15:30 IST, when the server is showing a leftover copy, or when the
   latest snapshot is more than 3 minutes old.
 - **Views:** positions, open orders, order history (with who placed each order and why), trades, a payoff chart (at
   expiry and today) and the equity curve.
 
 ### Strategy lab
-- **Rules, not code:** an entry window, weekdays, trades a day, conditions (gap, move since the open, opening range
+- **Rules, not code:** the index (NIFTY or SENSEX), an entry window, weekdays, trades a day, conditions (gap, move since the open, opening range
   breakout, price against VWAP or the previous day, India VIX, reversal signals), up to four legs set as strikes from
   ATM, and exits (stop and target as a share of premium or in rupees, an exit time, an index move).
-- **Backtest:** about 60 sessions of 5 or 15 minute candles. Option prices are **modelled** (Black-Scholes with India
+- **Backtest:** about 60 sessions of 5 or 15 minute candles of the strategy's index. Weekly expiries are taken as
+  Tuesdays for NIFTY and Thursdays for SENSEX. SENSEX has no volume proxy, so VWAP conditions never hold on it, and
+  India VIX stands in for its volatility. Option prices are **modelled** (Black-Scholes with India
   VIX, a simple skew, and time decay counted in trading minutes), because no historical option quotes are available.
   Conditions are judged on a candle's close and the trade enters at the next open; a stop and a target hit in the same
   candle count as a stop; nothing is held overnight; fills pay a modelled spread plus the real charges.
 - **Honest verdict:** "looks like an edge" needs 30 trades, a positive average trade with 95% confidence, and beating
   95% of runs that use the same legs and exits from random entry times. Most strategies show "not enough trades" or
   "no clear edge", and the page says so.
-- **Live:** deploy a saved strategy to an account (one strategy per account). Each minute the paper cron job checks
+- **Live:** deploy a saved strategy to an account of the same index (one strategy per account). Each minute the paper cron job checks
   it against the latest closed candle and trades through the same engine at real prices. Each live fill also records
   what the backtest model would have priced it at, so you can see how far backtests are from reality.
 
@@ -338,7 +346,7 @@ with its own strike step (100 points), lot size (20, or Upstox's live value) and
 - Breadth is counted for NIFTY 50 only; the sector heatmap shows NSE sector indices on both views.
 - India VIX is NSE's volatility index; it is shown on the SENSEX view as general market context.
 - FII / DII positions are NSE's market-wide participant data and are the same on both views.
-- Paper trading and the strategy lab are NIFTY only.
+- Paper trading and the strategy lab support SENSEX through SENSEX accounts and strategies (see Paper trading above).
 - SENSEX needs the Upstox source: with `DATA_SOURCE=nse` (or no token) the SENSEX view says so.
 
 ---
