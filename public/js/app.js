@@ -567,7 +567,7 @@ function renderFreshness() {
   const open = isMarketOpen();
 
   const chainAge = currentData ? (now - new Date(currentData.dataAsOf || currentData.fetchedAt).getTime()) / 1000 : NaN;
-  setChip('freshChain', 'Upstox', 'chain', freshness('chain', chainAge, { open, hasData: !!currentData, stale: !!(currentData && currentData.feed && currentData.feed.stale) }));
+  setChip('freshChain', currentData && currentData.feed && currentData.feed.source === 'nse' ? 'NSE' : 'Upstox', 'chain', freshness('chain', chainAge, { open, hasData: !!currentData, stale: !!(currentData && currentData.feed && currentData.feed.stale) }));
 
   const cs = chartFeedStatus();
   if (!cs) {

@@ -42,7 +42,7 @@ router.get('/option-chain', async (req, res) => {
       checks = [{ id: 'integrity_engine', group: 'Option chain', label: 'Integrity checks ran', level: 'fail', detail: 'the verification step itself errored' }];
     }
     // feed: when we last got this from NSE, whether it is a leftover copy served after a failed refresh, and why
-    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? staleReasonCode(staleReason) : null }, integrity: { checks } } });
+    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? staleReasonCode(staleReason) : null, source: sourceName() }, integrity: { checks } } });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
     return sendError(res, 502, 'Error fetching option chain', err);
