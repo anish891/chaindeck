@@ -1,7 +1,7 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env.local') });
 const express = require('express');
-const { securityHeaders, rateLimit } = require('./security');
+const { securityHeaders, rateLimit } = require('./middleware/security');
 
 const app = express();
 const PORT = process.env.PORT || 3000;

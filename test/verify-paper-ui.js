@@ -344,7 +344,7 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
     assert(srcs.indexOf('/paper/?') > 0 && srcs.indexOf('/paper/?') < srcs.indexOf('/(.*)', 1), '/paper is routed to the app before the catch-all');
     assert(vercel.routes.find(r => r.src === '/paper.html').status === 308, 'the old URL redirects permanently');
     assert(vercel.routes[0].headers && vercel.routes[0].continue === true, 'the security headers route is still first');
-    const owner = read('api/security.js');
+    const owner = read('api/middleware/security.js');
     assert(/function requirePaperOwner/.test(owner) && /router\.use\(requirePaperOwner\)/.test(read('api/routes/paper.js')), 'every /api/paper route except the sign-in and the agent API sits behind the owner gate');
   }
 

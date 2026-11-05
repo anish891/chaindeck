@@ -11,7 +11,7 @@
 //  - the same engine and checks as the page: market hours, fresh data only, funds and margin, nearest four expiries
 
 const express = require('express');
-const { paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../security');
+const { paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../middleware/security');
 const { fetchRawOptionChain } = require('../services/optionChain');
 const { processOptionChainData } = require('../services/analytics');
 const integrity = require('../services/integrity');

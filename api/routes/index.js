@@ -13,7 +13,7 @@ const calendar = require('../services/calendar');
 const instruments = require('../services/instruments');
 const premarket = require('../services/premarket');
 const paperRoutes = require('./paper');
-const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../security');
+const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../middleware/security');
 const {
   processOptionChainData,
   extractFeatureVector,

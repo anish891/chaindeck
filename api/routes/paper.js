@@ -31,7 +31,7 @@
 //   /v1/...                              the agent API (routes/paperAgent.js), authenticated by agent key instead
 
 const express = require('express');
-const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../security');
+const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../middleware/security');
 const { defaultService, ID_RE } = require('../services/paperAccounts');
 const { defaultStrategyService } = require('../services/paperStrategies');
 const { createLiveService } = require('../services/strategyLive');

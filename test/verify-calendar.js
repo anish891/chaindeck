@@ -73,7 +73,7 @@ const at = (y, m, d, h, mi) => Date.UTC(y, m - 1, d, h, mi) - IST; // an IST wal
   assert.strictEqual(nse.formatNseDate(Date.UTC(2026, 9, 24, 6, 0)), '24-Oct-2026');
   assert.strictEqual(nse.formatNseDate(Date.UTC(2026, 11, 31, 20, 0)), '01-Jan-2027', '20:00 UTC on 31 Dec is already 1 Jan in IST');
   assert.strictEqual(nse.formatNseDate(Date.UTC(2027, 1, 5, 0, 0)), '05-Feb-2027');
-  assert.ok(require('../api/security').isValidExpiry(nse.formatNseDate(Date.now())));
+  assert.ok(require('../api/middleware/security').isValidExpiry(nse.formatNseDate(Date.now())));
   assert.ok(!/30-Jun-2026/.test(require('fs').readFileSync(require('path').join(__dirname, '../api/services/nse.js'), 'utf8')), 'no hard-coded probe date');
 
   console.log('calendar checks passed');

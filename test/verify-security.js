@@ -10,7 +10,7 @@ const express = require('express');
 
 const root = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
-const sec = require('../api/security');
+const sec = require('../api/middleware/security');
 const app = require('../api/index');
 
 const listen = a => new Promise(res => { const s = http.createServer(a).listen(0, () => res(s)); });
@@ -41,7 +41,7 @@ const url = (s, p) => `http://127.0.0.1:${s.address().port}${p}`;
   const vercel = JSON.parse(read('vercel.json'));
   const hdrRoute = vercel.routes.find(r => r.headers);
   assert(hdrRoute && hdrRoute.continue === true, 'vercel.json needs a header route with continue:true');
-  assert.deepStrictEqual(hdrRoute.headers, sec.SECURITY_HEADERS, 'vercel.json headers must equal api/security.js (regenerate vercel.json if you change one)');
+  assert.deepStrictEqual(hdrRoute.headers, sec.SECURITY_HEADERS, 'vercel.json headers must equal api/middleware/security.js (regenerate vercel.json if you change one)');
   assert.strictEqual(vercel.routes[0], hdrRoute, 'header route must come first');
   const cacheRoute = vercel.routes.find(r => r.headers && r.headers['Cache-Control']);
   assert(cacheRoute && cacheRoute.continue === true && /vendor\|fonts/.test(cacheRoute.src) && /max-age=86400/.test(cacheRoute.headers['Cache-Control']),
