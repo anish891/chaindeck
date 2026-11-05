@@ -162,5 +162,37 @@ const sleep = async () => {};
   assert.ok(!integrity.validateRaw(toChainRaw([])).ok, 'an empty chain is rejected before caching');
   assert.throws(() => toChainRaw(null), /not a list/);
 
+  // ── chain loader ────────────────────────────────────────────────────
+  const chain = require('./services/upstoxChain');
+  chain._clearCache();
+  const log = [];
+  const fakeGet = async (path, q) => {
+    log.push(path);
+    if (path === '/v2/option/contract') return contracts;
+    if (path === '/v2/option/chain') { assert.strictEqual(q.expiry_date, '2026-11-10'); return upstoxRows; }
+    throw new Error(`unexpected ${path}`);
+  };
+  const loaded = await chain.loadChain('NIFTY', '10-Nov-2026', { get: fakeGet, nowMs: now });
+  assert.strictEqual(loaded.targetExpiry, '10-Nov-2026');
+  assert.deepStrictEqual(loaded.allExpiries, parsed.expiries);
+  assert.strictEqual(loaded.raw.records.data.length, upstoxRows.length);
+  assert.strictEqual(loaded.raw.records.data[10].CE.openInterest, nativeRows[10].CE.openInterest, 'units converted with the live lot size');
+  assert.deepStrictEqual(log, ['/v2/option/contract', '/v2/option/chain']);
+
+  // warm cache: one call per refresh
+  log.length = 0;
+  await chain.loadChain('NIFTY', '10-Nov-2026', { get: fakeGet, nowMs: now + 60000 });
+  assert.deepStrictEqual(log, ['/v2/option/chain']);
+  assert.deepStrictEqual(chain.knownExpiries('NIFTY', now), parsed.expiries);
+  assert.strictEqual(chain.lotSizeFor('NIFTY', now), 65);
+
+  // an expiry not on the list: the list is re-fetched once, then the request is refused without asking for a chain
+  log.length = 0;
+  await assert.rejects(chain.loadChain('NIFTY', '11-Nov-2026', { get: fakeGet, nowMs: now }), e => e.code === 'BAD_EXPIRY');
+  assert.deepStrictEqual(log, ['/v2/option/contract']);
+
+  // the cached list is dropped once its nearest expiry has passed
+  assert.strictEqual(chain.knownExpiries('NIFTY', Date.parse('2026-11-06T09:30:00+05:30')), null);
+
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });
