@@ -29,6 +29,10 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
   assert.deepStrictEqual(U.instParts('NIFTY|03-Nov-2026|22700|PE'), { expiry: '03-Nov-2026', strike: 22700, optionType: 'PE' });
   assert.strictEqual(U.instLabel('NIFTY|03-Nov-2026|22700|CE'), '03 Nov 22700 CE');
   assert.strictEqual(U.instrumentKey('03-Nov-2026', 22700, 'CE'), 'NIFTY|03-Nov-2026|22700|CE');
+  assert.strictEqual(U.instrumentKey('05-Nov-2026', 82000, 'PE', 'SENSEX'), 'SENSEX|05-Nov-2026|82000|PE');
+  assert.strictEqual(U.instSymbol('SENSEX|05-Nov-2026|82000|PE'), 'SENSEX'); assert.strictEqual(U.instSymbol('NIFTY|03-Nov-2026|22700|CE'), 'NIFTY');
+  assert.strictEqual(U.instLabel('SENSEX|05-Nov-2026|82000|PE'), '05 Nov 82000 PE');
+  assert.deepStrictEqual([U.INDEX_INFO.SENSEX.lotSize, U.INDEX_INFO.SENSEX.strikeStep, U.INDEX_INFO.NIFTY.lotSize], [20, 100, 65]);
   assert.strictEqual(U.todayIst(Date.UTC(2026, 9, 28, 20, 0)), '2026-10-29', '20:00 UTC is already the next day in India');
   assert.strictEqual(U.expiryCloseMs('03-Nov-2026'), Date.UTC(2026, 10, 3, 10, 0), '15:30 IST is 10:00 UTC');
   assert.strictEqual(U.statusText({ status: 'CANCELLED', statusReason: 'OCO_FILLED' }), 'cancelled (other leg filled)');
@@ -78,6 +82,7 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
   // ── agent prompt ──
   const prompt = U.agentPrompt('https://example.test', 'cdp_abcd1234_tok');
   assert(prompt.includes('https://example.test/api/paper/v1') && prompt.includes('Authorization: Bearer cdp_abcd1234_tok') && /reason/.test(prompt) && /Idempotency-Key/.test(prompt) && /AGENTS_PAUSED/.test(prompt));
+  assert(/trade NIFTY options/.test(prompt) && /trade SENSEX options/.test(U.agentPrompt('https://example.test', 'cdp_x', 'SENSEX')), 'the prompt names the account\'s index');
 
   // ── payoff (same maths the server test pins; here: the module's contract) ──
   const ps = U.payoffSeries([{ strike: 22700, optionType: 'CE', qty: 65, avgPrice: 100, iv: 12 }], { spot: 22700, expiryMs: Date.now() + 7 * 864e5, nowMs: Date.now() });
@@ -176,6 +181,26 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
     assert(!picked.includes('Limit price') && !picked.includes('Trigger price') && !picked.includes('Target price'), 'the first screen has no price fields and no advanced options');
     assert(picked.includes('More options') && !picked.includes('Stop limit'), 'stop orders, target and note stay behind More options');
     assert(sheet({ instrument: pos.instrument, side: 'BUY', nonce: 1 }).includes('Buy 1 lot') && sheet({ instrument: pos.instrument, side: 'BUY', nonce: 1 }).includes('pt-buy'));
+  }
+  // ── SENSEX: a SENSEX account's chain, sheet, strip and lab ──
+  {
+    const sxMarket = {
+      ...market, symbol: 'SENSEX', spot: 82040, expiries: ['05-Nov-2026', '12-Nov-2026'], expiry: '05-Nov-2026', lotSize: 20, atmStrike: 82000,
+      strikes: [81900, 82000, 82100].map(k => ({ strike: k, CE: { ltp: 300, bid: 299.5, ask: 300.5, iv: 12 }, PE: { ltp: 280, bid: 279.5, ask: 280.5, iv: 13 } }))
+    };
+    const sxPos = { ...pos, instrument: 'SENSEX|05-Nov-2026|82000|CE', expiry: '05-Nov-2026', strike: 82000, qty: 40 };
+    const chain = html(U.Chain, { market: sxMarket, held: new Set([sxPos.instrument]), onPick: noop, onExpiry: noop });
+    assert(chain.includes('SENSEX option chain') && chain.includes('Lot size 20'));
+    assert(chain.includes('aria-label="Trade 82000 CE (you hold this)"') && (chain.match(/pt-px held/g) || []).length === 1, 'held SENSEX contracts are dotted');
+    const picked = html(U.OrderSheet, { accountId: 'sx', market: sxMarket, selection: { instrument: sxPos.instrument, side: 'BUY', nonce: 1 }, onSide: noop, onClose: noop, onPlaced: noop });
+    assert(picked.includes('SENSEX 05 Nov 82000 CE') && picked.includes('(20 qty)') && !picked.includes('NIFTY'), 'the sheet names SENSEX and its lot size');
+    const sxAccount = { ...account, summary: { ...account.summary, symbol: 'SENSEX', lotSize: 20, spot: 82040, positions: [sxPos] } };
+    const strip = html(U.Strip, { account: sxAccount, market: sxMarket });
+    assert(strip.includes('SENSEX') && strip.includes('82,040') && !strip.includes('NIFTY'));
+    assert(html(U.Strip, { account: sxAccount, market }).includes('82,040'), 'a NIFTY market never shows as the SENSEX spot');
+    const ed = html(U.StrategyEditor, { strategy: { ...U.blankStrategy(), symbol: 'SENSEX' }, onChange: noop, error: '', onError: noop });
+    assert(ed.includes('strikes are 100 points apart') && ed.includes('Exit if SENSEX moves'), 'the editor follows the strategy\'s index');
+    assert(html(U.StrategyEditor, { strategy: U.blankStrategy(), onChange: noop, error: '', onError: noop }).includes('strikes are 50 points apart'));
   }
   {
     const hostile = { ...account, orders: [order({ id: 'O9', reason: '<img src=x onerror=alert(1)>', agent: { keyId: 'abcd1234', label: '<script>x</script>' } })] };
