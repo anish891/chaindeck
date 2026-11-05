@@ -269,7 +269,7 @@ It is a React + TypeScript app built with Vite. Source is in `paper-app/`, the b
   Waiting orders fill only on a newer option chain snapshot than the one they were placed against, never on the quote just seen.
   Stops trigger on the last traded price. All orders are day orders, cancelled at 15:30; positions carry overnight.
 - **Charges:** brokerage ₹20 an order, STT 0.15% of premium on sells and of intrinsic value on exercise, NSE
-  transaction charge, SEBI fee, stamp duty and GST (rates as of 2026, in `api/services/paperCosts.js`). SENSEX trades
+  transaction charge, SEBI fee, stamp duty and GST (rates as of 2026, in `api/services/paper/paperCosts.js`). SENSEX trades
   use the same rates; BSE's own transaction charge differs slightly.
 - **Margin:** an estimate, not SPAN. A naked short option needs about 9% of spot (less for out of the money), and a
   spread needs only its maximum loss. With ₹1,00,000 you can buy options and trade spreads, not sell naked.
@@ -316,7 +316,25 @@ spreadsheet would treat as formulas are neutralised).
 
 ## Operations
 
-- **Requirements:** Node 22 or newer. `npm test` runs the whole suite (no network or storage needed) and CI runs it on every push (`.github/workflows/ci.yml`).
+- **Requirements:** Node 22 or newer. `npm test` runs the paper app's type check and then every `test/verify-*.js` (no network or storage needed); CI runs it on every push (`.github/workflows/ci.yml`). A new test file is picked up automatically.
+- **Live data check:** `node scripts/check-upstox-live.js [NIFTY|SENSEX]` compares Upstox with NSE for the nearest expiry (needs `UPSTOX_ACCESS_TOKEN` and network).
+- **Project layout:**
+
+  ```
+  api/index.js            Express app (Vercel builds this file)
+  api/middleware/         security headers, rate limits, secret and owner checks, input validators
+  api/routes/             dashboard API, paper trading API, agent API
+  api/services/providers/ Upstox and NSE clients, index config, constituent lists
+  api/services/market/    option chain cache, index quotes, candles, calendar, holidays, FII/DII, pre-market cues
+  api/services/analytics/ chain analytics, integrity checks, volatility, levels, patterns, signals, backtests
+  api/services/paper/     paper trading engine, accounts, costs, strategies (backtest and live)
+  api/services/storage/   Upstash / in-memory store, intraday history
+  api/services/util/      retry helper
+  public/                 dashboard (served as is) and the built paper app (public/paper)
+  paper-app/              paper app source (React + TypeScript), built with npm run build:paper
+  test/                   test files and helpers; test/run.js runs them all
+  scripts/                developer tools (not deployed)
+  ```
 - **Per-minute recorder:** point cron-job.org (or similar) at `/api/cron/snapshot` with `Authorization: Bearer <CRON_SECRET>` during market hours. To keep SENSEX history too, add a second job for `/api/cron/snapshot?symbol=SENSEX` (it roughly doubles the recorder's storage commands).
 - **Is the recorder alive?** `GET /api/snapshot-age` returns HTTP 503 when the last saved snapshot is more than 5 minutes old during market hours, and 200 otherwise. Point an uptime monitor at it to be alerted when the cron job stops. It reveals only that age.
 - **Trading holidays:** the list comes from Upstox's market holidays, counting days the F&O segment is shut (refreshed at most daily, falling back to a built-in 2026 list), so holidays are treated as closed everywhere: the market-hours checks, time to expiry and the trust light.

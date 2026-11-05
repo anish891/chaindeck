@@ -5,18 +5,28 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only token: nothing in this workflow writes to the repository.
 permissions:
   contents: read
+
+# A newer push to the same branch or PR cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     strategy:
       matrix:
         node: [22, 24]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      # Third-party actions are pinned to a commit SHA (the tag in the comment); Dependabot keeps them current.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # later steps never push, so do not leave the token in .git/config
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -26,5 +36,5 @@ jobs:
       - run: npm run build:paper
       - run: git diff --exit-code -- public/paper && test -z "$(git ls-files --others --exclude-standard public/paper)"
       # Known-vulnerable runtime dependencies fail the build (the vendored browser libraries are pinned by hash in
-      # api/verify-security.js and are not covered by npm audit).
+      # test/verify-security.js and are not covered by npm audit).
       - run: npm audit --omit=dev --audit-level=high

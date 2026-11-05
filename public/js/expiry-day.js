@@ -1,6 +1,6 @@
 // Expiry-day readings: how fast the ATM straddle is decaying against time decay alone, how close spot sits to max pain
 // and the heaviest OI strikes (with the probability options price for a close near each), and how concentrated gamma is
-// near the money. Pure logic (no DOM, no imports) so api/verify-expiry.js can load it in Node.
+// near the money. Pure logic (no DOM, no imports) so test/verify-expiry.js can load it in Node.
 //
 // Inputs: d = /api/option-chain data, points = /api/intraday points (t, spot, straddle, maxPain, gexCr, atmIv).
 

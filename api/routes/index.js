@@ -1,26 +1,26 @@
 const express = require('express');
 const router = express.Router();
-const history = require('../services/history');
-const { getParticipantHistory } = require('../services/participants');
-const chartAnalysis = require('../services/chartAnalysis');
-const forwardLog = require('../services/forwardlog');
-const { withRetry } = require('../services/retry');
-const integrity = require('../services/integrity');
-const { istNow } = require('../services/market');
-const { refreshHolidays } = require('../services/holidays');
-const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/optionChain');
-const calendar = require('../services/calendar');
-const instruments = require('../services/instruments');
-const premarket = require('../services/premarket');
+const history = require('../services/storage/history');
+const { getParticipantHistory } = require('../services/market/participants');
+const chartAnalysis = require('../services/analytics/chartAnalysis');
+const forwardLog = require('../services/analytics/forwardlog');
+const { withRetry } = require('../services/util/retry');
+const integrity = require('../services/analytics/integrity');
+const { istNow } = require('../services/market/market');
+const { refreshHolidays } = require('../services/market/holidays');
+const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/market/optionChain');
+const calendar = require('../services/market/calendar');
+const instruments = require('../services/providers/instruments');
+const premarket = require('../services/market/premarket');
 const paperRoutes = require('./paper');
-const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../security');
+const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../middleware/security');
 const {
   processOptionChainData,
   extractFeatureVector,
   computeSessionSimilarities,
   readableSessions,
   getCacheData
-} = require('../services/analytics');
+} = require('../services/analytics/analytics');
 
 const READ_CACHE = 'public, s-maxage=3, stale-while-revalidate=10';
 const HISTORY_CACHE = 'public, s-maxage=10, stale-while-revalidate=20';
@@ -44,7 +44,7 @@ router.get('/option-chain', async (req, res) => {
     const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawOptionChain(symbol, expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry, { symbol });
     res.set('Cache-Control', READ_CACHE);
-    // Recompute the headline numbers from the raw payload with separate code and compare (see services/integrity.js).
+    // Recompute the headline numbers from the raw payload with separate code and compare (see services/analytics/integrity.js).
     let checks;
     try {
       checks = integrity.verifyProcessed(raw, data, targetExpiry);
@@ -141,10 +141,10 @@ router.get('/forward-log', async (req, res) => {
   }
 });
 
-// How each kind of support / resistance level actually behaved over the stored history (see services/scorecard.js).
+// How each kind of support / resistance level actually behaved over the stored history (see services/analytics/scorecard.js).
 router.get('/level-scorecard', async (req, res) => {
   try {
-    const card = await chartAnalysis.getScorecard(require('../services/candles'));
+    const card = await chartAnalysis.getScorecard(require('../services/market/candles'));
     if (!card) return res.status(503).json({ ok: false, error: 'Scorecard is not available yet.' });
     res.set('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
     res.json({ ok: true, ...card });

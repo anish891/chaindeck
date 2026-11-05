@@ -11,12 +11,12 @@
 //  - the same engine and checks as the page: market hours, fresh data only, funds and margin, nearest four expiries
 
 const express = require('express');
-const { paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../security');
-const { fetchRawOptionChain } = require('../services/optionChain');
-const { processOptionChainData } = require('../services/analytics');
-const integrity = require('../services/integrity');
-const { AGENT } = require('../services/paperAccounts');
-const { accountAnalytics } = require('../services/paperAnalytics');
+const { paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../middleware/security');
+const { fetchRawOptionChain } = require('../services/market/optionChain');
+const { processOptionChainData } = require('../services/analytics/analytics');
+const integrity = require('../services/analytics/integrity');
+const { AGENT } = require('../services/paper/paperAccounts');
+const { accountAnalytics } = require('../services/paper/paperAnalytics');
 
 const READS_PER_MINUTE = 120;
 

@@ -31,11 +31,11 @@
 //   /v1/...                              the agent API (routes/paperAgent.js), authenticated by agent key instead
 
 const express = require('express');
-const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../security');
-const { defaultService, ID_RE } = require('../services/paperAccounts');
-const { defaultStrategyService } = require('../services/paperStrategies');
-const { createLiveService } = require('../services/strategyLive');
-const analytics = require('../services/paperAnalytics');
+const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../middleware/security');
+const { defaultService, ID_RE } = require('../services/paper/paperAccounts');
+const { defaultStrategyService } = require('../services/paper/paperStrategies');
+const { createLiveService } = require('../services/paper/strategyLive');
+const analytics = require('../services/paper/paperAnalytics');
 
 const router = express.Router();
 const signInLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, name: 'paper-signin' });
@@ -50,9 +50,9 @@ let strategyService = null;
 const strategies = () => strategyService || (strategyService = defaultStrategyService());
 let liveService = null;
 const live = () => liveService || (liveService = createLiveService({
-  store: require('../services/storage'),
+  store: require('../services/storage/storage'),
   accounts: svc(),
-  loadLive: (interval, symbol = 'NIFTY') => require('../services/candles').getLiveData(interval, { symbol })
+  loadLive: (interval, symbol = 'NIFTY') => require('../services/market/candles').getLiveData(interval, { symbol })
 }));
 const backtestLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'paper-backtest' });
 let lastTick = 0;
