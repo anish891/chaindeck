@@ -44,6 +44,28 @@ function lotSizeFor(symbol = 'NIFTY', nowMs = Date.now()) {
   return (hit && hit.lotSize) || instruments.getIndex(symbol).lotSize;
 }
 
+/** Epoch ms from an Upstox time field: epoch ms as a number or digit string, or an ISO string. null if unreadable. */
+function parseUpstoxTime(v) {
+  if (typeof v === 'number' && Number.isFinite(v) && v > 1e12) return v;
+  if (typeof v === 'string' && /^\d{13}$/.test(v)) return Number(v);
+  if (typeof v === 'string') { const t = Date.parse(v); return Number.isFinite(t) ? t : null; }
+  return null;
+}
+
+/** Last trade time of the underlying index from the full market quote; null (never an error) when unavailable. */
+async function underlyingLastTrade(key, get) {
+  try {
+    const data = await get('/v2/market-quote/quotes', { instrument_key: key });
+    const q = Object.values(data || {}).find(x => x && x.instrument_token === key) || Object.values(data || {})[0];
+    if (!q) return null;
+    return parseUpstoxTime(q.last_trade_time) || parseUpstoxTime(q.timestamp);
+  } catch (err) {
+    if (err && err.code === 'UPSTOX_AUTH') throw err;
+    console.error('underlying quote failed:', err.message);
+    return null;
+  }
+}
+
 /**
  * @param symbol      'NIFTY'
  * @param expiryDate  'DD-Mon-YYYY', or null for the nearest expiry
@@ -60,12 +82,20 @@ async function loadChain(symbol = 'NIFTY', expiryDate = null, { get = upstox.get
     throw err;
   }
 
-  const rows = await get('/v2/option/chain', { instrument_key: cfg.underlyingKey, expiry_date: instruments.nseDateToYmd(targetExpiry) });
+  const fetchedAt = Date.now();
+  const [rows, lastTradeMs] = await Promise.all([
+    get('/v2/option/chain', { instrument_key: cfg.underlyingKey, expiry_date: instruments.nseDateToYmd(targetExpiry) }),
+    underlyingLastTrade(cfg.underlyingKey, get)
+  ]);
   const lot = contracts.lotSize || cfg.lotSize;
-  const raw = toChainRaw(rows, { expiries: contracts.expiries, asOfMs: Date.now(), quantityPerContract: OI_IN_UNITS ? lot : 1 });
+  // The chain carries no exchange time. The index's last trade time plays the role NSE's timestamp did: it stops moving
+  // when the feed (or the market) stops, so the freshness checks keep meaning something. Never later than now.
+  const asOfMs = lastTradeMs ? Math.min(lastTradeMs, Date.now()) : fetchedAt;
+  const raw = toChainRaw(rows, { expiries: contracts.expiries, asOfMs, quantityPerContract: OI_IN_UNITS ? lot : 1 });
+  raw.asOfSource = lastTradeMs ? 'last_trade' : 'fetch';
   return { raw, allExpiries: contracts.expiries, targetExpiry };
 }
 
 const _clearCache = () => contractsCache.clear();
 
-module.exports = { loadChain, getContracts, knownExpiries, lotSizeFor, OI_IN_UNITS, _clearCache };
+module.exports = { loadChain, parseUpstoxTime, getContracts, knownExpiries, lotSizeFor, OI_IN_UNITS, _clearCache };

@@ -177,6 +177,7 @@ const sleep = async () => {};
     log.push(path);
     if (path === '/v2/option/contract') return contracts;
     if (path === '/v2/option/chain') { assert.strictEqual(q.expiry_date, '2026-11-10'); return upstoxRows; }
+    if (path === '/v2/market-quote/quotes') return { 'NSE_INDEX:Nifty 50': { instrument_token: 'NSE_INDEX|Nifty 50', last_price: SPOT, last_trade_time: String(Date.parse('2026-11-05T10:59:58+05:30')) } };
     throw new Error(`unexpected ${path}`);
   };
   const loaded = await chain.loadChain('NIFTY', '10-Nov-2026', { get: fakeGet, nowMs: now });
@@ -184,12 +185,23 @@ const sleep = async () => {};
   assert.deepStrictEqual(loaded.allExpiries, parsed.expiries);
   assert.strictEqual(loaded.raw.records.data.length, upstoxRows.length);
   assert.strictEqual(loaded.raw.records.data[10].CE.openInterest, nativeRows[10].CE.openInterest, 'units converted with the live lot size');
-  assert.deepStrictEqual(log, ['/v2/option/contract', '/v2/option/chain']);
+  assert.deepStrictEqual(log, ['/v2/option/contract', '/v2/option/chain', '/v2/market-quote/quotes']);
+  assert.strictEqual(loaded.raw.records.timestamp, '05-Nov-2026 10:59:58', 'stamped with the index last trade time');
+  assert.strictEqual(loaded.raw.asOfSource, 'last_trade');
 
   // warm cache: one call per refresh
   log.length = 0;
   await chain.loadChain('NIFTY', '10-Nov-2026', { get: fakeGet, nowMs: now + 60000 });
-  assert.deepStrictEqual(log, ['/v2/option/chain']);
+  assert.deepStrictEqual(log, ['/v2/option/chain', '/v2/market-quote/quotes']);
+
+  // no quote: falls back to fetch time and says so; an expired token still fails loudly
+  const noQuote = await chain.loadChain('NIFTY', '10-Nov-2026', { get: async (p, q2) => (p === '/v2/market-quote/quotes' ? {} : fakeGet(p, q2)), nowMs: now });
+  assert.strictEqual(noQuote.raw.asOfSource, 'fetch');
+  await assert.rejects(chain.loadChain('NIFTY', '10-Nov-2026', { get: async (p, q2) => { if (p === '/v2/market-quote/quotes') throw Object.assign(new Error('x'), { code: 'UPSTOX_AUTH' }); return fakeGet(p, q2); }, nowMs: now }), e => e.code === 'UPSTOX_AUTH');
+  assert.strictEqual(chain.parseUpstoxTime('1794376198000'), 1794376198000);
+  assert.strictEqual(chain.parseUpstoxTime('2026-11-05T10:59:58+05:30'), Date.parse('2026-11-05T05:29:58Z'));
+  assert.strictEqual(chain.parseUpstoxTime(null), null);
+  log.length = 0;
   assert.deepStrictEqual(chain.knownExpiries('NIFTY', now), parsed.expiries);
   assert.strictEqual(chain.lotSizeFor('NIFTY', now), 65);
 
