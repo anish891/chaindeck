@@ -1,6 +1,6 @@
 // Manual live check (needs network and UPSTOX_ACCESS_TOKEN; not part of `npm test`):
 //
-//   node api/check-upstox-live.js [SYMBOL]
+//   node scripts/check-upstox-live.js [SYMBOL]
 //
 // Loads the nearest expiry from Upstox and, for NIFTY, the same expiry from NSE; runs both through the same analytics;
 // prints the headline numbers side by side. The per-strike OI ratio settles whether Upstox reports open interest in units
@@ -8,13 +8,13 @@
 // Run it during market hours for a fair comparison: NSE lags by up to a minute, so small differences are expected.
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env.local'), quiet: true });
-const market = require('./services/market');
+const market = require('../api/services/market');
 market.getIndexSnapshot = async () => null; // compare the chain maths only
 market.getPivotBasis = async () => null;
-const analytics = require('./services/analytics');
-const integrity = require('./services/integrity');
-const upstoxChain = require('./services/upstoxChain');
-const nse = require('./services/nse');
+const analytics = require('../api/services/analytics');
+const integrity = require('../api/services/integrity');
+const upstoxChain = require('../api/services/upstoxChain');
+const nse = require('../api/services/nse');
 
 const SYMBOL = (process.argv[2] || 'NIFTY').toUpperCase();
 const KEYS = ['spot', 'atm', 'pcr', 'volPcr', 'maxPain', 'totalCallOI', 'totalPutOI', 'totalCallChgOI', 'totalPutChgOI', 'straddlePrice', 'atmIv', 'ivSkew', 'maxCallOIStrike', 'maxPutOIStrike'];
