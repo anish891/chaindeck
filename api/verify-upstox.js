@@ -153,6 +153,42 @@ const sleep = async () => {};
     assert.deepStrictEqual(fromUpstox[k], fromNative[k], `analytics ${k}`);
   }
   assert.ok(Number.isFinite(fromUpstox.pcr) && fromUpstox.totalCallOI > 0, 'analytics produced real numbers');
+  assert.strictEqual(fromUpstox.symbol, 'NIFTY');
+  assert.strictEqual(fromUpstox.strikeStep, 50);
+
+  // SENSEX: same maths on a chain around 80,000 with 100-point strikes and lot size 20
+  const SX = 80030, SXEXP = '12-Nov-2026';
+  const sxRowsA = [];
+  for (let k = 77000; k <= 83000; k += 100) {
+    const time = 200 * Math.exp(-Math.pow((k - SX) / 900, 2));
+    const ce = Math.round((Math.max(0, SX - k) + time) * 100) / 100, pe = Math.round((Math.max(0, k - SX) + time) * 100) / 100;
+    const ceOI = Math.round(20000 + 90000 * Math.exp(-Math.pow((k - 81000) / 600, 2)));
+    const peOI = Math.round(20000 + 95000 * Math.exp(-Math.pow((k - 79000) / 600, 2)));
+    const side = (ltp, oi, iv) => ({ market_data: { ltp, close_price: ltp - 5, volume: 4000 * 20, oi: oi * 20, prev_oi: (oi - 100) * 20, bid_price: ltp - 1, bid_qty: 20, ask_price: ltp + 1, ask_qty: 40 }, option_greeks: { iv } });
+    sxRowsA.push({ expiry: '2026-11-12', strike_price: k, underlying_spot_price: SX, call_options: side(ce, ceOI, 13.5), put_options: side(pe, peOI, 14.5) });
+  }
+  const sxRaw = toChainRaw(sxRowsA, { expiries: [SXEXP], asOfMs: asOf, quantityPerContract: 20 });
+  assert.deepStrictEqual(integrity.validateRaw(sxRaw, null, asOf), { ok: true, reasons: [] });
+  const sxOut = await analytics.processOptionChainData(sxRaw, [SXEXP], SXEXP, { symbol: 'SENSEX' });
+  assert.notStrictEqual(sxOut, fromUpstox, 'the 5 s cache never hands one index the other\'s result');
+  assert.strictEqual(sxOut.symbol, 'SENSEX');
+  assert.strictEqual(sxOut.indexName, 'SENSEX');
+  assert.strictEqual(sxOut.strikeStep, 100);
+  assert.strictEqual(sxOut.atm, 80000, 'ATM rounds to 100');
+  assert.strictEqual(sxOut.gex.lotSize, 20);
+  assert.ok(sxOut.strikes.every(r => Math.abs(r.strike - 80000) <= 1000) && sxOut.strikes.length === 21, '10 strikes either side');
+  assert.strictEqual(sxOut.maxCallOIStrike, 81000);
+  assert.strictEqual(sxOut.maxPutOIStrike, 79000);
+  assert.strictEqual(sxOut.breadth, null, 'NIFTY 50 breadth is not shown as SENSEX breadth');
+  assert.ok(sxOut.gex.zeroGammaLevel === null || Math.abs(sxOut.gex.zeroGammaLevel - SX) < 3000, 'zero gamma searched around SENSEX, not NIFTY');
+  assert.ok(!integrity.hasFailure(integrity.verifyProcessed(sxRaw, sxOut, SXEXP)), 'independent recomputation agrees for SENSEX');
+  await assert.rejects(analytics.processOptionChainData(sxRaw, [SXEXP], SXEXP, { symbol: 'FOO' }), e => e.code === 'BAD_SYMBOL');
+  // spot at a midpoint: ATM 80100 vs nearest 80000 is one SENSEX strike apart, which is fine
+  const mid = integrity.verifyProcessed(sxRaw, { ...sxOut, spot: 80050, atm: 80100 }, SXEXP).find(c => c.id === 'atm_strike');
+  assert.strictEqual(mid.level, 'pass', `one 100-point strike is not an ATM error: ${mid.detail}`);
+  const off = integrity.verifyProcessed(sxRaw, { ...sxOut, atm: 80400 }, SXEXP).find(c => c.id === 'atm_strike');
+  assert.strictEqual(off.level, 'fail', 'a wrong ATM is still caught');
+
   const checks = integrity.verifyProcessed(adapted, fromUpstox, EXP);
   assert.ok(!integrity.hasFailure(checks), `integrity: ${checks.filter(c => c.level === 'fail').map(c => c.id).join(',')}`);
 

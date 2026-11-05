@@ -155,11 +155,12 @@ function verifyProcessed(raw, data, expiry) {
   // ATM strike is the nearest strike to spot
   const spot = data.spot;
   const nearest = strikes.reduce((b, s) => (Math.abs(s.strike - spot) < Math.abs(b.strike - spot) ? s : b), strikes[0]);
-  const atmOk = Math.abs(nearest.strike - data.atm) <= 50;
+  const step = finiteNum(data.strikeStep) && data.strikeStep > 0 ? data.strikeStep : 50; // NIFTY 50, SENSEX 100
+  const atmOk = Math.abs(nearest.strike - data.atm) <= step;
   out.push(chk('atm_strike', G, 'ATM strike is the one nearest spot', atmOk ? 'pass' : 'fail', `ATM ${data.atm}, nearest ${nearest.strike}`));
 
   // put-call parity: every near-money strike should imply about the same forward (K + C - P)
-  const ring = strikes.filter(s => Math.abs(s.strike - spot) <= 250 && s.CE && s.PE && s.CE.lastPrice > 0 && s.PE.lastPrice > 0);
+  const ring = strikes.filter(s => Math.abs(s.strike - spot) <= 5 * step && s.CE && s.PE && s.CE.lastPrice > 0 && s.PE.lastPrice > 0);
   if (ring.length >= 3) {
     const fwd = ring.map(s => ({ k: s.strike, f: s.strike + s.CE.lastPrice - s.PE.lastPrice }));
     const med = median(fwd.map(x => x.f));
