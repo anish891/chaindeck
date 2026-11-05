@@ -48,7 +48,7 @@ const fmt = v => (v === null || v === undefined ? 'n/a' : typeof v === 'number' 
   }
 
   if (n) {
-    const nseOi = new Map(n.raw.records.data.filter(r => r.expiryDate === up.targetExpiry && r.CE).map(r => [r.strikePrice, r.CE.openInterest]));
+    const nseOi = new Map(n.raw.records.data.filter(r => (r.expiryDate || r.expiryDates) === up.targetExpiry && r.CE).map(r => [r.strikePrice, r.CE.openInterest]));
     const ratios = up.raw.records.data.filter(r => r.CE && nseOi.get(r.strikePrice) > 1000).map(r => r.CE.openInterest / nseOi.get(r.strikePrice)).sort((p, q) => p - q);
     const med = ratios.length ? ratios[Math.floor(ratios.length / 2)] : NaN;
     console.log(`\nper-strike call OI, Upstox / NSE (median of ${ratios.length}): ${med.toFixed(3)}  -> ${Math.abs(med - 1) < 0.1 ? 'units match' : 'UNITS DIFFER: check UPSTOX_OI_IN_UNITS'}`);

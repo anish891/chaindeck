@@ -327,41 +327,51 @@ const sleep = async () => {};
 
   // ── index snapshot from Upstox quotes ───────────────────────────────
   const mkt = require('./services/market');
-  const q = (key, last, prev, o = {}) => ({ instrument_token: key, last_price: last, prev_ohlc: { close: prev }, live_ohlc: { open: o.open || prev, high: o.high || last, low: o.low || prev, close: last } });
-  assert.deepStrictEqual(mkt.fromUpstoxQuote(q('NSE_INDEX|Nifty 50', 22770, 22700, { open: 22710, high: 22800, low: 22650 })),
+  // Shapes as Upstox really sends them (checked live 2026-11-05): v3 LTP carries the previous close as `cp`;
+  // v3 OHLC (interval 1d) has today's live_ohlc but prev_ohlc: null.
+  const ltpQ = (key, last, prev) => ({ instrument_token: key, last_price: last, ltq: 0, volume: 0, cp: prev });
+  const ohlcQ = (key, last, o = {}) => ({ instrument_token: key, last_price: last, prev_ohlc: null, live_ohlc: { open: o.open || last, high: o.high || last, low: o.low || last, close: last, volume: 0, ts: 1 } });
+  assert.deepStrictEqual(mkt.fromUpstoxQuote({ ...ltpQ('NSE_INDEX|Nifty 50', 22770, 22700), live_ohlc: { open: 22710, high: 22800, low: 22650 } }),
     { last: 22770, previousClose: 22700, open: 22710, high: 22800, low: 22650, percentChange: 0.31 });
   assert.strictEqual(mkt.fromUpstoxQuote({ last_price: 0 }), null);
   assert.strictEqual(mkt.fromUpstoxQuote(null), null);
-  assert.strictEqual(mkt.fromUpstoxQuote({ last_price: 10, prev_ohlc: {} }).percentChange, null, 'no previous close: no % change, not a fake 0');
+  assert.strictEqual(mkt.fromUpstoxQuote(ohlcQ('X|Y', 10)).percentChange, null, 'no previous close: no % change, not a fake 0');
 
   const ISIN = n => `INE${String(n).padStart(8, '0')}0`;
   const lists = { 'NIFTY 50': [ISIN(1), ISIN(2), ISIN(3), ISIN(4)], 'NIFTY BANK': [ISIN(1), ISIN(2)] };
   const stockQ = { [ISIN(1)]: [101, 100], [ISIN(2)]: [99, 100], [ISIN(3)]: [100, 100], [ISIN(4)]: [105, 100] };
+  const IDX = { 'NSE_INDEX|Nifty 50': [22770, 22700], 'NSE_INDEX|India VIX': [13.2, 13.8], 'BSE_INDEX|SENSEX': [80400, 80000], 'NSE_INDEX|Nifty Bank': [50100, 50000] };
   const quoteCalls = [];
   const quoteGet = async (path, query) => {
-    quoteCalls.push(query.instrument_key.length);
-    assert.strictEqual(path, '/v3/market-quote/ohlc');
-    assert.strictEqual(query.interval, '1d');
+    quoteCalls.push([path, query.instrument_key.length]);
     const out = {};
     for (const key of query.instrument_key) {
       const colon = key.replace('|', ':');
-      if (key === 'NSE_INDEX|Nifty 50') out[colon] = q(key, 22770, 22700);
-      else if (key === 'NSE_INDEX|India VIX') out[colon] = q(key, 13.2, 13.8);
-      else if (key === 'BSE_INDEX|SENSEX') out[colon] = q(key, 80400, 80000);
-      else if (key === 'NSE_INDEX|Nifty Bank') out[colon] = q(key, 50100, 50000);
-      else if (key.startsWith('NSE_EQ|') && stockQ[key.slice(7)]) out[colon] = q(key, ...stockQ[key.slice(7)]);
+      const px = IDX[key] || (key.startsWith('NSE_EQ|') && stockQ[key.slice(7)]);
+      if (!px) continue;
+      if (path === '/v3/market-quote/ltp') out[colon] = ltpQ(key, ...px);
+      else if (path === '/v3/market-quote/ohlc') { assert.strictEqual(query.interval, '1d'); out[colon] = ohlcQ(key, px[0], { open: px[1] + 5, high: px[0] + 30, low: px[1] - 20 }); }
+      else throw new Error(`unexpected ${path}`);
     }
     return out;
   };
   const snap = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => lists });
   assert.strictEqual(snap.source, 'upstox');
   assert.strictEqual(snap.nifty.last, 22770);
+  assert.strictEqual(snap.nifty.previousClose, 22700, 'previous close from LTP cp');
+  assert.strictEqual(snap.nifty.percentChange, 0.31);
+  assert.deepStrictEqual([snap.nifty.open, snap.nifty.high, snap.nifty.low], [22705, 22800, 22680], 'day range from OHLC live_ohlc');
   assert.strictEqual(snap.vix.percentChange, -4.35);
-  assert.strictEqual(snap.sensex.percentChange, 0.5, 'SENSEX day stats in the same quote call');
+  assert.strictEqual(snap.sensex.percentChange, 0.5, 'SENSEX day stats in the same calls');
   assert.deepStrictEqual(snap.breadth, { advances: 2, declines: 1, unchanged: 1 });
   assert.strictEqual(snap.sectors.length, 1, 'sectors without a quote are left out, as before');
   assert.deepStrictEqual(snap.sectors[0], { name: 'Bank', index: 'NIFTY BANK', last: 50100, percentChange: 0.2, advances: 1, declines: 1 });
-  assert.deepStrictEqual(quoteCalls, [3 + mkt.SECTORS.length + 4], 'one quote call for indices and stocks together');
+  assert.deepStrictEqual(quoteCalls.sort(), [['/v3/market-quote/ltp', 3 + mkt.SECTORS.length + 4], ['/v3/market-quote/ohlc', 3]], 'one LTP call for everything, one OHLC call for the three headline indices');
+
+  // OHLC failing only loses the day range, never the price or % change
+  const noOhlc = await mkt.loadIndicesUpstox({ get: async (p, q2) => { if (p.endsWith('/ohlc')) throw new Error('down'); return quoteGet(p, q2); }, getLists: async () => lists });
+  assert.strictEqual(noOhlc.nifty.percentChange, 0.31);
+  assert.strictEqual(noOhlc.nifty.high, null);
 
   // breadth unknown when constituents are unavailable; NIFTY missing is an error (the old copy is then served)
   const noLists = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => { throw new Error('down'); } });
@@ -372,11 +382,10 @@ const sleep = async () => {};
 
   // large constituent sets are split into batches; a failed stock batch only blanks breadth
   const many = { 'NIFTY 50': Array.from({ length: 450 }, (_, i) => ISIN(i + 10)) };
-  quoteCalls.length = 0;
-  let n = 0;
-  const flakyStocks = async (p, query) => { n += 1; if (n > 1) throw new Error('boom'); return quoteGet(p, query); };
+  let ltpCalls = 0;
+  const flakyStocks = async (p, query) => { if (p.endsWith('/ltp')) { ltpCalls += 1; if (ltpCalls > 1) throw new Error('boom'); } return quoteGet(p, query); };
   const big = await mkt.loadIndicesUpstox({ get: flakyStocks, getLists: async () => many });
-  assert.strictEqual(n, 3, '469 keys -> 3 calls of at most 200');
+  assert.strictEqual(ltpCalls, 3, '469 keys -> 3 LTP calls of at most 200');
   assert.strictEqual(big.nifty.last, 22770);
 
   // ── constituent lists ───────────────────────────────────────────────
