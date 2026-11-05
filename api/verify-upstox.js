@@ -1,6 +1,9 @@
 // Upstox client checks: no network, every reply comes from a fake fetch.
 const assert = require('assert');
 const upstox = require('./services/upstox');
+const market = require('./services/market');
+market.getIndexSnapshot = async () => null; // offline
+market.getPivotBasis = async () => null;
 
 const reply = (status, body) => async () => ({ status, ok: status >= 200 && status < 300, json: async () => body });
 const sleep = async () => {};
@@ -86,6 +89,78 @@ const sleep = async () => {};
   assert.strictEqual(asked.q.instrument_key, 'NSE_INDEX|Nifty 50');
   assert.strictEqual(fc.expiries[0], '05-Nov-2026');
   await assert.rejects(instruments.fetchContracts('NIFTY', { get: async () => [], nowMs: now }), /no open expiries/);
+
+  // ── adapter: Upstox chain -> ChainDeck chain ────────────────────────
+  const { toChainRaw, formatIstTimestamp } = require('./services/upstoxAdapter');
+  const integrity = require('./services/integrity');
+  const analytics = require('./services/analytics');
+  assert.strictEqual(formatIstTimestamp(Date.parse('2026-11-05T04:45:07Z')), '05-Nov-2026 10:15:07');
+
+  // One synthetic chain, written twice: in ChainDeck's own shape (contracts) and as Upstox would send it (units).
+  const LOT = 65, SPOT = 22700, EXP_YMD = '2026-11-10', EXP = '10-Nov-2026';
+  const asOf = Date.parse('2026-11-05T11:30:00+05:30');
+  const nativeRows = [], upstoxRows = [];
+  for (let k = 22000; k <= 23400; k += 50) {
+    const time = 60 * Math.exp(-Math.pow((k - SPOT) / 250, 2));
+    const ce = Math.round((Math.max(0, SPOT - k) + time) * 100) / 100, pe = Math.round((Math.max(0, k - SPOT) + time) * 100) / 100;
+    const ceOI = Math.round(40000 + 200000 * Math.exp(-Math.pow((k - 23000) / 200, 2)));
+    const peOI = Math.round(40000 + 220000 * Math.exp(-Math.pow((k - 22400) / 200, 2)));
+    const chg = 500, vol = 90000, ivC = 14.2, ivP = 15.1, prevClose = 3;
+    const native = (ltp, oi, iv) => ({ strikePrice: k, expiryDate: EXP, openInterest: oi, changeinOpenInterest: chg, totalTradedVolume: vol, impliedVolatility: iv, lastPrice: ltp, change: Number((ltp - (ltp - prevClose)).toFixed(2)), bidprice: ltp - 0.5, bidQty: 650, askPrice: ltp + 0.5, askQty: 1300, underlyingValue: SPOT });
+    nativeRows.push({ strikePrice: k, expiryDate: EXP, CE: native(ce, ceOI, ivC), PE: native(pe, peOI, ivP) });
+    const side = (ltp, oi, iv, type) => ({
+      instrument_key: `NSE_FO|${k}${type}`,
+      market_data: { ltp, close_price: ltp - prevClose, volume: vol * LOT, oi: oi * LOT, prev_oi: (oi - chg) * LOT, bid_price: ltp - 0.5, bid_qty: 650, ask_price: ltp + 0.5, ask_qty: 1300 },
+      option_greeks: { vega: 1, theta: -1, gamma: 0.001, delta: 0.5, iv, pop: 50 }
+    });
+    upstoxRows.push({ expiry: EXP_YMD, pcr: 1, strike_price: k, underlying_key: 'NSE_INDEX|Nifty 50', underlying_spot_price: SPOT, call_options: side(ce, ceOI, ivC, 'CE'), put_options: side(pe, peOI, ivP, 'PE') });
+  }
+  const nativeRaw = { records: { expiryDates: [EXP, '17-Nov-2026'], underlyingValue: SPOT, timestamp: formatIstTimestamp(asOf), data: nativeRows } };
+  const adapted = toChainRaw(upstoxRows.slice().reverse(), { expiries: [EXP, '17-Nov-2026'], asOfMs: asOf, quantityPerContract: LOT });
+
+  assert.strictEqual(adapted.source, 'upstox');
+  assert.deepStrictEqual(adapted.records.expiryDates, [EXP, '17-Nov-2026']);
+  assert.strictEqual(adapted.records.underlyingValue, SPOT);
+  assert.strictEqual(adapted.records.timestamp, '05-Nov-2026 11:30:00');
+  assert.deepStrictEqual(adapted.records.data.map(r => r.strikePrice), nativeRows.map(r => r.strikePrice), 'rows sorted by strike');
+  const leg = adapted.records.data[10].CE, want = nativeRows[10].CE;
+  for (const f of ['strikePrice', 'expiryDate', 'openInterest', 'changeinOpenInterest', 'totalTradedVolume', 'impliedVolatility', 'lastPrice', 'change', 'bidprice', 'bidQty', 'askPrice', 'askQty', 'underlyingValue']) {
+    assert.strictEqual(leg[f], want[f], `leg field ${f}`);
+  }
+  assert.strictEqual(leg.identifier, 'NSE_FO|22500CE');
+
+  // With quantityPerContract 1, numbers pass through untouched.
+  assert.strictEqual(toChainRaw(upstoxRows, { quantityPerContract: 1 }).records.data[0].CE.openInterest, upstoxRows[0].call_options.market_data.oi);
+
+  // The adapted payload passes the same checks as before, and every headline number comes out identical.
+  assert.deepStrictEqual(integrity.validateRaw(adapted, null, asOf), { ok: true, reasons: [] });
+  const fromNative = await analytics.processOptionChainData(nativeRaw, [EXP], EXP);
+  const fromUpstox = await analytics.processOptionChainData(adapted, [EXP], EXP);
+  for (const k of ['spot', 'atm', 'dteDays', 'pcr', 'ntmPcr', 'volPcr', 'straddlePrice', 'upperRange', 'lowerRange', 'impliedFuture', 'ivSkew', 'atmIv', 'maxPain', 'walls', 'gex', 'totalCallOI', 'totalPutOI', 'totalCallChgOI', 'totalPutChgOI', 'maxCallOIStrike', 'maxPutOIStrike']) {
+    assert.ok(fromNative[k] !== undefined, `analytics returns ${k}`);
+    assert.deepStrictEqual(fromUpstox[k], fromNative[k], `analytics ${k}`);
+  }
+  assert.ok(Number.isFinite(fromUpstox.pcr) && fromUpstox.totalCallOI > 0, 'analytics produced real numbers');
+  const checks = integrity.verifyProcessed(adapted, fromUpstox, EXP);
+  assert.ok(!integrity.hasFailure(checks), `integrity: ${checks.filter(c => c.level === 'fail').map(c => c.id).join(',')}`);
+
+  // Bad values are surfaced, never turned into zeros.
+  const broken = JSON.parse(JSON.stringify(upstoxRows));
+  broken[3].call_options.market_data.oi = '1200';
+  broken[4].put_options.option_greeks.iv = null;      // missing is fine
+  const br = toChainRaw(broken, { expiries: [EXP], asOfMs: asOf, quantityPerContract: LOT });
+  assert.ok(Number.isNaN(br.records.data[3].CE.openInterest));
+  assert.ok(Number.isNaN(br.records.data[3].CE.changeinOpenInterest));
+  assert.ok(!('impliedVolatility' in br.records.data[4].PE));
+  assert.ok(integrity.validateRaw(br, null, asOf).reasons.some(r => /non-numeric/.test(r)), 'a string OI is rejected');
+
+  // Missing legs and an empty chain
+  const oneSided = JSON.parse(JSON.stringify(upstoxRows));
+  delete oneSided[0].put_options;
+  assert.ok(!('PE' in toChainRaw(oneSided).records.data[0]));
+  assert.ok(Number.isNaN(toChainRaw([]).records.underlyingValue));
+  assert.ok(!integrity.validateRaw(toChainRaw([])).ok, 'an empty chain is rejected before caching');
+  assert.throws(() => toChainRaw(null), /not a list/);
 
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });
