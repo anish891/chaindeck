@@ -46,6 +46,16 @@ function feed(expiry) {
   return { records: { timestamp: nseTs(Date.now() - 10000), underlyingValue: 25010, expiryDates: EXPIRIES, data } };
 }
 
+/** SENSEX chain: 100-point strikes around 82000. */
+function sxFeed(expiry) {
+  const data = [];
+  for (let k = 81000; k <= 83000; k += 100) {
+    const ce = Math.max(5, 82000 - k + 300), pe = Math.max(5, k - 82000 + 280);
+    data.push({ expiryDate: expiry, strikePrice: k, CE: { lastPrice: ce, bidprice: ce - 0.5, askPrice: ce + 0.5, impliedVolatility: 12, openInterest: 1000 }, PE: { lastPrice: pe, bidprice: pe - 0.5, askPrice: pe + 0.5, impliedVolatility: 13, openInterest: 1000 } });
+  }
+  return { records: { timestamp: nseTs(Date.now() - 10000), underlyingValue: 82040, expiryDates: EXPIRIES, data } };
+}
+
 (async () => {
   // ── payoff maths: the app's TypeScript module, compiled by Vite the way the shipped bundle is ──
   const P = await require('./lib/paperUi').loadPaperUi();
@@ -75,8 +85,9 @@ function feed(expiry) {
   paperRouter.setService(createService({
     store: fakeStore(),
     isMarketOpen: () => true,
-    loadRaw: async e => ({ raw: feed(e || EXP), allExpiries: EXPIRIES, targetExpiry: e || EXP, stale: false }),
-    loadSettle: async () => null
+    loadRaw: async (e, symbol = 'NIFTY') => ({ raw: (symbol === 'SENSEX' ? sxFeed : feed)(e || EXP), allExpiries: EXPIRIES, targetExpiry: e || EXP, stale: false }),
+    loadSettle: async () => null,
+    lotSizeFor: () => 20
   }));
   const server = await listen(app);
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -172,6 +183,34 @@ function feed(expiry) {
     assert.strictEqual((await call('/api/paper/accounts/main/orders/xyz', { method: 'DELETE', cookie })).status, 400);
     assert.strictEqual((await call(`/api/paper/accounts/main/orders/${rest.order.id}`, { method: 'DELETE', cookie })).status, 200);
     assert.strictEqual((await call(`/api/paper/accounts/main/orders/${rest.order.id}`, { method: 'DELETE', cookie })).status, 422, 'already cancelled');
+
+    // SENSEX: an account of its own, the ticket market by symbol, lot size 20, and no NIFTY orders on it
+    assert.strictEqual((await call('/api/paper/accounts', { method: 'POST', cookie, body: { id: 'bad-index', symbol: 'BANKNIFTY' } })).status, 400);
+    r = await call('/api/paper/accounts', { method: 'POST', cookie, body: { id: 'sensex', name: 'Sensex', symbol: 'SENSEX' } });
+    assert.strictEqual(r.status, 201);
+    assert.strictEqual((await r.json()).account.symbol, 'SENSEX');
+    assert.strictEqual((await (await call('/api/paper/accounts', { cookie })).json()).accounts.find(a => a.id === 'sensex').symbol, 'SENSEX');
+    assert.strictEqual((await call('/api/paper/market?symbol=BANKNIFTY', { cookie })).status, 400);
+    const sm = await (await call('/api/paper/market?symbol=SENSEX', { cookie })).json();
+    assert.deepStrictEqual([sm.symbol, sm.lotSize, sm.atmStrike, sm.spot], ['SENSEX', 20, 82000, 82040]);
+    assert(sm.strikes.every((x, i, a) => i === 0 || x.strike - a[i - 1].strike === 100));
+    assert.deepStrictEqual([m.symbol, m.lotSize], ['NIFTY', 65], 'the default market is still NIFTY');
+    const sxOrder = await (await call('/api/paper/accounts/sensex/orders', { method: 'POST', cookie, body: { instrument: `SENSEX|${EXP}|82000|CE`, side: 'BUY', lots: 2 } })).json();
+    assert(sxOrder.ok, JSON.stringify(sxOrder));
+    assert.deepStrictEqual([sxOrder.trade.qty, sxOrder.trade.price], [40, 300.5]);
+    r = await call('/api/paper/accounts/sensex/orders', { method: 'POST', cookie, body: order });
+    assert.deepStrictEqual([r.status, (await r.json()).code], [422, 'WRONG_INDEX']);
+    const sxView = await (await call('/api/paper/accounts/sensex', { cookie })).json();
+    assert.deepStrictEqual([sxView.summary.symbol, sxView.summary.lotSize, sxView.summary.positions[0].qty], ['SENSEX', 20, 40]);
+    // an agent key on the SENSEX account sees SENSEX
+    const key = await (await call('/api/paper/accounts/sensex/keys', { method: 'POST', cookie, body: { label: 'Agent' } })).json();
+    const agentAuth = `Bearer ${key.token}`;
+    const doc = await (await call('/api/paper/v1', { auth: agentAuth })).json();
+    assert.strictEqual(doc.you.index, 'SENSEX');
+    assert(/SENSEX\|/.test(doc.order.instrument) && /100 points/.test(doc.instruments));
+    const am = await (await call('/api/paper/v1/market', { auth: agentAuth })).json();
+    assert.deepStrictEqual([am.symbol, am.lotSize, am.atmStrike], ['SENSEX', 20, 82000]);
+    assert.strictEqual((await call('/api/paper/accounts/sensex', { method: 'DELETE', cookie, body: {} })).status, 200);
 
     // account view
     const view = await (await call('/api/paper/accounts/main', { cookie })).json();
