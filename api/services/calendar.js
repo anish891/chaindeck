@@ -1,7 +1,8 @@
 // NSE trading calendar (equity derivatives): which days the market is closed besides weekends.
 //
 // Pure module with no imports, so nse.js, volatility.js and the routes can all use it without import cycles.
-// The list is refreshed from NSE's own holiday master (see nse.refreshHolidays) and falls back to the list below if
+// The list is refreshed daily from Upstox's market holidays (or NSE's holiday master with DATA_SOURCE=nse; see
+// holidays.js) and falls back to the list below if
 // that cannot be reached. The fallback covers 2026 only: for a year with no data the module has no holidays to apply
 // and behaves like a plain Monday-Friday calendar, which is the previous behaviour.
 //
@@ -43,6 +44,26 @@ function setHolidaysFromNse(json, now = Date.now()) {
   if (dates.length < 5) return 0;
   holidays = new Set(dates);
   source = 'nse';
+  updatedAt = now;
+  return dates.length;
+}
+
+/**
+ * Replace the holiday list from Upstox's /v2/market/holidays rows
+ * ({ date: 'YYYY-MM-DD', holiday_type: 'TRADING_HOLIDAY', closed_exchanges: ['NSE', 'NFO', ...] }).
+ * Only days the F&O segment (NFO) is shut count. Upstox lists one year at a time, so dates the current list holds for
+ * other years are kept. Returns the number of dates loaded, or 0 (list unchanged) if the payload does not look right.
+ */
+function setHolidaysFromUpstox(rows, now = Date.now()) {
+  if (!Array.isArray(rows)) return 0;
+  const dates = rows
+    .filter(r => r && r.holiday_type === 'TRADING_HOLIDAY' && Array.isArray(r.closed_exchanges) && r.closed_exchanges.includes('NFO'))
+    .map(r => String(r.date || '').slice(0, 10))
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  if (dates.length < 5) return 0;
+  const years = new Set(dates.map(d => d.slice(0, 4)));
+  holidays = new Set([...[...holidays].filter(d => !years.has(d.slice(0, 4))), ...dates]);
+  source = 'upstox';
   updatedAt = now;
   return dates.length;
 }
@@ -100,6 +121,7 @@ module.exports = {
   CLOSE_MIN,
   nseDateToYmd,
   setHolidaysFromNse,
+  setHolidaysFromUpstox,
   setHolidays,
   isHoliday,
   isTradingDayYmd,

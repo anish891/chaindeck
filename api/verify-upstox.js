@@ -376,5 +376,35 @@ const sleep = async () => {};
   assert.deepStrictEqual(Object.keys(candlesMod.UPSTOX_KEYS).sort(), Object.keys(candlesMod.SYMBOLS).sort());
   assert.strictEqual(candlesMod.UPSTOX_KEYS.etf, 'NSE_EQ|INF204KB14I2', 'NIFTYBEES by ISIN');
 
+  // ── holidays from Upstox ────────────────────────────────────────────
+  const cal = require('./services/calendar');
+  const hol = require('./services/holidays');
+  const shut = (date, closed = ['NSE', 'NFO', 'BSE', 'BFO']) => ({ date, description: 'x', holiday_type: 'TRADING_HOLIDAY', closed_exchanges: closed, open_exchanges: [] });
+  const upHolidays = [
+    shut('2027-01-26'), shut('2027-03-22'), shut('2027-04-14'), shut('2027-05-01'), shut('2027-08-15'), shut('2027-10-02'),
+    shut('2027-11-01', ['MCX']),                                                         // NFO open: not a holiday here
+    { date: '2027-11-08', holiday_type: 'SETTLEMENT_HOLIDAY', closed_exchanges: ['NFO'] } // settlement only
+  ];
+  assert.strictEqual(cal.setHolidaysFromUpstox(upHolidays), 6);
+  assert.ok(cal.isHoliday('2027-01-26') && !cal.isHoliday('2027-11-01') && !cal.isHoliday('2027-11-08'));
+  assert.ok(cal.isHoliday('2026-10-20'), 'other years already known are kept');
+  assert.strictEqual(cal.snapshot().source, 'upstox');
+  assert.strictEqual(cal.setHolidaysFromUpstox([shut('2027-01-26')]), 0, 'a tiny list is ignored');
+  assert.strictEqual(cal.setHolidaysFromUpstox({}), 0);
+  cal.setHolidays(cal.FALLBACK_HOLIDAYS);
+
+  hol._reset();
+  let holCalls = 0;
+  const holGet = async p => { holCalls += 1; assert.strictEqual(p, '/v2/market/holidays'); return upHolidays; };
+  assert.strictEqual((await hol.refreshHolidays({ get: holGet, source: 'upstox' })).source, 'upstox');
+  await hol.refreshHolidays({ get: holGet, source: 'upstox' });
+  assert.strictEqual(holCalls, 1, 'once a day');
+  cal.setHolidays(cal.FALLBACK_HOLIDAYS);
+  const errLog = console.error; console.error = () => {};
+  const kept = await hol.refreshHolidays({ force: true, get: async () => { throw new Error('down'); }, source: 'upstox' });
+  console.error = errLog;
+  assert.ok(kept.holidays.includes('2026-11-10'), 'a failed refresh keeps the list in memory');
+  hol._reset();
+
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

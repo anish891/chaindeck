@@ -7,7 +7,7 @@ const forwardLog = require('../services/forwardlog');
 const { withRetry } = require('../services/retry');
 const integrity = require('../services/integrity');
 const { istNow } = require('../services/market');
-const { refreshHolidays } = require('../services/nse');
+const { refreshHolidays } = require('../services/holidays');
 const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/optionChain');
 const calendar = require('../services/calendar');
 const premarket = require('../services/premarket');
@@ -26,7 +26,7 @@ const HISTORY_CACHE = 'public, s-maxage=10, stale-while-revalidate=20';
 const strictLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'sensitive' });
 
 router.get('/option-chain', async (req, res) => {
-  refreshHolidays().catch(() => {}); // cheap: at most one NSE call a day, never blocks or throws
+  refreshHolidays().catch(() => {}); // cheap: at most one upstream call a day, never blocks or throws
   const { expiry } = req.query;
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
