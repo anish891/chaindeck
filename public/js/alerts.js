@@ -444,7 +444,7 @@ function renderSettings() {
 
   const note = document.createElement('p');
   note.className = 'as-note';
-  note.textContent = 'Alerts are evaluated in this browser on each new NSE snapshot (about once a minute), so they only fire while a dashboard tab is open. A change must hold for two snapshots before it alerts, and values hovering near a threshold stay quiet. Settings and the log are stored in this browser only.';
+  note.textContent = 'Alerts are evaluated in this browser on each new option chain snapshot (every few seconds while the page refreshes), so they only fire while a dashboard tab is open. A change must hold for two snapshots before it alerts, and values hovering near a threshold stay quiet. Settings and the log are stored in this browser only.';
   host.append(note);
 }
 

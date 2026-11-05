@@ -40,7 +40,7 @@ function codedError(code, message) {
 /**
  * deps:
  *   store        storage.js-compatible (get, set, setNx, del, hset, hgetall, hdel)
- *   loadRaw      (expiry | null) => { raw, allExpiries, targetExpiry, stale }   (nse.fetchRawNSEOptionChain)
+ *   loadRaw      (expiry | null) => { raw, allExpiries, targetExpiry, stale }   (optionChain.fetchRawOptionChain)
  *   loadSettle   (expiry) => settlement spot or null                             (daily close on the expiry date)
  *   now          () => epoch ms
  *   isMarketOpen (ms) => boolean
@@ -406,7 +406,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 /** The service wired to real storage, NSE and Yahoo. */
 function defaultService() {
   const store = require('./storage');
-  const { fetchRawNSEOptionChain } = require('./nse');
+  const { fetchRawOptionChain } = require('./optionChain');
   const candles = require('./candles');
   const loadSettle = async expiry => {
     const ymd = calendar.nseDateToYmd(expiry);
@@ -414,7 +414,7 @@ function defaultService() {
     const bar = (daily || []).find(c => candles.istDay(c.t) === ymd);
     return bar ? bar.c : null;
   };
-  return createService({ store, loadRaw: e => fetchRawNSEOptionChain('NIFTY', e), loadSettle });
+  return createService({ store, loadRaw: e => fetchRawOptionChain('NIFTY', e), loadSettle });
 }
 
 module.exports = { createService, defaultService, ID_RE, AGENT };

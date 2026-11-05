@@ -1,7 +1,9 @@
 const fetch = require('node-fetch');
 const calendar = require('./calendar');
+const upstoxCandles = require('./upstoxCandles');
 
-// OHLC candles for the Nifty 50 index from Yahoo Finance, with volume borrowed from the Nifty 50 ETF (NIFTYBEES).
+// OHLC candles for the Nifty 50 index from Upstox (or Yahoo Finance when DATA_SOURCE=nse / no Upstox token), with volume
+// borrowed from the Nifty 50 ETF (NIFTYBEES).
 // The index itself carries no volume, so the ETF's traded volume on the same candle is used as a proxy. It is a proxy:
 // it includes arbitrage and creation/redemption activity, and the UI says so.
 //
@@ -9,6 +11,9 @@ const calendar = require('./calendar');
 
 const YAHOO = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 const SYMBOLS = { index: '^NSEI', etf: 'NIFTYBEES.NS', vix: '^INDIAVIX' };
+// The same three series on Upstox (NIFTYBEES is keyed by its ISIN).
+const UPSTOX_KEYS = { index: 'NSE_INDEX|Nifty 50', etf: 'NSE_EQ|INF204KB14I2', vix: 'NSE_INDEX|India VIX' };
+const YAHOO_SYMBOL_TO_SERIES = Object.fromEntries(Object.entries(SYMBOLS).map(([k, v]) => [v, k]));
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 6000;
 
@@ -70,6 +75,19 @@ async function fetchYahooCandles(symbol, interval, range, fetchImpl = fetch) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Which provider candles come from: Upstox when it is the option chain source, Yahoo otherwise (and for DATA_SOURCE=nse). */
+const candleSource = () => (require('./optionChain').sourceName() === 'upstox' ? 'upstox' : 'yahoo');
+
+/**
+ * One candle series by Yahoo symbol, from whichever provider is active. Callers keep passing Yahoo symbols, so the
+ * Yahoo path and its tests are unchanged; with Upstox the symbol is mapped to the matching Upstox instrument.
+ */
+async function fetchSeries(symbol, interval, range, fetchImpl = fetch) {
+  const series = YAHOO_SYMBOL_TO_SERIES[symbol];
+  if (candleSource() === 'upstox' && series) return upstoxCandles.fetchUpstoxCandles(UPSTOX_KEYS[series], interval, range);
+  return fetchYahooCandles(symbol, interval, range, fetchImpl);
 }
 
 /**
@@ -164,16 +182,16 @@ async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch }
   try {
     const result = await cached(`chart|${interval}`, ttl, async () => {
       const [idx, etf] = await Promise.all([
-        fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
-        fetchYahooCandles(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => [])
+        fetchSeries(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
+        fetchSeries(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => [])
       ]);
       if (!idx.length) throw new Error('No index candles returned');
       const merged = mergeVolume(idx, etf, daily);
-      return { candles: merged.candles, volumeSource: merged.covered > idx.length * 0.5 ? 'etf' : 'none', source: 'yahoo' };
+      return { candles: merged.candles, volumeSource: merged.covered > idx.length * 0.5 ? 'etf' : 'none', source: candleSource() };
     }, staleMax);
     return { ...result.value, fetchedAt: result.ts, stale: result.stale, updatedAt: Date.now() };
   } catch (err) {
-    console.error('candles: Yahoo unavailable:', err.message);
+    console.error(`candles: ${candleSource()} unavailable:`, err.message);
     const minutes = preset.minutes;
     if (fallbackPoints && minutes) {
       let points = fallbackPoints;
@@ -191,7 +209,7 @@ async function getCandles(interval, { fallbackPoints = null, fetchImpl = fetch }
 async function getHistoryCandles(interval, { fetchImpl = fetch } = {}) {
   const preset = HISTORY_PRESETS[interval];
   if (!preset) throw new Error(`Unsupported interval ${interval}`);
-  const r = await cached(`history|${interval}`, TTL_HISTORY_MS, () => fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl), TTL_HISTORY_MS * 4);
+  const r = await cached(`history|${interval}`, TTL_HISTORY_MS, () => fetchSeries(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl), TTL_HISTORY_MS * 4);
   return r.value;
 }
 
@@ -200,8 +218,8 @@ async function getHistoryWithVolume({ fetchImpl = fetch } = {}) {
   const preset = HISTORY_PRESETS['5m'];
   const r = await cached('historyv|5m', TTL_HISTORY_MS, async () => {
     const [idx, etf] = await Promise.all([
-      fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
-      fetchYahooCandles(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => [])
+      fetchSeries(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
+      fetchSeries(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => [])
     ]);
     if (!idx.length) throw new Error('No index candles returned');
     return mergeVolume(idx, etf, false).candles;
@@ -218,9 +236,9 @@ async function getBacktestData(interval, { fetchImpl = fetch } = {}) {
   if (!preset || interval === '1d') throw new Error(`Unsupported interval ${interval}`);
   const r = await cached(`backtest|${interval}`, TTL_HISTORY_MS, async () => {
     const [idx, etf, vix] = await Promise.all([
-      fetchYahooCandles(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
-      fetchYahooCandles(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => []),
-      fetchYahooCandles(SYMBOLS.vix, preset.yahooInterval, preset.range, fetchImpl)
+      fetchSeries(SYMBOLS.index, preset.yahooInterval, preset.range, fetchImpl),
+      fetchSeries(SYMBOLS.etf, preset.yahooInterval, preset.range, fetchImpl).catch(() => []),
+      fetchSeries(SYMBOLS.vix, preset.yahooInterval, preset.range, fetchImpl)
     ]);
     if (!idx.length) throw new Error('No index candles returned');
     if (!vix.length) throw new Error('No India VIX candles returned');
@@ -239,7 +257,7 @@ async function getLiveData(interval, { fetchImpl = fetch } = {}) {
   const ttl = marketOpenNow() ? TTL_OPEN_MS : TTL_CLOSED_MS;
   const [chart, vix] = await Promise.all([
     getCandles(interval, { fetchImpl }),
-    cached(`livevix|${interval}`, ttl, () => fetchYahooCandles(SYMBOLS.vix, preset.yahooInterval, '5d', fetchImpl), STALE_MAX_OPEN_MS)
+    cached(`livevix|${interval}`, ttl, () => fetchSeries(SYMBOLS.vix, preset.yahooInterval, '5d', fetchImpl), STALE_MAX_OPEN_MS)
   ]);
   return { candles: chart.candles, vix: vix.value.map(c => ({ t: c.t, c: c.c })), stale: !!(chart.stale || vix.stale), source: chart.source };
 }
@@ -257,6 +275,8 @@ module.exports = {
   istMinuteOfDay,
   parseYahoo,
   fetchYahooCandles,
+  fetchSeries,
+  UPSTOX_KEYS,
   mergeVolume,
   candlesFromSpotPoints,
   getCandles,

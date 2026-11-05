@@ -20,7 +20,7 @@ import type { AccountDetail, AccountListItem, Market, OptionType, Session, Side 
 type Boot = 'loading' | 'unreachable' | 'unconfigured' | 'signedOut' | 'ready';
 type View = 'trade' | 'lab' | 'perf';
 
-const OPEN_POLL_MS = 15000; // NSE refreshes about once a minute; faster polling only spends storage commands
+const OPEN_POLL_MS = 15000; // orders are checked about once a minute; faster polling only spends storage commands
 const CLOSED_POLL_MS = 60000;
 
 const savedView = (): View => { const v = readPref('paper_view'); return v === 'lab' || v === 'perf' ? v : 'trade'; };
@@ -207,7 +207,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
         {visited.perf && <div hidden={view !== 'perf'}><div className="section"><EquityPanel account={account} /></div><Perf accountId={accountId} active={view === 'perf'} /></div>}
 
         <div className="section pt-foot">
-          <div className="panel-note">Paper trading with simulated money on real NSE prices. Fills, charges and margin are approximations of what a broker would do. For practice and testing only, not investment advice.</div>
+          <div className="panel-note">Paper trading with simulated money on real market prices from Upstox. Fills, charges and margin are approximations of what a broker would do. For practice and testing only, not investment advice.</div>
         </div>
       </main>
     </>

@@ -152,7 +152,7 @@ export function Lab({ accounts, accountId, marketOpen, active }: Props) {
           </div>
           {current && current.id && (
             <div className="lab-deploy">
-              <div className="pt-label">Run it live on a paper account: real NSE prices, checked every minute by the paper cron job</div>
+              <div className="pt-label">Run it live on a paper account: real market prices, checked every minute by the paper cron job</div>
               <div className="pt-form-row">
                 <select aria-label="Account to run the strategy on" value={deployAccount} onChange={e => setDeployAccount(e.target.value)}>
                   {accounts.map(a => <option key={a.id} value={a.id} disabled={busy.has(a.id)}>{a.name}{busy.has(a.id) ? ' (strategy running)' : ''}</option>)}

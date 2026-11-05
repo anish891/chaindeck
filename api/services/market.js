@@ -1,8 +1,11 @@
 const fetch = require('node-fetch');
 const { getCookies, fetchWithTimeout } = require('./nse');
+const upstox = require('./upstox');
+const constituents = require('./constituents');
+const upstoxCandles = require('./upstoxCandles');
 
-// Cached market-context lookups: India VIX / index day stats from NSE, and the
-// previous completed session's OHLC (for real CPR/pivots) from Yahoo Finance.
+// Cached market-context lookups: India VIX, index day stats, sectors and breadth (Upstox quotes, or NSE when DATA_SOURCE=nse),
+// and the previous completed session's OHLC (for real CPR/pivots) from the same provider's daily candles.
 // Every function resolves to null on failure so analytics can degrade gracefully.
 
 
@@ -38,15 +41,20 @@ function pick(row) {
   };
 }
 
-// Sector tiles: [short label, exact NSE index name]
+// Sector tiles: [short label, exact NSE index name, Upstox instrument key]
 const SECTORS = [
-  ['Bank', 'NIFTY BANK'], ['Private Bank', 'NIFTY PRIVATE BANK'], ['PSU Bank', 'NIFTY PSU BANK'],
-  ['Financial Services', 'NIFTY FINANCIAL SERVICES'], ['IT', 'NIFTY IT'], ['Auto', 'NIFTY AUTO'],
-  ['FMCG', 'NIFTY FMCG'], ['Pharma', 'NIFTY PHARMA'], ['Healthcare', 'NIFTY HEALTHCARE INDEX'],
-  ['Metal', 'NIFTY METAL'], ['Energy', 'NIFTY ENERGY'], ['Oil & Gas', 'NIFTY OIL & GAS'],
-  ['Realty', 'NIFTY REALTY'], ['Media', 'NIFTY MEDIA'], ['Consumer Durables', 'NIFTY CONSUMER DURABLES'],
-  ['Infrastructure', 'NIFTY INFRASTRUCTURE']
+  ['Bank', 'NIFTY BANK', 'NSE_INDEX|Nifty Bank'], ['Private Bank', 'NIFTY PRIVATE BANK', 'NSE_INDEX|Nifty Pvt Bank'],
+  ['PSU Bank', 'NIFTY PSU BANK', 'NSE_INDEX|Nifty PSU Bank'], ['Financial Services', 'NIFTY FINANCIAL SERVICES', 'NSE_INDEX|Nifty Fin Service'],
+  ['IT', 'NIFTY IT', 'NSE_INDEX|Nifty IT'], ['Auto', 'NIFTY AUTO', 'NSE_INDEX|Nifty Auto'], ['FMCG', 'NIFTY FMCG', 'NSE_INDEX|Nifty FMCG'],
+  ['Pharma', 'NIFTY PHARMA', 'NSE_INDEX|Nifty Pharma'], ['Healthcare', 'NIFTY HEALTHCARE INDEX', 'NSE_INDEX|NIFTY HEALTHCARE'],
+  ['Metal', 'NIFTY METAL', 'NSE_INDEX|Nifty Metal'], ['Energy', 'NIFTY ENERGY', 'NSE_INDEX|Nifty Energy'],
+  ['Oil & Gas', 'NIFTY OIL & GAS', 'NSE_INDEX|NIFTY OIL AND GAS'], ['Realty', 'NIFTY REALTY', 'NSE_INDEX|Nifty Realty'],
+  ['Media', 'NIFTY MEDIA', 'NSE_INDEX|Nifty Media'], ['Consumer Durables', 'NIFTY CONSUMER DURABLES', 'NSE_INDEX|NIFTY CONSR DURBL'],
+  ['Infrastructure', 'NIFTY INFRASTRUCTURE', 'NSE_INDEX|Nifty Infra']
 ];
+const NIFTY_KEY = 'NSE_INDEX|Nifty 50';
+const VIX_KEY = 'NSE_INDEX|India VIX';
+const QUOTE_BATCH = 200; // instrument keys per Upstox quote call
 
 async function loadIndices() {
   const cookies = await getCookies();
@@ -63,7 +71,67 @@ async function loadIndices() {
   return { nifty: pick(nifty), vix: vix ? pick(vix) : null, sectors, breadth };
 }
 
-let indexLoader = loadIndices; // swappable in tests
+/** Upstox v3 OHLC quote (interval 1d) -> { last, previousClose, open, high, low, percentChange }, or null. */
+function fromUpstoxQuote(q) {
+  if (!q) return null;
+  const last = Number(q.last_price);
+  const prev = Number(q.prev_ohlc && q.prev_ohlc.close);
+  const live = q.live_ohlc || {};
+  if (!(last > 0)) return null;
+  const pct = prev > 0 ? Number((((last - prev) / prev) * 100).toFixed(2)) : null;
+  const n = v => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
+  return { last, previousClose: prev > 0 ? prev : null, open: n(live.open), high: n(live.high), low: n(live.low), percentChange: pct };
+}
+
+/** Count stocks up / down / flat against their previous close. Unknown stocks are skipped; null if none are known. */
+function countBreadth(isins, quotes) {
+  if (!Array.isArray(isins) || !isins.length) return null;
+  let advances = 0, declines = 0, unchanged = 0, known = 0;
+  for (const isin of isins) {
+    const q = fromUpstoxQuote(quotes.get(`NSE_EQ|${isin}`));
+    if (!q || q.previousClose === null) continue;
+    known += 1;
+    if (q.last > q.previousClose) advances += 1;
+    else if (q.last < q.previousClose) declines += 1;
+    else unchanged += 1;
+  }
+  return known ? { advances, declines, unchanged } : null;
+}
+
+/** VIX, NIFTY day stats, sectors and breadth from one batch of Upstox quotes (same shape as the NSE loader). */
+async function loadIndicesUpstox({ get = upstox.get, getLists = () => constituents.getConstituents() } = {}) {
+  const lists = await getLists().catch(err => { console.error('constituents failed:', err.message); return {}; });
+  const stockKeys = [...new Set(Object.values(lists || {}).flat())].map(isin => `NSE_EQ|${isin}`);
+  const keys = [NIFTY_KEY, VIX_KEY, ...SECTORS.map(s => s[2]), ...stockKeys];
+  const batches = [];
+  for (let i = 0; i < keys.length; i += QUOTE_BATCH) batches.push(keys.slice(i, i + QUOTE_BATCH));
+  const replies = await Promise.all(batches.map((b, i) => {
+    const call = get('/v3/market-quote/ohlc', { instrument_key: b, interval: '1d' });
+    // Only the first batch (indices) is essential; a failed stock batch just leaves breadth unknown.
+    return i === 0 ? call : call.catch(err => { console.error('stock quotes failed:', err.message); return {}; });
+  }));
+  // Replies are keyed 'NSE_INDEX:Nifty 50'; instrument_token carries the 'NSE_INDEX|Nifty 50' form we asked with.
+  const quotes = new Map();
+  for (const data of replies) for (const q of Object.values(data || {})) if (q && q.instrument_token) quotes.set(q.instrument_token, q);
+
+  const nifty = fromUpstoxQuote(quotes.get(NIFTY_KEY));
+  if (!nifty) throw new Error('NIFTY 50 missing from Upstox quotes');
+  const vix = fromUpstoxQuote(quotes.get(VIX_KEY));
+  const sectors = SECTORS.map(([name, index, key]) => {
+    const q = fromUpstoxQuote(quotes.get(key));
+    if (!q) return null;
+    const b = countBreadth(lists && lists[index], quotes);
+    return { name, index, last: q.last, percentChange: q.percentChange, advances: b ? b.advances : null, declines: b ? b.declines : null };
+  }).filter(Boolean);
+  const breadth = countBreadth(lists && lists['NIFTY 50'], quotes);
+  return { nifty, vix, sectors, breadth, source: 'upstox' };
+}
+
+const defaultLoader = () => (optionChainSource() === 'upstox' ? loadIndicesUpstox() : loadIndices());
+// Lazy: optionChain.js decides the source; requiring it here at load time would be needlessly early.
+const optionChainSource = () => require('./optionChain').sourceName();
+
+let indexLoader = defaultLoader; // swappable in tests
 
 const staleIndices = () => (indicesCache.value && Date.now() - indicesCache.ts < INDICES_MAX_STALE ? indicesCache.value : null);
 
@@ -78,7 +146,7 @@ async function getIndexSnapshot({ timeoutMs = 0 } = {}) {
     indicesInflight = indexLoader()
       .then(v => { indicesCache = { ts: Date.now(), value: v }; return v; })
       .catch(err => {
-        console.error('allIndices failed:', err.message);
+        console.error('index snapshot failed:', err.message);
         return staleIndices();
       })
       .finally(() => { indicesInflight = null; });
@@ -95,12 +163,16 @@ async function getIndexSnapshot({ timeoutMs = 0 } = {}) {
 
 /** Test hooks: replace the NSE loader and clear the cache. */
 function _setIndexLoader(fn) {
-  indexLoader = fn || loadIndices;
+  indexLoader = fn || defaultLoader;
   indicesCache = { ts: 0, value: null };
   indicesInflight = null;
 }
 
 async function loadDailyBars() {
+  if (optionChainSource() === 'upstox') {
+    const candles = await upstoxCandles.fetchUpstoxCandles(NIFTY_KEY, '1d', '10d');
+    return candles.map(c => ({ date: new Date(c.t + 330 * 60 * 1000).toISOString().slice(0, 10), open: c.o, high: c.h, low: c.l, close: c.c }));
+  }
   const url = 'https://query1.finance.yahoo.com/v8/finance/chart/%5ENSEI?range=10d&interval=1d';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 5000);
@@ -140,7 +212,7 @@ async function getPivotBasis() {
     const prior = bars.filter(b => b.date < now.ymd).pop();
     const basis = sessionClosed && todayBar ? todayBar : prior;
     if (!basis) return ohlcCache.value;
-    const value = { ...basis, source: 'yahoo' };
+    const value = { ...basis, source: optionChainSource() === 'upstox' ? 'upstox' : 'yahoo' };
     ohlcCache = { ts: Date.now(), value, key };
     return value;
   } catch (err) {
@@ -149,4 +221,4 @@ async function getPivotBasis() {
   }
 }
 
-module.exports = { getIndexSnapshot, getPivotBasis, istNow, _setIndexLoader };
+module.exports = { getIndexSnapshot, getPivotBasis, istNow, _setIndexLoader, loadIndicesUpstox, fromUpstoxQuote, countBreadth, SECTORS };

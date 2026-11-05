@@ -7,7 +7,7 @@
 
 // seconds of age before a feed turns amber, then red
 export const THRESHOLDS = {
-  chain: { warn: 90, bad: 180 },   // NSE refreshes its option chain about every 30 to 60 seconds
+  chain: { warn: 90, bad: 180 },   // a live feed: a minute and a half without a new trade time is already unusual
   candles: { warn: 120, bad: 360 }, // measured as how far the latest bar's end is behind the clock; Yahoo is delayed by design
   saved: { warn: 180, bad: 360 }    // the per-minute cron snapshot
 };

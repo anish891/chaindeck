@@ -65,7 +65,7 @@ export function Chain({ market, held, onPick, onExpiry }: Props) {
           </tbody>
         </table>
       </div>
-      <div className="panel-note">Tap a price to buy or sell. A dot means you hold it. Prices from NSE, about once a minute. Lot size {market ? market.lotSize : 'n/a'}.</div>
+      <div className="panel-note">Tap a price to buy or sell. A dot means you hold it. Prices from Upstox. Lot size {market ? market.lotSize : 'n/a'}.</div>
     </div>
   );
 }

@@ -180,11 +180,12 @@ function fakeStore() {
   assert.strictEqual(openEntries().length, 0);
   assert.ok(doneEntries().some(e => e.id === zoneOpen.id && e.status === 'resolved'));
 
-  // stale or non-Yahoo data never creates entries
+  // stale data, or candles rebuilt from our own saved spots, never create entries (Upstox and Yahoo candles do)
   const st2 = fakeStore(), repo2 = F.makeRepo(st2);
   assert.strictEqual((await F.tick({ '5m': analysis({ feed: { stale: true, source: 'yahoo' } }) }, { now, repo: repo2 })).recorded, 0);
   assert.strictEqual((await F.tick({ '5m': analysis({ feed: { stale: false, source: 'stored' } }) }, { now, repo: repo2 })).recorded, 0);
   assert.strictEqual((await F.tick({ '5m': analysis() }, { now, repo: repo2, open: false })).recorded, 0, 'nothing is recorded outside market hours');
+  { const st3 = fakeStore(), repo3 = F.makeRepo(st3); assert.ok((await F.tick({ '5m': analysis({ feed: { stale: false, source: 'upstox' } }) }, { now, repo: repo3 })).recorded > 0, 'fresh Upstox candles are recorded'); }
   assert.strictEqual((await F.tick({ '5m': analysis() }, { now: now + 40 * 60000, repo: repo2 })).recorded, 0, 'a lagging last bar (over 15 minutes behind) is not fresh');
 
   // log summary reads open entries plus the monthly lists

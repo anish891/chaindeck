@@ -177,6 +177,7 @@ const sleep = async () => {};
     log.push(path);
     if (path === '/v2/option/contract') return contracts;
     if (path === '/v2/option/chain') { assert.strictEqual(q.expiry_date, '2026-11-10'); return upstoxRows; }
+    if (path === '/v2/market-quote/quotes') return { 'NSE_INDEX:Nifty 50': { instrument_token: 'NSE_INDEX|Nifty 50', last_price: SPOT, last_trade_time: String(Date.parse('2026-11-05T10:59:58+05:30')) } };
     throw new Error(`unexpected ${path}`);
   };
   const loaded = await chain.loadChain('NIFTY', '10-Nov-2026', { get: fakeGet, nowMs: now });
@@ -184,12 +185,23 @@ const sleep = async () => {};
   assert.deepStrictEqual(loaded.allExpiries, parsed.expiries);
   assert.strictEqual(loaded.raw.records.data.length, upstoxRows.length);
   assert.strictEqual(loaded.raw.records.data[10].CE.openInterest, nativeRows[10].CE.openInterest, 'units converted with the live lot size');
-  assert.deepStrictEqual(log, ['/v2/option/contract', '/v2/option/chain']);
+  assert.deepStrictEqual(log, ['/v2/option/contract', '/v2/option/chain', '/v2/market-quote/quotes']);
+  assert.strictEqual(loaded.raw.records.timestamp, '05-Nov-2026 10:59:58', 'stamped with the index last trade time');
+  assert.strictEqual(loaded.raw.asOfSource, 'last_trade');
 
   // warm cache: one call per refresh
   log.length = 0;
   await chain.loadChain('NIFTY', '10-Nov-2026', { get: fakeGet, nowMs: now + 60000 });
-  assert.deepStrictEqual(log, ['/v2/option/chain']);
+  assert.deepStrictEqual(log, ['/v2/option/chain', '/v2/market-quote/quotes']);
+
+  // no quote: falls back to fetch time and says so; an expired token still fails loudly
+  const noQuote = await chain.loadChain('NIFTY', '10-Nov-2026', { get: async (p, q2) => (p === '/v2/market-quote/quotes' ? {} : fakeGet(p, q2)), nowMs: now });
+  assert.strictEqual(noQuote.raw.asOfSource, 'fetch');
+  await assert.rejects(chain.loadChain('NIFTY', '10-Nov-2026', { get: async (p, q2) => { if (p === '/v2/market-quote/quotes') throw Object.assign(new Error('x'), { code: 'UPSTOX_AUTH' }); return fakeGet(p, q2); }, nowMs: now }), e => e.code === 'UPSTOX_AUTH');
+  assert.strictEqual(chain.parseUpstoxTime('1794376198000'), 1794376198000);
+  assert.strictEqual(chain.parseUpstoxTime('2026-11-05T10:59:58+05:30'), Date.parse('2026-11-05T05:29:58Z'));
+  assert.strictEqual(chain.parseUpstoxTime(null), null);
+  log.length = 0;
   assert.deepStrictEqual(chain.knownExpiries('NIFTY', now), parsed.expiries);
   assert.strictEqual(chain.lotSizeFor('NIFTY', now), 65);
 
@@ -200,6 +212,211 @@ const sleep = async () => {};
 
   // the cached list is dropped once its nearest expiry has passed
   assert.strictEqual(chain.knownExpiries('NIFTY', Date.parse('2026-11-06T09:30:00+05:30')), null);
+
+  // ── option chain source and cache in front of Upstox ────────────────
+  const oc = require('./services/optionChain');
+  assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'nse' }).name, 'nse', 'DATA_SOURCE=nse switches back');
+  assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'UPSTOX' }).name, 'upstox');
+  const saved = process.env.UPSTOX_ACCESS_TOKEN;
+  process.env.UPSTOX_ACCESS_TOKEN = 'x';
+  assert.strictEqual(oc.pickSource({}).name, 'upstox', 'Upstox is the default when a token is set');
+  process.env.UPSTOX_ACCESS_TOKEN = '';
+  const warn = console.warn; console.warn = () => {};
+  assert.strictEqual(oc.pickSource({}).name, 'nse', 'no token: NSE, with a warning');
+  console.warn = warn;
+  if (saved === undefined) delete process.env.UPSTOX_ACCESS_TOKEN; else process.env.UPSTOX_ACCESS_TOKEN = saved;
+
+  let loads = 0, failNext = false;
+  oc._setSource({
+    name: 'upstox',
+    knownExpiries: () => ['10-Nov-2026'],
+    load: async (sym, exp) => {
+      loads += 1;
+      if (failNext) throw Object.assign(new Error('Upstox did not answer within 6000 ms'), { code: 'UPSTOX_TIMEOUT' });
+      return { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: Date.now(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: exp || EXP };
+    }
+  });
+  const [a, b] = await Promise.all([oc.fetchRawOptionChain('NIFTY', null), oc.fetchRawOptionChain('NIFTY', null)]);
+  assert.strictEqual(loads, 1, 'concurrent requests share one Upstox call');
+  assert.strictEqual(a, b);
+  assert.strictEqual(a.stale, false);
+  await oc.fetchRawOptionChain('NIFTY', null);
+  assert.strictEqual(loads, 1, 'served from the 5 s cache');
+  await assert.rejects(oc.fetchRawOptionChain('NIFTY', '17-Nov-2026'), e => e.code === 'BAD_EXPIRY');
+  assert.strictEqual(loads, 1, 'unknown expiry refused without an upstream call');
+
+  // a broken payload is not cached; a failed refresh serves the last copy flagged stale
+  oc._setSource({ name: 'upstox', knownExpiries: () => null, load: async () => ({ raw: toChainRaw([]), allExpiries: [EXP], targetExpiry: EXP }) });
+  await assert.rejects(oc.fetchRawOptionChain('NIFTY', null), /payload rejected/);
+  const realNow = Date.now;
+  oc._setSource({ name: 'upstox', knownExpiries: () => ['10-Nov-2026'], load: async () => { loads += 1; if (failNext) throw new Error('Upstox did not answer within 6000 ms'); return { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: realNow(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: EXP }; } });
+  await oc.fetchRawOptionChain('NIFTY', null);
+  failNext = true;
+  Date.now = () => realNow() + 6000;
+  const stale = await oc.fetchRawOptionChain('NIFTY', null);
+  Date.now = realNow;
+  assert.strictEqual(stale.stale, true);
+  assert.strictEqual(oc.staleReasonCode(stale.staleReason), 'timeout');
+  oc._setSource(null);
+
+  // ── index snapshot from Upstox quotes ───────────────────────────────
+  const mkt = require('./services/market');
+  const q = (key, last, prev, o = {}) => ({ instrument_token: key, last_price: last, prev_ohlc: { close: prev }, live_ohlc: { open: o.open || prev, high: o.high || last, low: o.low || prev, close: last } });
+  assert.deepStrictEqual(mkt.fromUpstoxQuote(q('NSE_INDEX|Nifty 50', 22770, 22700, { open: 22710, high: 22800, low: 22650 })),
+    { last: 22770, previousClose: 22700, open: 22710, high: 22800, low: 22650, percentChange: 0.31 });
+  assert.strictEqual(mkt.fromUpstoxQuote({ last_price: 0 }), null);
+  assert.strictEqual(mkt.fromUpstoxQuote(null), null);
+  assert.strictEqual(mkt.fromUpstoxQuote({ last_price: 10, prev_ohlc: {} }).percentChange, null, 'no previous close: no % change, not a fake 0');
+
+  const ISIN = n => `INE${String(n).padStart(8, '0')}0`;
+  const lists = { 'NIFTY 50': [ISIN(1), ISIN(2), ISIN(3), ISIN(4)], 'NIFTY BANK': [ISIN(1), ISIN(2)] };
+  const stockQ = { [ISIN(1)]: [101, 100], [ISIN(2)]: [99, 100], [ISIN(3)]: [100, 100], [ISIN(4)]: [105, 100] };
+  const quoteCalls = [];
+  const quoteGet = async (path, query) => {
+    quoteCalls.push(query.instrument_key.length);
+    assert.strictEqual(path, '/v3/market-quote/ohlc');
+    assert.strictEqual(query.interval, '1d');
+    const out = {};
+    for (const key of query.instrument_key) {
+      const colon = key.replace('|', ':');
+      if (key === 'NSE_INDEX|Nifty 50') out[colon] = q(key, 22770, 22700);
+      else if (key === 'NSE_INDEX|India VIX') out[colon] = q(key, 13.2, 13.8);
+      else if (key === 'NSE_INDEX|Nifty Bank') out[colon] = q(key, 50100, 50000);
+      else if (key.startsWith('NSE_EQ|') && stockQ[key.slice(7)]) out[colon] = q(key, ...stockQ[key.slice(7)]);
+    }
+    return out;
+  };
+  const snap = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => lists });
+  assert.strictEqual(snap.source, 'upstox');
+  assert.strictEqual(snap.nifty.last, 22770);
+  assert.strictEqual(snap.vix.percentChange, -4.35);
+  assert.deepStrictEqual(snap.breadth, { advances: 2, declines: 1, unchanged: 1 });
+  assert.strictEqual(snap.sectors.length, 1, 'sectors without a quote are left out, as before');
+  assert.deepStrictEqual(snap.sectors[0], { name: 'Bank', index: 'NIFTY BANK', last: 50100, percentChange: 0.2, advances: 1, declines: 1 });
+  assert.deepStrictEqual(quoteCalls, [2 + mkt.SECTORS.length + 4], 'one quote call for indices and stocks together');
+
+  // breadth unknown when constituents are unavailable; NIFTY missing is an error (the old copy is then served)
+  const noLists = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => { throw new Error('down'); } });
+  assert.strictEqual(noLists.breadth, null);
+  assert.strictEqual(noLists.sectors[0].advances, null);
+  await assert.rejects(mkt.loadIndicesUpstox({ get: async () => ({}), getLists: async () => ({}) }), /NIFTY 50 missing/);
+  assert.strictEqual(mkt.countBreadth([], new Map()), null);
+
+  // large constituent sets are split into batches; a failed stock batch only blanks breadth
+  const many = { 'NIFTY 50': Array.from({ length: 450 }, (_, i) => ISIN(i + 10)) };
+  quoteCalls.length = 0;
+  let n = 0;
+  const flakyStocks = async (p, query) => { n += 1; if (n > 1) throw new Error('boom'); return quoteGet(p, query); };
+  const big = await mkt.loadIndicesUpstox({ get: flakyStocks, getLists: async () => many });
+  assert.strictEqual(n, 3, '468 keys -> 3 calls of at most 200');
+  assert.strictEqual(big.nifty.last, 22770);
+
+  // ── constituent lists ───────────────────────────────────────────────
+  const cons = require('./services/constituents');
+  const csv = 'Company Name,Industry,Symbol,Series,ISIN Code\nA Ltd.,X,AAA,EQ,INE423A01024\nB Ltd.,Y,BBB,EQ,INE742F01042\nbad,row,,,\n';
+  assert.deepStrictEqual(cons.parseConstituentCsv(csv), ['INE423A01024', 'INE742F01042']);
+  assert.strictEqual(cons.parseConstituentCsv('<html>blocked</html>'), null);
+  const memStore = (() => { const m = new Map(); return { get: async k => m.get(k) || null, set: async (k, v) => { m.set(k, v); } }; })();
+  let downloads = 0;
+  const csvFetch = async () => { downloads += 1; return { ok: true, text: async () => csv }; };
+  cons._clear();
+  const got = await cons.getConstituents({ fetchImpl: csvFetch, storeImpl: memStore, nowMs: 1e12 });
+  assert.strictEqual(Object.keys(got).length, Object.keys(cons.FILES).length);
+  assert.strictEqual(downloads, Object.keys(cons.FILES).length);
+  cons._clear();
+  await cons.getConstituents({ fetchImpl: csvFetch, storeImpl: memStore, nowMs: 1e12 + 3600e3 });
+  assert.strictEqual(downloads, Object.keys(cons.FILES).length, 'a stored copy under a day old is reused');
+  cons._clear();
+  const failing = await cons.getConstituents({ fetchImpl: async () => ({ ok: false }), storeImpl: memStore, nowMs: 1e12 + 30 * 3600e3 });
+  assert.deepStrictEqual(failing['NIFTY 50'], ['INE423A01024', 'INE742F01042'], 'failed downloads keep the last good list');
+  cons._clear();
+
+  // ── candles from Upstox ─────────────────────────────────────────────
+  const uc = require('./services/upstoxCandles');
+  assert.deepStrictEqual(uc.parseRange('60d'), { sessions: 60, calendarDays: 95 });
+  assert.deepStrictEqual(uc.parseRange('5y'), { sessions: null, calendarDays: 1830 });
+  assert.throws(() => uc.parseRange('max'), /Unsupported range/);
+  const rowsIn = [
+    ['2026-11-05T09:20:00+05:30', 22710, 22730, 22700, 22725, 0, 0],
+    ['2026-11-05T09:15:00+05:30', 22700, 22715, 22690, 22710, 12000, 0],
+    ['2026-11-05T09:15:00+05:30', 22700, 22715, 22690, 22710, 12000, 0],   // duplicate
+    ['2026-11-05T09:25:00+05:30', 22725, null, 22720, 22722, 0, 0],         // missing high: dropped
+    'junk'
+  ];
+  const parsedC = uc.parseUpstoxCandles(rowsIn);
+  assert.deepStrictEqual(parsedC.map(c => c.t), [Date.parse('2026-11-05T09:15:00+05:30'), Date.parse('2026-11-05T09:20:00+05:30')], 'sorted oldest first, de-duplicated');
+  assert.deepStrictEqual(parsedC[0], { t: Date.parse('2026-11-05T09:15:00+05:30'), o: 22700, h: 22715, l: 22690, c: 22710, v: 12000 });
+  assert.strictEqual(parsedC[1].v, null, 'index volume 0 means no volume');
+
+  // windows: 60 sessions of 5m candles -> intraday + 4 history windows of <= 28 days, keyed path with the encoded instrument
+  const paths = [];
+  const nowC = Date.parse('2026-11-05T11:00:00+05:30');
+  const dayRows = (ymd) => [[`${ymd}T09:15:00+05:30`, 1, 2, 1, 2, 5, 0], [`${ymd}T15:25:00+05:30`, 2, 3, 2, 3, 5, 0]];
+  const histGet = async (path) => {
+    paths.push(path);
+    if (path.includes('/intraday/')) return { candles: dayRows('2026-11-05') };
+    const [toDay, from] = path.split('/').slice(-2);
+    const out = [];
+    for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${toDay}T00:00:00Z`); t += 86400000) {
+      const d = new Date(t); if (d.getUTCDay() === 0 || d.getUTCDay() === 6) continue;
+      out.push(...dayRows(d.toISOString().slice(0, 10)));
+    }
+    return { candles: out };
+  };
+  const c60 = await uc.fetchUpstoxCandles('NSE_INDEX|Nifty 50', '5m', '60d', { get: histGet, nowMs: nowC });
+  assert.ok(paths[0].startsWith('/v3/historical-candle/intraday/NSE_INDEX%7CNifty%2050/minutes/5'));
+  assert.strictEqual(paths.length, 5, 'intraday + 4 windows for ~95 calendar days');
+  for (const pth of paths.slice(1)) {
+    const [toDay, from] = pth.split('/').slice(-2);
+    assert.ok((Date.parse(toDay) - Date.parse(from)) / 86400000 <= 27, `window ${from}..${toDay} within a month`);
+    assert.ok(toDay < '2026-11-05', 'history stops at yesterday; today comes from the intraday call');
+  }
+  assert.strictEqual(new Set(c60.map(c => new Date(c.t + 330 * 60000).toISOString().slice(0, 10))).size, 60, 'trimmed to 60 sessions');
+  assert.strictEqual(new Date(c60[c60.length - 1].t + 330 * 60000).toISOString().slice(0, 10), '2026-11-05', 'today included');
+
+  // daily: one history request; a failing intraday call (holiday, pre-open) is fine, an auth failure is not
+  paths.length = 0;
+  const d1 = await uc.fetchUpstoxCandles('NSE_INDEX|Nifty 50', '1d', '1y', { get: async p => { if (p.includes('intraday')) { paths.push(p); throw Object.assign(new Error('no data'), { code: 'UPSTOX_HTTP' }); } return histGet(p); }, nowMs: nowC });
+  assert.strictEqual(paths.length, 2);
+  assert.ok(paths[1].includes('/days/1/'));
+  assert.ok(d1.length > 200);
+  await assert.rejects(uc.fetchUpstoxCandles('X|Y', '5m', '5d', { get: async () => { throw Object.assign(new Error('expired'), { code: 'UPSTOX_AUTH' }); }, nowMs: nowC }), e => e.code === 'UPSTOX_AUTH');
+  await assert.rejects(uc.fetchUpstoxCandles('X|Y', '2h', '5d', { get: histGet }), /Unsupported interval/);
+
+  // the candle module maps its Yahoo symbols to Upstox instruments
+  const candlesMod = require('./services/candles');
+  assert.deepStrictEqual(Object.keys(candlesMod.UPSTOX_KEYS).sort(), Object.keys(candlesMod.SYMBOLS).sort());
+  assert.strictEqual(candlesMod.UPSTOX_KEYS.etf, 'NSE_EQ|INF204KB14I2', 'NIFTYBEES by ISIN');
+
+  // ── holidays from Upstox ────────────────────────────────────────────
+  const cal = require('./services/calendar');
+  const hol = require('./services/holidays');
+  const shut = (date, closed = ['NSE', 'NFO', 'BSE', 'BFO']) => ({ date, description: 'x', holiday_type: 'TRADING_HOLIDAY', closed_exchanges: closed, open_exchanges: [] });
+  const upHolidays = [
+    shut('2027-01-26'), shut('2027-03-22'), shut('2027-04-14'), shut('2027-05-01'), shut('2027-08-15'), shut('2027-10-02'),
+    shut('2027-11-01', ['MCX']),                                                         // NFO open: not a holiday here
+    { date: '2027-11-08', holiday_type: 'SETTLEMENT_HOLIDAY', closed_exchanges: ['NFO'] } // settlement only
+  ];
+  assert.strictEqual(cal.setHolidaysFromUpstox(upHolidays), 6);
+  assert.ok(cal.isHoliday('2027-01-26') && !cal.isHoliday('2027-11-01') && !cal.isHoliday('2027-11-08'));
+  assert.ok(cal.isHoliday('2026-10-20'), 'other years already known are kept');
+  assert.strictEqual(cal.snapshot().source, 'upstox');
+  assert.strictEqual(cal.setHolidaysFromUpstox([shut('2027-01-26')]), 0, 'a tiny list is ignored');
+  assert.strictEqual(cal.setHolidaysFromUpstox({}), 0);
+  cal.setHolidays(cal.FALLBACK_HOLIDAYS);
+
+  hol._reset();
+  let holCalls = 0;
+  const holGet = async p => { holCalls += 1; assert.strictEqual(p, '/v2/market/holidays'); return upHolidays; };
+  assert.strictEqual((await hol.refreshHolidays({ get: holGet, source: 'upstox' })).source, 'upstox');
+  await hol.refreshHolidays({ get: holGet, source: 'upstox' });
+  assert.strictEqual(holCalls, 1, 'once a day');
+  cal.setHolidays(cal.FALLBACK_HOLIDAYS);
+  const errLog = console.error; console.error = () => {};
+  const kept = await hol.refreshHolidays({ force: true, get: async () => { throw new Error('down'); }, source: 'upstox' });
+  console.error = errLog;
+  assert.ok(kept.holidays.includes('2026-11-10'), 'a failed refresh keeps the list in memory');
+  hol._reset();
 
   console.log('upstox checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

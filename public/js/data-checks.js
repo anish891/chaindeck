@@ -7,7 +7,7 @@
 //          content: { sameCount } }
 //
 // What this can do: show that the numbers are fresh, internally consistent and agree with a second source.
-// What it cannot do: prove NSE itself is right.
+// What it cannot do: prove the data provider itself is right.
 
 import { freshness, candleLagSec } from './freshness.js';
 
@@ -28,11 +28,11 @@ export const CHECK_TARGETS = {
   day_range: ['ksDay']
 };
 
-export const SPOT_TOLERANCE = { warn: 0.0015, fail: 0.004 }; // NSE vs Yahoo, as a fraction of spot (Yahoo is delayed, so not tighter)
+export const SPOT_TOLERANCE = { warn: 0.0015, fail: 0.004 }; // option chain spot vs the candle feed, as a fraction of spot (Yahoo, when used, is delayed, so not tighter)
 export const FROZEN = { warn: 3, fail: 5 };                   // consecutive NEW snapshots with identical contents
 
 // The server sends a short reason code, never raw error text.
-const STALE_REASONS = { payload_rejected: 'NSE sent data that failed validation', timeout: 'NSE did not answer in time', fetch_failed: 'NSE could not be reached' };
+const STALE_REASONS = { payload_rejected: 'Upstox sent data that failed validation', timeout: 'Upstox did not answer in time', fetch_failed: 'Upstox could not be reached' };
 
 const chk = (id, group, label, level, detail) => ({ id, group, label, level, detail });
 const fromFresh = (f, okText) => ({ level: f.level === 'bad' ? 'fail' : f.level === 'warn' ? 'warn' : 'pass', detail: f.level === 'idle' ? `${f.text} (market closed)` : f.text === 'no data' ? 'no data' : `${okText} ${f.text}` });
@@ -79,12 +79,12 @@ export function evaluateTrust({ now, marketOpen, chain = null, candles = null, s
   const checks = [];
   const F = 'Freshness';
 
-  // ── NSE option chain ──
+  // ── option chain ──
   if (!chain || !chain.d) {
     checks.push(chk('nse_fresh', F, 'Option chain from NSE is current', marketOpen ? 'fail' : 'skip', 'no option chain loaded'));
   } else {
     const f = freshness('chain', chain.ageSec, { stale: false, open: marketOpen, hasData: true });
-    const r = fromFresh(f, 'last NSE update');
+    const r = fromFresh(f, 'last option chain update');
     checks.push(chk('nse_fresh', F, 'Option chain from NSE is current', r.level, r.detail));
     // While trading a leftover copy means the screen is behind the market (fail, pauses signals). After the close nothing is
     // moving, so the last good copy is still the right picture and it only warns.
@@ -124,14 +124,16 @@ export function evaluateTrust({ now, marketOpen, chain = null, candles = null, s
     checks.push(chk('saved_fresh', F, 'Per-minute snapshots are being saved', marketOpen ? 'warn' : 'skip', 'no saved history found (needs storage and the cron job)'));
   }
 
-  // ── cross-source: NSE spot vs the Yahoo candle ──
+  // ── cross-check: option chain spot vs the latest candle (a separate feed: Upstox candles or Yahoo) ──
   const lastClose = candles && candles.lastClose;
-  if (chain && chain.d && Number.isFinite(lastClose) && candles.feed && candles.feed.source === 'yahoo' && !candles.feed.stale) {
+  const candleFeed = candles && candles.feed && candles.feed.source;
+  if (chain && chain.d && Number.isFinite(lastClose) && (candleFeed === 'upstox' || candleFeed === 'yahoo') && !candles.feed.stale) {
+    const feedName = candleFeed === 'upstox' ? 'Upstox candle' : 'Yahoo';
     const gap = Math.abs(chain.d.spot - lastClose) / chain.d.spot;
     const lvl = gap <= SPOT_TOLERANCE.warn ? 'pass' : gap <= SPOT_TOLERANCE.fail ? 'warn' : 'fail';
-    checks.push(chk('spot_vs_yahoo', 'Cross-check', 'NSE spot agrees with the Yahoo price', lvl, `${(gap * 100).toFixed(2)}% apart (NSE ${Math.round(chain.d.spot)}, Yahoo ${Math.round(lastClose)})`));
+    checks.push(chk('spot_vs_yahoo', 'Cross-check', `Option chain spot agrees with the ${feedName} price`, lvl, `${(gap * 100).toFixed(2)}% apart (chain ${Math.round(chain.d.spot)}, ${feedName} ${Math.round(lastClose)})`));
   } else {
-    checks.push(chk('spot_vs_yahoo', 'Cross-check', 'NSE spot agrees with the Yahoo price', 'skip', 'no current Yahoo candle to compare with'));
+    checks.push(chk('spot_vs_yahoo', 'Cross-check', 'Option chain spot agrees with the candle price', 'skip', 'no current candle from a separate feed to compare with'));
   }
 
   // ── the server's independent recomputation ──

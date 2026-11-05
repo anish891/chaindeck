@@ -1,7 +1,7 @@
 {
   "name": "chaindeck",
   "version": "1.0.0",
-  "description": "ChainDeck: live NIFTY option chain analytics (OI, GEX, volatility, alerts)",
+  "description": "ChainDeck: live NIFTY option chain analytics from the Upstox API (OI, GEX, volatility, alerts)",
   "main": "api/index.js",
   "scripts": {
     "start": "node api/index.js",

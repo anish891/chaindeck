@@ -9,7 +9,7 @@ import type { AccountDetail, AccountListItem, AgentKey } from '../types';
 export function agentPrompt(origin: string, token: string): string {
   const base = `${origin}/api/paper/v1`;
   return [
-    'You can trade NIFTY options on my ChainDeck paper trading account. The money is simulated; the prices are real NSE prices.',
+    'You can trade NIFTY options on my ChainDeck paper trading account. The money is simulated; the prices are real market prices from Upstox.',
     `API base URL: ${base}`,
     `Send this header on every request: Authorization: Bearer ${token}`,
     `Start with GET ${base} for the rules, endpoints and order format, then GET ${base}/account and ${base}/context.`,

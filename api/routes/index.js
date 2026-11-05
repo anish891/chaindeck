@@ -7,7 +7,8 @@ const forwardLog = require('../services/forwardlog');
 const { withRetry } = require('../services/retry');
 const integrity = require('../services/integrity');
 const { istNow } = require('../services/market');
-const { fetchRawNSEOptionChain, refreshHolidays, staleReasonCode } = require('../services/nse');
+const { refreshHolidays } = require('../services/holidays');
+const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/optionChain');
 const calendar = require('../services/calendar');
 const premarket = require('../services/premarket');
 const paperRoutes = require('./paper');
@@ -25,11 +26,11 @@ const HISTORY_CACHE = 'public, s-maxage=10, stale-while-revalidate=20';
 const strictLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'sensitive' });
 
 router.get('/option-chain', async (req, res) => {
-  refreshHolidays().catch(() => {}); // cheap: at most one NSE call a day, never blocks or throws
+  refreshHolidays().catch(() => {}); // cheap: at most one upstream call a day, never blocks or throws
   const { expiry } = req.query;
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawNSEOptionChain('NIFTY', expiry || null);
+    const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawOptionChain('NIFTY', expiry || null);
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
     res.set('Cache-Control', READ_CACHE);
     // Recompute the headline numbers from the raw payload with separate code and compare (see services/integrity.js).
@@ -41,7 +42,7 @@ router.get('/option-chain', async (req, res) => {
       checks = [{ id: 'integrity_engine', group: 'Option chain', label: 'Integrity checks ran', level: 'fail', detail: 'the verification step itself errored' }];
     }
     // feed: when we last got this from NSE, whether it is a leftover copy served after a failed refresh, and why
-    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? staleReasonCode(staleReason) : null }, integrity: { checks } } });
+    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? staleReasonCode(staleReason) : null, source: sourceName() }, integrity: { checks } } });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
     return sendError(res, 502, 'Error fetching option chain', err);
@@ -204,7 +205,7 @@ async function cronSnapshot(req, res) {
     const { raw, allExpiries, targetExpiry, stale: cronStale } = await withRetry(
       attempt => {
         if (attempt > 1) console.error(`cron snapshot: retrying NSE fetch (attempt ${attempt})`);
-        return fetchRawNSEOptionChain('NIFTY', expiry || null);
+        return fetchRawOptionChain('NIFTY', expiry || null);
       },
       { attempts: 3, delayMs: 900, budgetMs: 6500, shouldRetry: e => e.code !== 'BAD_EXPIRY' }
     );
@@ -249,7 +250,7 @@ router.use('/paper', paperRoutes);
 // Writes to storage, so it needs the same secret as the cron endpoint (it used to be open to anyone).
 router.post('/session-summary', strictLimit, requireSecret, async (req, res) => {
   try {
-    const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY');
+    const { raw, allExpiries, targetExpiry } = await fetchRawOptionChain('NIFTY');
     const data = await processOptionChainData(raw, allExpiries, targetExpiry);
     const vector = extractFeatureVector(data);
     const date = istNow(new Date(data.dataAsOf || Date.now())).ymd;
@@ -265,7 +266,7 @@ router.get('/similar-sessions', async (req, res) => {
   try {
     let liveData = getCacheData();
     if (!liveData) {
-      const { raw, allExpiries, targetExpiry } = await fetchRawNSEOptionChain('NIFTY');
+      const { raw, allExpiries, targetExpiry } = await fetchRawOptionChain('NIFTY');
       liveData = await processOptionChainData(raw, allExpiries, targetExpiry);
     }
     const currentVector = extractFeatureVector(liveData);
@@ -311,7 +312,7 @@ router.get('/similar-sessions', async (req, res) => {
 });
 
 router.get('/health', (req, res) => {
-  res.json({ ok: true, ts: new Date().toISOString() });
+  res.json({ ok: true, ts: new Date().toISOString(), source: sourceName() });
 });
 
 module.exports = router;

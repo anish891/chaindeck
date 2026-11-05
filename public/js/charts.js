@@ -65,7 +65,7 @@ export function getSmoothedBuildup(strike, currentOI, currentPrice, isCall, dayO
     if (oiTrend !== 0 || priceTrend !== 0) return buildupSingle(oiTrend, priceTrend, isCall);
   }
 
-  // Otherwise classify on the day's change (NSE: OI change vs prev close, price change vs prev close).
+  // Otherwise classify on the day's change (OI change vs prev close, price change vs prev close).
   // Never default to "LONG BUILD" just because nothing has moved yet.
   if (dayOiChg === 0 && dayPriceChg === 0) return { label: 'FLAT', cls: '' };
   return buildupSingle(dayOiChg, dayPriceChg, isCall);

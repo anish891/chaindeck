@@ -326,7 +326,7 @@ async function tick(analyses, { now = Date.now(), open = true, repo = getRepo() 
   for (const [interval, a] of Object.entries(analyses)) {
     if (!a || !a.candles || !a.candles.length) continue;
     const lastBar = a.candles[a.candles.length - 1];
-    const isFresh = open && a.feed && !a.feed.stale && a.feed.source === 'yahoo' && now - (lastBar.t + BAR_MS[interval]) < 15 * 60000;
+    const isFresh = open && a.feed && !a.feed.stale && (a.feed.source === 'upstox' || a.feed.source === 'yahoo') && now - (lastBar.t + BAR_MS[interval]) < 15 * 60000;
     if (!isFresh) continue;
     for (const sig of a.signals || []) {
       if (!sig.confirmed || sig.state === 'invalidated') continue;
