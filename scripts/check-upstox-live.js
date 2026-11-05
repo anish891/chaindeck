@@ -8,7 +8,7 @@
 // Run it during market hours for a fair comparison: NSE lags by up to a minute, so small differences are expected.
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env.local'), quiet: true });
-const market = require('../api/services/market');
+const market = require('../api/services/market/market');
 market.getIndexSnapshot = async () => null; // compare the chain maths only
 market.getPivotBasis = async () => null;
 const analytics = require('../api/services/analytics');

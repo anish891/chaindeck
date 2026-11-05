@@ -3,7 +3,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const pm = require('../api/services/premarket');
+const pm = require('../api/services/market/premarket');
 
 const root = path.join(__dirname, '..');
 const read = f => fs.readFileSync(path.join(root, f), 'utf8');

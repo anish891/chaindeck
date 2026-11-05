@@ -18,7 +18,7 @@
 
 const store = require('./storage');
 const { wilson } = require('./backtest');
-const { istDay } = require('./candles');
+const { istDay } = require('./market/candles');
 
 const KEY = 'fl:entries';
 const BAR_MS = { '5m': 5 * 60000, '15m': 15 * 60000 };
@@ -368,7 +368,7 @@ async function getLog({ repo = getRepo(), now = Date.now() } = {}) {
 async function run(d, { timeoutMs = 4500 } = {}) {
   if (!store.configured) return { skipped: 'no-storage' };
   const { analyze } = require('./chartAnalysis');
-  const { marketOpenNow } = require('./candles');
+  const { marketOpenNow } = require('./market/candles');
   const work = (async () => {
     const [a5, a15] = await Promise.all([analyze('5m', { d }), analyze('15m', { d })]);
     return tick({ '5m': a5, '15m': a15 }, { open: marketOpenNow() });

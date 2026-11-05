@@ -1,6 +1,6 @@
 // Integrity layer: payload validation before caching, and independent recomputation after analytics.
 const assert = require('assert');
-const market = require('../api/services/market');
+const market = require('../api/services/market/market');
 market.getIndexSnapshot = async () => null; // offline
 market.getPivotBasis = async () => null;
 const analytics = require('../api/services/analytics');
@@ -53,7 +53,7 @@ const byId = checks => Object.fromEntries(checks.map(c => [c.id, c]));
   assert.ok(I.validateRaw(mkRaw({ mutate: r => { r.records.data[4].CE.change = null; r.records.data[5].PE.underlyingValue = undefined; } })).ok, 'null and missing optional fields are fine');
 
   // SEC-004: public stale reasons are short codes, never raw error text
-  const optionChain = require('../api/services/optionChain');
+  const optionChain = require('../api/services/market/optionChain');
   assert.strictEqual(optionChain.staleReasonCode('NSE payload rejected: spot jumped 12% (secret-host.internal)'), 'payload_rejected');
   assert.strictEqual(optionChain.staleReasonCode('The user aborted a request.'), 'timeout');
   assert.strictEqual(optionChain.staleReasonCode('connect ECONNREFUSED 10.0.0.5:443'), 'fetch_failed');

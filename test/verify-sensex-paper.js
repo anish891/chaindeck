@@ -7,10 +7,10 @@ const { createService } = require('../api/services/paperAccounts');
 const { validateStrategy, strikeStepFor } = require('../api/services/strategy');
 const B = require('../api/services/strategyBacktest');
 const L = require('../api/services/strategyLive');
-const C = require('../api/services/candles');
+const C = require('../api/services/market/candles');
 const upstoxCandles = require('../api/services/providers/upstoxCandles');
-const optionChain = require('../api/services/optionChain');
-const calendar = require('../api/services/calendar');
+const optionChain = require('../api/services/market/optionChain');
+const calendar = require('../api/services/market/calendar');
 
 const IST = 330 * 60 * 1000;
 const at = (d, h, m, s = 0) => Date.UTC(2026, 10, d, h, m, s) - IST; // November 2026, IST wall clock

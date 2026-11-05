@@ -52,7 +52,7 @@ let liveService = null;
 const live = () => liveService || (liveService = createLiveService({
   store: require('../services/storage'),
   accounts: svc(),
-  loadLive: (interval, symbol = 'NIFTY') => require('../services/candles').getLiveData(interval, { symbol })
+  loadLive: (interval, symbol = 'NIFTY') => require('../services/market/candles').getLiveData(interval, { symbol })
 }));
 const backtestLimit = rateLimit({ windowMs: 60 * 1000, max: 20, name: 'paper-backtest' });
 let lastTick = 0;

@@ -15,7 +15,7 @@
 
 const crypto = require('crypto');
 const engine = require('./paperEngine');
-const calendar = require('./calendar');
+const calendar = require('./market/calendar');
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,23}$/;
 const LOCK_TTL_SEC = 10;
@@ -442,8 +442,8 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 /** The service wired to real storage, the option chain feed (Upstox, or NSE for NIFTY) and daily candles. */
 function defaultService() {
   const store = require('./storage');
-  const { fetchRawOptionChain } = require('./optionChain');
-  const candles = require('./candles');
+  const { fetchRawOptionChain } = require('./market/optionChain');
+  const candles = require('./market/candles');
   const { lotSizeFor } = require('./providers/upstoxChain');
   const loadSettle = async (expiry, symbol = 'NIFTY') => {
     const ymd = calendar.nseDateToYmd(expiry);

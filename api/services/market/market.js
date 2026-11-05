@@ -1,8 +1,8 @@
 const fetch = require('node-fetch');
-const { getCookies, fetchWithTimeout } = require('./providers/nse');
-const upstox = require('./providers/upstox');
-const constituents = require('./providers/constituents');
-const upstoxCandles = require('./providers/upstoxCandles');
+const { getCookies, fetchWithTimeout } = require('../providers/nse');
+const upstox = require('../providers/upstox');
+const constituents = require('../providers/constituents');
+const upstoxCandles = require('../providers/upstoxCandles');
 
 // Cached market-context lookups: India VIX, index day stats, sectors and breadth (Upstox quotes, or NSE when DATA_SOURCE=nse),
 // and the previous completed session's OHLC (for real CPR/pivots) from the same provider's daily candles.

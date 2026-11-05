@@ -1,7 +1,7 @@
 // Upstox client checks: no network, every reply comes from a fake fetch.
 const assert = require('assert');
 const upstox = require('../api/services/providers/upstox');
-const market = require('../api/services/market');
+const market = require('../api/services/market/market');
 market.getIndexSnapshot = async () => null; // offline
 market.getPivotBasis = async () => null;
 
@@ -272,7 +272,7 @@ const sleep = async () => {};
   assert.strictEqual(chain.knownExpiries('NIFTY', Date.parse('2026-11-06T09:30:00+05:30')), null);
 
   // ── option chain source and cache in front of Upstox ────────────────
-  const oc = require('../api/services/optionChain');
+  const oc = require('../api/services/market/optionChain');
   assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'nse' }).name, 'nse', 'DATA_SOURCE=nse switches back');
   assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'UPSTOX' }).name, 'upstox');
   const saved = process.env.UPSTOX_ACCESS_TOKEN;
@@ -326,7 +326,7 @@ const sleep = async () => {};
   oc._setSource(null);
 
   // ── index snapshot from Upstox quotes ───────────────────────────────
-  const mkt = require('../api/services/market');
+  const mkt = require('../api/services/market/market');
   // Shapes as Upstox really sends them (checked live 2026-11-05): v3 LTP carries the previous close as `cp`;
   // v3 OHLC (interval 1d) has today's live_ohlc but prev_ohlc: null.
   const ltpQ = (key, last, prev) => ({ instrument_token: key, last_price: last, ltq: 0, volume: 0, cp: prev });
@@ -461,13 +461,13 @@ const sleep = async () => {};
   await assert.rejects(uc.fetchUpstoxCandles('X|Y', '2h', '5d', { get: histGet }), /Unsupported interval/);
 
   // the candle module maps its Yahoo symbols to Upstox instruments
-  const candlesMod = require('../api/services/candles');
+  const candlesMod = require('../api/services/market/candles');
   assert.deepStrictEqual(Object.keys(candlesMod.UPSTOX_KEYS).sort(), Object.keys(candlesMod.SYMBOLS).sort());
   assert.strictEqual(candlesMod.UPSTOX_KEYS.etf, 'NSE_EQ|INF204KB14I2', 'NIFTYBEES by ISIN');
 
   // ── holidays from Upstox ────────────────────────────────────────────
-  const cal = require('../api/services/calendar');
-  const hol = require('../api/services/holidays');
+  const cal = require('../api/services/market/calendar');
+  const hol = require('../api/services/market/holidays');
   const shut = (date, closed = ['NSE', 'NFO', 'BSE', 'BFO']) => ({ date, description: 'x', holiday_type: 'TRADING_HOLIDAY', closed_exchanges: closed, open_exchanges: [] });
   const upHolidays = [
     shut('2027-01-26'), shut('2027-03-22'), shut('2027-04-14'), shut('2027-05-01'), shut('2027-08-15'), shut('2027-10-02'),

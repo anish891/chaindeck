@@ -1,17 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const history = require('../services/history');
-const { getParticipantHistory } = require('../services/participants');
+const { getParticipantHistory } = require('../services/market/participants');
 const chartAnalysis = require('../services/chartAnalysis');
 const forwardLog = require('../services/forwardlog');
 const { withRetry } = require('../services/retry');
 const integrity = require('../services/integrity');
-const { istNow } = require('../services/market');
-const { refreshHolidays } = require('../services/holidays');
-const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/optionChain');
-const calendar = require('../services/calendar');
+const { istNow } = require('../services/market/market');
+const { refreshHolidays } = require('../services/market/holidays');
+const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/market/optionChain');
+const calendar = require('../services/market/calendar');
 const instruments = require('../services/providers/instruments');
-const premarket = require('../services/premarket');
+const premarket = require('../services/market/premarket');
 const paperRoutes = require('./paper');
 const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../middleware/security');
 const {
@@ -144,7 +144,7 @@ router.get('/forward-log', async (req, res) => {
 // How each kind of support / resistance level actually behaved over the stored history (see services/scorecard.js).
 router.get('/level-scorecard', async (req, res) => {
   try {
-    const card = await chartAnalysis.getScorecard(require('../services/candles'));
+    const card = await chartAnalysis.getScorecard(require('../services/market/candles'));
     if (!card) return res.status(503).json({ ok: false, error: 'Scorecard is not available yet.' });
     res.set('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
     res.json({ ok: true, ...card });

@@ -1,5 +1,5 @@
 const fetch = require('node-fetch');
-const store = require('./storage');
+const store = require('../storage');
 const { istNow } = require('./market');
 
 // Participant-wise open interest (FII / DII / Pro / Client) from NSE's end-of-day archive file.

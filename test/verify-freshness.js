@@ -41,7 +41,7 @@ const path = require('path');
   assert.strictEqual(candleLagSec(null, '5m', t0), null);
 
   // NSE leftover-copy limit: short while trading, long after the close
-  const { staleLimitMs } = require('../api/services/optionChain');
+  const { staleLimitMs } = require('../api/services/market/optionChain');
   const IST = 330 * 60 * 1000;
   const at = (d, h, m) => Date.UTC(2026, 9, d, h, m) - IST;
   assert.strictEqual(staleLimitMs(at(12, 11, 0)), 2 * 60 * 1000, 'Monday 11:00 IST, market open');

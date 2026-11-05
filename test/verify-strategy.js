@@ -6,7 +6,7 @@ const fetch = require('node-fetch');
 const { validateStrategy, PRESETS } = require('../api/services/strategy');
 const B = require('../api/services/strategyBacktest');
 const { createStrategyService } = require('../api/services/paperStrategies');
-const calendar = require('../api/services/calendar');
+const calendar = require('../api/services/market/calendar');
 
 const IST = 330 * 60 * 1000;
 const DAY = 24 * 3600 * 1000;

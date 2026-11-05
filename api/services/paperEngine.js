@@ -25,7 +25,7 @@
 
 const { tradeCharges, exerciseCharges, RATES } = require('./paperCosts');
 const { parseNseTs, strikesFor } = require('./integrity');
-const { nseDateToYmd, CLOSE_MIN } = require('./calendar');
+const { nseDateToYmd, CLOSE_MIN } = require('./market/calendar');
 const { INDICES } = require('./providers/instruments');
 
 const DEFAULTS = {

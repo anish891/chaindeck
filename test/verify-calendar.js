@@ -1,6 +1,6 @@
 // BUG-002 / MATH-004: the app must know about NSE holidays (weekday closures), not just weekends.
 const assert = require('assert');
-const cal = require('../api/services/calendar');
+const cal = require('../api/services/market/calendar');
 const nse = require('../api/services/providers/nse');
 const vol = require('../api/services/volatility');
 
@@ -37,8 +37,8 @@ const at = (y, m, d, h, mi) => Date.UTC(y, m - 1, d, h, mi) - IST; // an IST wal
   cal.setHolidays(cal.FALLBACK_HOLIDAYS);
 
   // NSE's leftover-copy limit is the long one on a holiday and the short one on a normal trading day
-  assert.strictEqual(require('../api/services/optionChain').staleLimitMs(at(2026, 10, 20, 11, 0)), 6 * 3600 * 1000, 'holiday');
-  assert.strictEqual(require('../api/services/optionChain').staleLimitMs(at(2026, 10, 21, 11, 0)), 2 * 60 * 1000, 'trading day');
+  assert.strictEqual(require('../api/services/market/optionChain').staleLimitMs(at(2026, 10, 20, 11, 0)), 6 * 3600 * 1000, 'holiday');
+  assert.strictEqual(require('../api/services/market/optionChain').staleLimitMs(at(2026, 10, 21, 11, 0)), 2 * 60 * 1000, 'trading day');
 
   // parsing NSE's holiday master
   assert.strictEqual(cal.nseDateToYmd('26-Jan-2026'), '2026-01-26');

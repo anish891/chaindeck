@@ -1,5 +1,5 @@
 const assert = require('assert');
-const C = require('../api/services/candles');
+const C = require('../api/services/market/candles');
 
 const IST = 330 * 60 * 1000;
 // 2026-10-12 (Monday) 09:15 IST in epoch ms

@@ -16,7 +16,7 @@
 const crypto = require('crypto');
 const B = require('./strategyBacktest');
 const engine = require('./paperEngine');
-const calendar = require('./calendar');
+const calendar = require('./market/calendar');
 const { strikeStepFor, toMins, LAST_EXIT_MIN } = require('./strategy');
 
 const MAX_DEPLOYMENTS = 10;

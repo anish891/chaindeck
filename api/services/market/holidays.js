@@ -1,6 +1,6 @@
 const calendar = require('./calendar');
-const upstox = require('./providers/upstox');
-const nse = require('./providers/nse');
+const upstox = require('../providers/upstox');
+const nse = require('../providers/nse');
 
 // Keeps the trading-holiday calendar current: from Upstox's /v2/market/holidays, or NSE's holiday master when the
 // option chain comes from NSE. At most one successful refresh a day. Never throws: on any failure the list already in
