@@ -3,8 +3,8 @@ const assert = require('assert');
 const market = require('../api/services/market/market');
 market.getIndexSnapshot = async () => null; // offline
 market.getPivotBasis = async () => null;
-const analytics = require('../api/services/analytics');
-const I = require('../api/services/integrity');
+const analytics = require('../api/services/analytics/analytics');
+const I = require('../api/services/analytics/integrity');
 
 const EXPIRY = '29-Oct-2026';
 const SPOT = 22700;

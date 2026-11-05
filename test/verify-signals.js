@@ -1,5 +1,5 @@
 const assert = require('assert');
-const S = require('../api/services/signals');
+const S = require('../api/services/analytics/signals');
 
 const IST = 330 * 60 * 1000;
 const t0 = Date.UTC(2026, 9, 12, 9, 15) - IST;

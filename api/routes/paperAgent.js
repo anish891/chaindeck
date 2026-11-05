@@ -13,8 +13,8 @@
 const express = require('express');
 const { paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../middleware/security');
 const { fetchRawOptionChain } = require('../services/market/optionChain');
-const { processOptionChainData } = require('../services/analytics');
-const integrity = require('../services/integrity');
+const { processOptionChainData } = require('../services/analytics/analytics');
+const integrity = require('../services/analytics/integrity');
 const { AGENT } = require('../services/paperAccounts');
 const { accountAnalytics } = require('../services/paperAnalytics');
 

@@ -102,8 +102,8 @@ const sleep = async () => {};
 
   // ── adapter: Upstox chain -> ChainDeck chain ────────────────────────
   const { toChainRaw, formatIstTimestamp } = require('../api/services/providers/upstoxAdapter');
-  const integrity = require('../api/services/integrity');
-  const analytics = require('../api/services/analytics');
+  const integrity = require('../api/services/analytics/integrity');
+  const analytics = require('../api/services/analytics/analytics');
   assert.strictEqual(formatIstTimestamp(Date.parse('2026-11-05T04:45:07Z')), '05-Nov-2026 10:15:07');
 
   // One synthetic chain, written twice: in ChainDeck's own shape (contracts) and as Upstox would send it (units).

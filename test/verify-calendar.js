@@ -2,7 +2,7 @@
 const assert = require('assert');
 const cal = require('../api/services/market/calendar');
 const nse = require('../api/services/providers/nse');
-const vol = require('../api/services/volatility');
+const vol = require('../api/services/analytics/volatility');
 
 const IST = 330 * 60000;
 const at = (y, m, d, h, mi) => Date.UTC(y, m - 1, d, h, mi) - IST; // an IST wall-clock time

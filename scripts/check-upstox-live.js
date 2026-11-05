@@ -11,8 +11,8 @@ require('dotenv').config({ path: path.join(__dirname, '../.env.local'), quiet: t
 const market = require('../api/services/market/market');
 market.getIndexSnapshot = async () => null; // compare the chain maths only
 market.getPivotBasis = async () => null;
-const analytics = require('../api/services/analytics');
-const integrity = require('../api/services/integrity');
+const analytics = require('../api/services/analytics/analytics');
+const integrity = require('../api/services/analytics/integrity');
 const upstoxChain = require('../api/services/providers/upstoxChain');
 const nse = require('../api/services/providers/nse');
 

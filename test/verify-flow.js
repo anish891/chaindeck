@@ -7,7 +7,7 @@ const assert = require('assert');
 const market = require('../api/services/market/market');
 market.getIndexSnapshot = async () => null;
 market.getPivotBasis = async () => null;
-const analytics = require('../api/services/analytics');
+const analytics = require('../api/services/analytics/analytics');
 
 const EXPIRY = '13-Oct-2026';
 const mkRaw = (minuteOffset, perMinVol) => {

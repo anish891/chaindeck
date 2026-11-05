@@ -1,5 +1,5 @@
 // Orchestrates the chart payload: candles + levels + patterns + backtest + signals, in one response.
-const candlesSvc = require('./market/candles');
+const candlesSvc = require('../market/candles');
 const levels = require('./levels');
 const patternsSvc = require('./patterns');
 const backtestSvc = require('./backtest');

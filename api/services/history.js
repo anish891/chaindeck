@@ -1,6 +1,6 @@
 const store = require('./storage');
 const { istNow } = require('./market/market');
-const { addVolSeries } = require('./volatility');
+const { addVolSeries } = require('./analytics/volatility');
 
 // Intraday buffer + session summaries.
 //

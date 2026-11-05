@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const history = require('../services/history');
 const { getParticipantHistory } = require('../services/market/participants');
-const chartAnalysis = require('../services/chartAnalysis');
-const forwardLog = require('../services/forwardlog');
+const chartAnalysis = require('../services/analytics/chartAnalysis');
+const forwardLog = require('../services/analytics/forwardlog');
 const { withRetry } = require('../services/retry');
-const integrity = require('../services/integrity');
+const integrity = require('../services/analytics/integrity');
 const { istNow } = require('../services/market/market');
 const { refreshHolidays } = require('../services/market/holidays');
 const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/market/optionChain');
@@ -20,7 +20,7 @@ const {
   computeSessionSimilarities,
   readableSessions,
   getCacheData
-} = require('../services/analytics');
+} = require('../services/analytics/analytics');
 
 const READ_CACHE = 'public, s-maxage=3, stale-while-revalidate=10';
 const HISTORY_CACHE = 'public, s-maxage=10, stale-while-revalidate=20';

@@ -1,5 +1,5 @@
 const assert = require('assert');
-const L = require('../api/services/levels');
+const L = require('../api/services/analytics/levels');
 
 const IST = 330 * 60 * 1000;
 const day0 = Date.UTC(2026, 9, 12, 9, 15) - IST; // Mon 12 Oct 2026 09:15 IST

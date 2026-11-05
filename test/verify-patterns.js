@@ -1,6 +1,6 @@
 const assert = require('assert');
-const P = require('../api/services/patterns');
-const B = require('../api/services/backtest');
+const P = require('../api/services/analytics/patterns');
+const B = require('../api/services/analytics/backtest');
 
 const IST = 330 * 60 * 1000;
 const day0 = Date.UTC(2026, 9, 12, 9, 15) - IST;

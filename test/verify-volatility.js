@@ -1,5 +1,5 @@
 const assert = require('assert');
-const v = require('../api/services/volatility');
+const v = require('../api/services/analytics/volatility');
 
 const near = (a, b, tol, msg) => assert(Math.abs(a - b) <= tol, `${msg}: got ${a}, expected ${b} ± ${tol}`);
 const ist = (y, mo, d, h, mi) => Date.UTC(y, mo - 1, d, h, mi) - 330 * 60000;
@@ -55,7 +55,7 @@ assert.deepStrictEqual(v.ivPercentile(15, [10, 12]), { pct: null, samples: 2 });
 // Time to expiry is measured from when NSE quoted the prices, not from the wall clock: on a Sunday, Friday's
 // closing chain still has 4 days to a Tuesday expiry (before the fix it was treated as 2, skewing Greeks and GEX).
 {
-  const { getDTEInYears } = require('../api/services/analytics');
+  const { getDTEInYears } = require('../api/services/analytics/analytics');
   const friClose = ist(2026, 10, 9, 15, 30);
   near(getDTEInYears('13-Oct-2026', friClose) * 365, 4, 1e-9, 'Fri 15:30 -> Tue 15:30 is 4 days');
   near(getDTEInYears('13-Oct-2026', ist(2026, 10, 13, 9, 15)) * 365, 375 / 1440, 1e-9, 'expiry morning: the session is left');

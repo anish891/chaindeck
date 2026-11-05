@@ -1,4 +1,4 @@
-const integrity = require('../integrity');
+const integrity = require('../analytics/integrity');
 const calendar = require('./calendar');
 const nse = require('../providers/nse');
 const upstox = require('../providers/upstox');
