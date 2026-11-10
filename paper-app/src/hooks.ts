@@ -35,14 +35,3 @@ export function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, n
   }, []);
   return [ref, width];
 }
-
-/** Calls `fn` on a timer that can change (e.g. faster while the market is open); runs once straight away. */
-export function usePoll(fn: () => void | Promise<void>, ms: number, enabled: boolean): void {
-  const saved = useRef(fn);
-  saved.current = fn;
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const id = setInterval(() => { if (!document.hidden) void saved.current(); }, ms);
-    return () => clearInterval(id);
-  }, [ms, enabled]);
-}

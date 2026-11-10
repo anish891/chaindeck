@@ -98,7 +98,7 @@ export function createStream({
   }
 
   function connect() {
-    if (closed || ws) return;
+    if (closed || ws || !WebSocketImpl || !win) return; // nothing to connect with (rendered outside a browser)
     let sock;
     try { sock = new WebSocketImpl(target()); } catch (e) { scheduleRetry(); return; }
     ws = sock;
@@ -140,7 +140,7 @@ export function createStream({
   }
 
   // a socket that has gone quiet without closing (sleeping laptop, dropped Wi-Fi) is replaced
-  const watchdog = timers.setInterval(() => {
+  const watchdog = !WebSocketImpl || !win ? null : timers.setInterval(() => {
     if (socketOpen() && now() - lastMessageAt > QUIET_MS) {
       const dead = ws;
       ws = null;

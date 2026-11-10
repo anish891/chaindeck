@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { usePoll, useConfirm } from '../hooks';
+import { useConfirm } from '../hooks';
+import { live } from '../live';
 import { blankStrategy, cloneStrategy } from '../strategy';
 import { StrategyEditor } from './StrategyEditor';
 import { Report } from './Report';
@@ -10,13 +11,12 @@ import type { AccountListItem, BacktestReport, Deployment, SavedStrategy, Strate
 interface Props {
   accounts: AccountListItem[];
   accountId: string | null;
-  marketOpen: boolean;
   active: boolean;
 }
 
 interface Current { id: string | null; strategy: Strategy }
 
-export function Lab({ accounts, accountId, marketOpen, active }: Props) {
+export function Lab({ accounts, accountId, active }: Props) {
   const [saved, setSaved] = useState<SavedStrategy[]>([]);
   const [presets, setPresets] = useState<Strategy[]>([]);
   const [current, setCurrent] = useState<Current | null>(null);
@@ -43,8 +43,14 @@ export function Lab({ accounts, accountId, marketOpen, active }: Props) {
   }, []);
 
   useEffect(() => { void loadLists(); }, [loadLists]);
-  useEffect(() => { if (active) void loadDeployments(); }, [active, loadDeployments]); // fresh whenever the lab is opened
-  usePoll(loadDeployments, 15000, marketOpen && active); // live positions move only while trading
+  // While the lab is open the server pushes the deployments (at once, then as they change) over the socket: no polling.
+  useEffect(() => {
+    if (!active) return undefined;
+    const s = live();
+    const off = s.on('deployments', (m: { payload: { ok: boolean; deployments?: Deployment[] } }) => { if (m.payload.ok && m.payload.deployments) setDeployments(m.payload.deployments); });
+    s.watch({ type: 'deployments', on: true });
+    return () => { off(); s.unwatch('deployments'); };
+  }, [active]);
 
   const busy = new Set(deployments.filter(d => d.status !== 'stopped').map(d => d.accountId));
   // a strategy runs only on an account of its own index
