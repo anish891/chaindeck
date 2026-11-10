@@ -1,4 +1,4 @@
-// Tests for the India VIX / index snapshot cache in services/market/market.js (no network: the live-feed loader is replaced).
+// Tests for the India VIX / index snapshot cache in services/market/market.js (no network: the NSE loader is replaced).
 const assert = require('assert');
 const market = require('../api/services/market/market');
 
@@ -12,15 +12,15 @@ const sleepy = (ms, v) => () => new Promise(resolve => setTimeout(() => resolve(
 
 (async () => {
   try {
-    // 1. a normal load is cached for a second (the feed is in memory, so this only spares rebuilding it per request)
+    // 1. a normal load is cached for 15 seconds
     let calls = 0;
     market._setIndexLoader(async () => { calls += 1; return snap(1); });
     assert.strictEqual((await market.getIndexSnapshot({ timeoutMs: 50 })).nifty.last, 1);
-    clock += 500;
+    clock += 10 * 1000;
     await market.getIndexSnapshot({ timeoutMs: 50 });
     assert.strictEqual(calls, 1, 'second call inside the TTL is served from cache');
 
-    // 2. the bug: a loader slower than the timeout used to return null, blanking VIX and sectors.
+    // 2. the bug: NSE slower than the timeout used to return null, blanking VIX and sectors.
     //    Now the last good snapshot is returned instead.
     {
       let hang = false;
@@ -30,18 +30,18 @@ const sleepy = (ms, v) => () => new Promise(resolve => setTimeout(() => resolve(
       hang = true;
       const t0 = realNow();
       const got = await market.getIndexSnapshot({ timeoutMs: 40 });
-      assert(got && got.nifty.last === 3, 'slow feed: the last good snapshot comes back, not null');
-      assert(realNow() - t0 < 1000, 'and it comes back at the timeout, without waiting for it');
+      assert(got && got.nifty.last === 3, 'slow NSE: the last good snapshot comes back, not null');
+      assert(realNow() - t0 < 1000, 'and it comes back at the timeout, without waiting for NSE');
     }
 
-    // 3. a failing feed also falls back to the last good snapshot
+    // 3. a failing NSE also falls back to the last good snapshot
     {
       let fail = false;
       market._setIndexLoader(async () => { if (fail) throw new Error('403'); return snap(4); });
       await market.getIndexSnapshot();
       clock += 20 * 1000;
       fail = true;
-      assert.strictEqual((await market.getIndexSnapshot()).nifty.last, 4, 'feed error: last good snapshot');
+      assert.strictEqual((await market.getIndexSnapshot()).nifty.last, 4, 'NSE error: last good snapshot');
     }
 
     // 4. but never one older than 10 minutes: that would show stale VIX as live
@@ -58,7 +58,7 @@ const sleepy = (ms, v) => () => new Promise(resolve => setTimeout(() => resolve(
     {
       market._setIndexLoader(sleepy(80, snap(6)));
       const first = await market.getIndexSnapshot({ timeoutMs: 20 });
-      assert.strictEqual(first, null, 'nothing cached yet and feed slow: null');
+      assert.strictEqual(first, null, 'nothing cached yet and NSE slow: null');
       await new Promise(r => setTimeout(r, 120));
       assert.strictEqual((await market.getIndexSnapshot({ timeoutMs: 20 })).nifty.last, 6, 'the late answer was cached');
     }

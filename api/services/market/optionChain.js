@@ -1,29 +1,44 @@
 const integrity = require('../analytics/integrity');
 const calendar = require('./calendar');
-const liveChain = require('../stream/liveChain');
+const nse = require('../providers/nse');
+const upstox = require('../providers/upstox');
+const upstoxChain = require('../providers/upstoxChain');
 const instruments = require('../providers/instruments');
 
 // The option chain every route reads, with the caching around it:
-//   - a copy younger than a second is served from memory
-//   - concurrent requests for the same expiry share one build
+//   - a fresh copy (5 s) is served from memory
+//   - concurrent requests for the same expiry share one upstream call
 //   - a payload that fails integrity.validateRaw is never cached
-//   - when a build fails (the live feed is down or has not caught up), the last good copy is served, flagged stale,
-//     for a limited time. There is no HTTP fallback.
+//   - when a refresh fails, the last good copy is served (flagged stale) for a limited time
 //
-// The chain is built from the Upstox live feed (services/stream/liveChain.js). The loader stays swappable for tests; it
-// resolves to { raw, allExpiries, targetExpiry } with `raw` in ChainDeck's chain shape.
+// The upstream loader is pluggable; it resolves to { raw, allExpiries, targetExpiry } with `raw` in ChainDeck's chain shape.
 
-const RAW_TTL = 1000;
+const RAW_TTL = 5000;
 const STALE_MAX_OPEN = 2 * 60 * 1000;      // while the market moves: a leftover copy lives 2 min at most (flagged stale), then fail loudly
 const STALE_MAX_CLOSED = 6 * 3600 * 1000; // nothing changes after the close, so an old copy is still the right picture
 
-const STREAM = { name: 'upstox', load: (symbol, expiry) => liveChain.loadChain(symbol, expiry), knownExpiries: symbol => liveChain.knownExpiries(symbol) };
+const SOURCES = {
+  upstox: { name: 'upstox', load: (symbol, expiry) => upstoxChain.loadChain(symbol, expiry), knownExpiries: symbol => upstoxChain.knownExpiries(symbol) },
+  nse: { name: 'nse', load: nse.loadFromNSE, knownExpiries: () => nse.getCachedExpiries() }
+};
 
-let source = STREAM;
+/**
+ * Upstox by default. DATA_SOURCE=nse switches back to the old NSE scraper (kept as a fallback while Upstox beds in).
+ * Without an Upstox token and no explicit choice, NSE is used and a warning is logged, so a local run still works.
+ */
+function pickSource(env = process.env) {
+  const wanted = String(env.DATA_SOURCE || '').toLowerCase();
+  if (SOURCES[wanted]) return SOURCES[wanted];
+  if (upstox.isConfigured()) return SOURCES.upstox;
+  console.warn('UPSTOX_ACCESS_TOKEN is not set: reading the option chain from NSE instead');
+  return SOURCES.nse;
+}
+
+let source = pickSource();
 const sourceName = () => source.name;
 /** Test hook: swap the loader ({ name, load, knownExpiries }) and clear the cache. */
 function _setSource(s) {
-  source = s || STREAM;
+  source = s || pickSource();
   rawCache.clear();
   inflight.clear();
 }
@@ -38,6 +53,12 @@ const inflight = new Map();          // key -> Promise
 
 async function fetchRawOptionChain(symbol = 'NIFTY', expiryDate = null) {
   symbol = instruments.getIndex(symbol).symbol; // throws BAD_SYMBOL for anything unknown
+  if (symbol !== 'NIFTY' && source.name === 'nse') {
+    // The NSE scraper only knows NSE's own indices; SENSEX trades on BSE.
+    const err = new Error(`${symbol} needs the Upstox source`);
+    err.code = 'UNSUPPORTED_SYMBOL';
+    throw err;
+  }
   const known = source.knownExpiries(symbol);
   if (expiryDate && known && !known.includes(expiryDate)) {
     // Stale / mistyped expiry (e.g. from an old shared link): fail fast instead of burning upstream timeouts.
@@ -67,7 +88,7 @@ async function fetchRawOptionChain(symbol = 'NIFTY', expiryDate = null) {
     })
     .catch(err => {
       if (err.code === 'BAD_EXPIRY') throw err;
-      // Stale-on-error: the last known values, marked stale, while the feed reconnects
+      // Stale-on-error: better old data than a "Disconnected" dashboard
       if (hit && Date.now() - hit.ts < staleLimitMs()) {
         console.error('Option chain fetch failed, serving stale data:', err.message);
         return { ...hit.value, stale: true, staleReason: err.message };
@@ -84,9 +105,8 @@ async function fetchRawOptionChain(symbol = 'NIFTY', expiryDate = null) {
 function staleReasonCode(message) {
   const m = String(message || '');
   if (/payload rejected/i.test(m)) return 'payload_rejected';
-  if (/live feed/i.test(m)) return 'feed_down';
   if (/abort|timeout|timed out|did not answer/i.test(m)) return 'timeout';
   return 'fetch_failed';
 }
 
-module.exports = { fetchRawOptionChain, staleReasonCode, staleLimitMs, sourceName, _setSource };
+module.exports = { fetchRawOptionChain, staleReasonCode, staleLimitMs, SOURCES, pickSource, sourceName, _setSource };

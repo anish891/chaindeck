@@ -226,9 +226,10 @@ const strategy = over => validateStrategy({
     assert(x.text.startsWith('time_utc,'));
     assert.strictEqual((await call('/api/paper/accounts/strat/export?kind=secrets')).status, 400);
     assert.strictEqual((await call('/api/paper/accounts/strat/export?kind=orders', 'GET', undefined, 'Bearer wrong')).status, 401, 'exports are owner only');
-    // the scheduler's paper tick runs the strategies too
-    const ticked = await require('../api/services/scheduler').paperTick();
-    assert(ticked.strategies && typeof ticked.strategies.deployments === 'number');
+    // the cron tick runs the strategies too
+    x = await call('/api/cron/paper', 'GET', undefined, 'Bearer cron-secret-for-tests');
+    assert.strictEqual(x.status, 200);
+    assert(x.json.strategies && typeof x.json.strategies.deployments === 'number');
     // agents read their own analytics
     const key = await call('/api/paper/accounts/strat/keys', 'POST', { label: 'Reader', scope: 'read' });
     assert.strictEqual((await call('/api/paper/v1/analytics', 'GET', undefined, `Bearer ${key.json.token}`)).json.analytics.id, 'strat');

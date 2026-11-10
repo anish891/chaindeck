@@ -39,6 +39,8 @@ const analytics = require('../services/paper/paperAnalytics');
 
 const router = express.Router();
 const signInLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, name: 'paper-signin' });
+// An open page works resting orders itself only when the cron job seems to be missing (no tick for 90 seconds), so the
+// two never duplicate each other's storage traffic.
 const TICK_EVERY_MS = 60 * 1000;
 const CRON_GRACE_MS = 90 * 1000;
 
@@ -109,34 +111,6 @@ router.use('/v1', require('./paperAgent')(svc, strategies));
 // everything below is owner only
 router.use(requirePaperOwner);
 
-// What the page shows, as plain functions: the same payload leaves by GET and over the browser socket (stream/gateway.js).
-const views = {
-  market: async (expiry, symbol = 'NIFTY') => ({ ok: true, ...(await svc().market(expiry || null, { symbol })) }),
-  async account(id) {
-    // The scheduler ticks every minute. A page only works resting orders itself when that seems to be missing (no tick
-    // for 90 seconds), so the two never duplicate each other's storage traffic.
-    if (Date.now() - lastTick > TICK_EVERY_MS) {
-      lastTick = Date.now();
-      const last = await svc().lastTickAt().catch(() => 0);
-      if (Date.now() - last > CRON_GRACE_MS) await svc().tick().catch(e => console.error('paper tick from page failed:', e.message));
-    }
-    const { summary, state } = await svc().getSummary(id);
-    return {
-      ok: true,
-      agentsPaused: !!state.agentsPaused,
-      summary,
-      orders: state.orders.slice(-150).reverse(),
-      trades: state.trades.slice(-150).reverse(),
-      curve: state.curve,
-      settlements: state.settlements || [],
-      createdAt: state.createdAt
-    };
-  },
-  deployments: async () => ({ ok: true, deployments: await withReports(await live().list()) })
-};
-router.views = views;
-router.ID_RE = ID_RE;
-
 // ── market ──
 
 router.get('/market', async (req, res) => {
@@ -144,7 +118,7 @@ router.get('/market', async (req, res) => {
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 03-Nov-2026.' });
   if (!['NIFTY', 'SENSEX'].includes(symbol)) return res.status(400).json({ ok: false, code: 'BAD_SYMBOL', error: 'symbol must be NIFTY or SENSEX.' });
   try {
-    res.json(await views.market(expiry || null, symbol));
+    res.json({ ok: true, ...(await svc().market(expiry || null, { symbol })) });
   } catch (err) {
     return fail(res, err, 'Error loading paper market');
   }
@@ -177,7 +151,22 @@ router.post('/accounts', async (req, res) => {
 
 router.get('/accounts/:id', validId, async (req, res) => {
   try {
-    res.json(await views.account(req.params.id));
+    if (Date.now() - lastTick > TICK_EVERY_MS) {
+      lastTick = Date.now();
+      const last = await svc().lastTickAt().catch(() => 0);
+      if (Date.now() - last > CRON_GRACE_MS) await svc().tick().catch(e => console.error('paper tick from page failed:', e.message));
+    }
+    const { summary, state } = await svc().getSummary(req.params.id);
+    res.json({
+      ok: true,
+      agentsPaused: !!state.agentsPaused,
+      summary,
+      orders: state.orders.slice(-150).reverse(),
+      trades: state.trades.slice(-150).reverse(),
+      curve: state.curve,
+      settlements: state.settlements || [],
+      createdAt: state.createdAt
+    });
   } catch (err) {
     return fail(res, err, 'Error reading paper account');
   }
@@ -335,7 +324,7 @@ async function withReports(list) {
 
 router.get('/deployments', async (req, res) => {
   try {
-    res.json(await views.deployments());
+    res.json({ ok: true, deployments: await withReports(await live().list()) });
   } catch (err) {
     return fail(res, err, 'Error listing deployments');
   }

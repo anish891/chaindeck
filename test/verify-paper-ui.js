@@ -151,8 +151,7 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
     assert(strip.includes('₹73,000.00') && strip.includes('22,712'), 'free cash and NIFTY are shown');
     assert(strip.includes('+₹1,300.00 (1.30%)'), 'total and percentage against starting capital');
     assert(!strip.includes('Charges') && !strip.includes('Realised') && !strip.includes('Margin used'), 'the strip keeps only what a trader checks at a glance');
-    const loading = html(U.Strip, { account: null, market });
-    assert(/^<div class="keystrip" aria-busy="true">/.test(loading) && (loading.match(/class="skeleton"/g) || []).length === 5 && loading.includes('Free cash'), 'before the account arrives: the strip\'s labels with placeholders, not an empty bar');
+    assert.strictEqual(html(U.Strip, { account: null, market }), '<div class="keystrip"></div>');
     assert.strictEqual(U.previousClose(account, Date.UTC(2026, 9, 28, 6, 0)), 101000, "the previous close is the last recorded day before today");
     assert.strictEqual(U.previousClose({ ...account, curve: [] }), 100000, 'a new account falls back to its starting capital');
     assert(html(U.Strip, { account, market: { ...market, health: { ok: false, reason: 'DATA_OLD' } } }).includes('ks-val stale'), 'stale prices are flagged in the strip');
@@ -160,7 +159,7 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
   }
   {
     const held = new Set([pos.instrument]);
-    const chain = html(U.Chain, { market, loaded: true, held, onPick: noop, onExpiry: noop });
+    const chain = html(U.Chain, { market, held, onPick: noop, onExpiry: noop });
     assert(chain.includes('03 Nov') && chain.includes('10 Nov') && /seg-btn active[^>]*>03 Nov/.test(chain), 'expiry buttons, the current one active');
     assert((chain.match(/<tr class="pt-atm"/g) || []).length === 1 && /pt-atm"><td[^>]*>.*?22700/.test(chain.replace(/\n/g, '')), 'exactly the ATM row is marked');
     assert((chain.match(/pt-px held/g) || []).length === 1 && chain.includes('aria-label="Trade 22700 CE (you hold this)"'), 'only the held contract is dotted');
@@ -169,12 +168,8 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
     assert(!chain.includes('Bid / Ask') && !/>B<\/button>/.test(chain), 'the chain is just calls, strike and puts');
     assert(chain.includes('Lot size 65') && chain.includes('Tap a price to buy or sell'));
     assert(chain.includes('pt-itm'), 'in-the-money cells are shaded');
-    // loading, error and empty are three different states
-    const skel = html(U.Chain, { market: null, loaded: false, held, onPick: noop, onExpiry: noop });
-    assert(skel.includes('skeleton-row') && skel.includes('aria-busy="true"') && !skel.includes('unavailable'), 'before the first market message: skeleton rows, not an error');
-    const err = html(U.Chain, { market: null, loaded: true, held, onPick: noop, onExpiry: noop });
-    assert(err.includes('Option chain unavailable') && err.includes('role="alert"') && !err.includes('skeleton-row'), 'loaded with no market: an error that says what happens next');
-    assert(html(U.Chain, { market: { ...market, strikes: [] }, loaded: true, held, onPick: noop, onExpiry: noop }).includes('No strikes listed for this expiry'));
+    assert(html(U.Chain, { market: null, held, onPick: noop, onExpiry: noop }).includes('Option chain unavailable'));
+    assert(html(U.Chain, { market: { ...market, strikes: [] }, held, onPick: noop, onExpiry: noop }).includes('No strikes for this expiry'));
   }
   {
     const sheet = sel => html(U.OrderSheet, { accountId: 'main', market, selection: sel, onSide: noop, onClose: noop, onPlaced: noop });
@@ -194,7 +189,7 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
       strikes: [81900, 82000, 82100].map(k => ({ strike: k, CE: { ltp: 300, bid: 299.5, ask: 300.5, iv: 12 }, PE: { ltp: 280, bid: 279.5, ask: 280.5, iv: 13 } }))
     };
     const sxPos = { ...pos, instrument: 'SENSEX|05-Nov-2026|82000|CE', expiry: '05-Nov-2026', strike: 82000, qty: 40 };
-    const chain = html(U.Chain, { market: sxMarket, loaded: true, held: new Set([sxPos.instrument]), onPick: noop, onExpiry: noop });
+    const chain = html(U.Chain, { market: sxMarket, held: new Set([sxPos.instrument]), onPick: noop, onExpiry: noop });
     assert(chain.includes('SENSEX option chain') && chain.includes('Lot size 20'));
     assert(chain.includes('aria-label="Trade 82000 CE (you hold this)"') && (chain.match(/pt-px held/g) || []).length === 1, 'held SENSEX contracts are dotted');
     const picked = html(U.OrderSheet, { accountId: 'sx', market: sxMarket, selection: { instrument: sxPos.instrument, side: 'BUY', nonce: 1 }, onSide: noop, onClose: noop, onPlaced: noop });
@@ -290,10 +285,6 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
     assert(!/—/.test(text), `${f}: no em dashes`);
     assert(!/\p{Extended_Pictographic}/u.test(text.replace(/[©®™]/g, '')), `${f}: no emoji`);
     if (!/\/api\.ts$/.test(f)) assert(!/\bfetch\(/.test(text), `${f}: network calls go through api.ts only`);
-    // live data comes over the one shared socket (live.ts -> public/js/stream.js): no component polls or opens its own
-    assert(!/setInterval\(|usePoll|_POLL_MS|refetchInterval/.test(text), `${f}: no polling`);
-    assert(!/new WebSocket\(/.test(text), `${f}: components never open a socket`);
-    if (!/\/live\.ts$/.test(f)) assert(!/createStream\(/.test(text), `${f}: the stream is created in live.ts only`);
     if (!/\/theme\.ts$/.test(f)) assert(!/localStorage|sessionStorage/.test(text), `${f}: storage goes through theme.ts only (it must never break the page)`);
   }
   assert(/'\/api\/paper/.test(read('paper-app/src/api.ts')) || /`\/api\/paper/.test(read('paper-app/src/api.ts')), 'the client talks only to /api/paper');

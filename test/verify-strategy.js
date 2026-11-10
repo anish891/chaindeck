@@ -167,7 +167,7 @@ const base = over => ({
   const app = require('../api/index');
   const paperRouter = require('../api/routes/paper');
   const { createService, AGENT } = require('../api/services/paper/paperAccounts');
-  const { formatNseDate } = require('../api/services/providers/instruments');
+  const { formatNseDate } = require('../api/services/providers/nse');
   const EXPS = [3, 10, 17, 24, 31].map(dd => formatNseDate(Date.now() + dd * DAY));
   paperRouter.setService(createService({ store, isMarketOpen: () => false, loadRaw: async () => ({ raw: { records: { timestamp: null, data: [] } }, allExpiries: EXPS, targetExpiry: EXPS[0], stale: false }), loadSettle: async () => null }));
   paperRouter.setStrategyService(strategies);

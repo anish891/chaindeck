@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, setSignedOutHandler, signedOut } from './api';
-import { live, closeLive, useConnection, watchTicks } from './live';
-import { STATUS_TEXT } from '../../public/js/stream.js';
+import { api, setSignedOutHandler } from './api';
 import { INDEX_INFO, MARKET_REASONS, instrumentKey } from './format';
 import { readPref, writePref, applyTheme, loadTheme, saveTheme } from './theme';
 import type { Theme } from './theme';
@@ -21,6 +19,9 @@ import type { AccountDetail, AccountListItem, Market, OptionType, Session, Side 
 
 type Boot = 'loading' | 'unreachable' | 'unconfigured' | 'signedOut' | 'ready';
 type View = 'trade' | 'lab' | 'perf';
+
+const OPEN_POLL_MS = 15000; // orders are checked about once a minute; faster polling only spends storage commands
+const CLOSED_POLL_MS = 60000;
 
 const savedView = (): View => { const v = readPref('paper_view'); return v === 'lab' || v === 'perf' ? v : 'trade'; };
 const savedTab = (): BlotterTab => { const v = readPref('paper_tab'); return BLOTTER_TABS.some(([id]) => id === v) ? (v as BlotterTab) : 'positions'; };
@@ -42,14 +43,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    setSignedOutHandler(() => { closeLive(); setBoot('signedOut'); });
+    setSignedOutHandler(() => setBoot('signedOut'));
     void checkSession();
     return () => setSignedOutHandler(null);
   }, [checkSession]);
 
   async function signOut() {
     await api('/session', { method: 'DELETE' });
-    closeLive();
     setBoot('signedOut');
   }
 
@@ -107,33 +107,31 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
 
   useEffect(() => { void loadAccounts(); }, [loadAccounts]);
 
-  // Live data: the server pushes the market (every few seconds) and the account (when it changes) over the socket.
-  // Nothing here polls. Changing account, index or expiry moves the subscription.
+  // The data loop: market and account together, again after 15 s while trading and 60 s otherwise.
   useEffect(() => {
     if (!accountId) return undefined;
-    const s = live();
-    const off = s.on('paper', (m: { accountId: string; symbol: string; expiry: string | null; market?: (Market & { ok: boolean }) | { ok: false }; account?: (AccountDetail & { ok: boolean }) | { ok: false } }) => {
-      if (m.accountId !== accountId || m.symbol !== symbol || (m.expiry || null) !== (expiry || null)) return; // an answer for a view the user has left
-      if (m.market) {
-        setMarket(m.market.ok ? (m.market as Market) : null);
-        setMarketLoaded(true);
-      }
-      if (m.account && m.account.ok) setAccount(m.account as AccountDetail);
-    });
-    const offErr = s.on('error', (e: { code?: string }) => { if (e.code === 'SIGNED_OUT') signedOut(); });
-    s.watch({ type: 'paper', accountId, symbol, expiry });
-    return () => { off(); offErr(); };
-  }, [accountId, expiry, symbol]);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const run = async () => {
+      const params = [expiry ? `expiry=${encodeURIComponent(expiry)}` : '', symbol !== 'NIFTY' ? `symbol=${symbol}` : ''].filter(Boolean);
+      const q = params.length ? `?${params.join('&')}` : '';
+      const [m, a] = await Promise.all([api<Market>(`/market${q}`), api<AccountDetail>(`/accounts/${encodeURIComponent(accountId)}`)]);
+      if (cancelled) return;
+      if (m.status === 401 || a.status === 401) return; // the signed-out handler is already showing the sign-in form
+      setMarket(m.ok ? m : null);
+      setMarketLoaded(true);
+      if (a.ok) setAccount(a);
+      timer = setTimeout(run, m.ok && m.marketOpen ? OPEN_POLL_MS : CLOSED_POLL_MS);
+    };
+    void run();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [accountId, expiry, reload, symbol]);
 
-  // After an action of the user's (an order, a reset): ask for the account now instead of waiting for the next push.
-  useEffect(() => { if (reload) live().send({ type: 'refresh' }); }, [reload]);
-
-  // Price changes for the expiry on screen, between the market pushes (see live.ts: only the cells that moved re-render).
-  const shownExpiry = market && market.expiry;
-  useEffect(() => { watchTicks(symbol, shownExpiry || null); }, [symbol, shownExpiry]);
-  useEffect(() => () => watchTicks(symbol, null), []); // eslint-disable-line react-hooks/exhaustive-deps -- on unmount only
-
-  const conn = useConnection();
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) bump(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [bump]);
 
   const chooseView = (v: View) => {
     setView(v);
@@ -154,12 +152,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
   };
 
   const h = market && market.health;
-  const trading = !marketLoaded ? 'Connecting…' : !market ? 'No market data' : h && h.ok ? 'Trading open' : h && h.reason === 'MARKET_CLOSED' ? 'Market closed' : 'Trading paused';
-  const statusText = conn.status === 'connected' ? trading : STATUS_TEXT[conn.status];
-  const connBanner = conn.status === 'auth'
-    ? 'Upstox rejected the server\'s access token, so live prices have stopped. Set a new UPSTOX_ACCESS_TOKEN and restart the server. Prices below are the last ones received; orders are not filled on them.'
-    : conn.status === 'offline' ? 'You are offline. Prices below are the last ones received and are not updating.'
-      : conn.status === 'reconnecting' && marketLoaded ? 'Connection lost. Reconnecting… prices below are the last ones received.' : '';
+  const statusText = !marketLoaded ? 'Connecting…' : !market ? 'No market data' : h && h.ok ? 'Trading open' : h && h.reason === 'MARKET_CLOSED' ? 'Market closed' : 'Trading paused';
   const showBanner = !!h && !h.ok && h.reason !== 'MARKET_CLOSED';
   const closeSheet = useCallback(() => setSelection(s => ({ ...s, instrument: null })), []);
   const placed = (text: string) => { closeSheet(); setNotice(text); bump(); };
@@ -175,7 +168,6 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
       <TopBar
         statusText={statusText}
         statusOk={!!h && h.ok}
-        conn={conn}
         accounts={accounts}
         accountId={accountId}
         onAccount={chooseAccount}
@@ -187,8 +179,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
         theme={theme}
         onTheme={onTheme}
       />
-      <main className={conn.stale && marketLoaded ? 'is-stale' : undefined}>
-        {connBanner && <div className="conn-banner" role="alert" data-status={conn.status}>{connBanner}</div>}
+      <main>
         <Strip account={account} market={market} />
         {showBanner && <div className="pt-banner" role="status">{MARKET_REASONS[h!.reason || ''] || 'Trading is paused.'}</div>}
 
@@ -205,7 +196,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
         <div hidden={view !== 'trade'}>
           {notice && <div className="pt-toast" role="status">{notice}</div>}
           <div className="section">
-            <Chain market={market} loaded={marketLoaded} held={held} onPick={pick} onExpiry={setExpiry} />
+            <Chain market={market} held={held} onPick={pick} onExpiry={setExpiry} />
           </div>
           <div className="section">
             <Blotter account={account} accountId={accountId} lotSize={(account && account.summary.lotSize) || (market && (market.symbol || 'NIFTY') === symbol && market.lotSize) || INDEX_INFO[symbol].lotSize} tab={tab} onTab={chooseTab} onChanged={bump} />
@@ -219,7 +210,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
           <OrderSheet accountId={accountId} market={market} selection={selection} onSide={side => setSelection(s => ({ ...s, side }))} onClose={closeSheet} onPlaced={placed} />
         </div>
 
-        {visited.lab && <div hidden={view !== 'lab'}><Lab accounts={accounts} accountId={accountId} active={view === 'lab'} /></div>}
+        {visited.lab && <div hidden={view !== 'lab'}><Lab accounts={accounts} accountId={accountId} marketOpen={!!(market && market.marketOpen)} active={view === 'lab'} /></div>}
         {visited.perf && <div hidden={view !== 'perf'}><div className="section"><EquityPanel account={account} /></div><Perf accountId={accountId} active={view === 'perf'} /></div>}
 
         <div className="section pt-foot">

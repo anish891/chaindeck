@@ -1,7 +1,7 @@
 // BUG-002 / MATH-004: the app must know about NSE holidays (weekday closures), not just weekends.
 const assert = require('assert');
 const cal = require('../api/services/market/calendar');
-const { formatNseDate } = require('../api/services/providers/instruments');
+const nse = require('../api/services/providers/nse');
 const vol = require('../api/services/analytics/volatility');
 
 const IST = 330 * 60000;
@@ -40,16 +40,41 @@ const at = (y, m, d, h, mi) => Date.UTC(y, m - 1, d, h, mi) - IST; // an IST wal
   assert.strictEqual(require('../api/services/market/optionChain').staleLimitMs(at(2026, 10, 20, 11, 0)), 6 * 3600 * 1000, 'holiday');
   assert.strictEqual(require('../api/services/market/optionChain').staleLimitMs(at(2026, 10, 21, 11, 0)), 2 * 60 * 1000, 'trading day');
 
-  // expiry / holiday date strings
+  // parsing NSE's holiday master
   assert.strictEqual(cal.nseDateToYmd('26-Jan-2026'), '2026-01-26');
   assert.strictEqual(cal.nseDateToYmd('5-feb-2027'), '2027-02-05');
   assert.strictEqual(cal.nseDateToYmd('garbage'), null);
+  const payload = { FO: ['15-Jan-2026', '26-Jan-2026', '03-Mar-2026', '26-Mar-2026', '31-Mar-2026', '03-Apr-2026'].map(d => ({ tradingDate: d })) };
+  assert.strictEqual(cal.setHolidaysFromNse(payload), 6);
+  assert.ok(cal.isHoliday('2026-03-03') && !cal.isHoliday('2026-10-20'), 'the list is replaced by what NSE sent');
+  assert.strictEqual(cal.snapshot().source, 'nse');
+  // an odd payload never wipes a good list
+  assert.strictEqual(cal.setHolidaysFromNse({ FO: [] }), 0);
+  assert.strictEqual(cal.setHolidaysFromNse({ FO: [{ tradingDate: 'x' }] }), 0);
+  assert.strictEqual(cal.setHolidaysFromNse(null), 0);
+  assert.ok(cal.isHoliday('2026-03-03'));
+  cal.setHolidays(cal.FALLBACK_HOLIDAYS);
+
+  // refreshHolidays: uses the fetcher, caches for a day, survives failures, retries sooner after a failure
+  let calls = 0;
+  const good = async () => { calls += 1; return payload; };
+  const out = await nse.refreshHolidays({ force: true, fetcher: good, cookiesFn: async () => '' });
+  assert.strictEqual(calls, 1); assert.strictEqual(out.source, 'nse');
+  await nse.refreshHolidays({ fetcher: good, cookiesFn: async () => '' });
+  assert.strictEqual(calls, 1, 'cached for a day');
+  cal.setHolidays(cal.FALLBACK_HOLIDAYS);
+  const prevErr = console.error; console.error = () => {};
+  const bad = async () => { throw new Error('NSE down'); };
+  const afterFail = await nse.refreshHolidays({ force: true, fetcher: bad, cookiesFn: async () => '' });
+  console.error = prevErr;
+  assert.ok(afterFail.holidays.includes('2026-10-20'), 'a failed refresh keeps the previous list');
 
   // BUG-005: the expiry probe is derived from the date, and always passes the app's own expiry validator
-  assert.strictEqual(formatNseDate(Date.UTC(2026, 9, 24, 6, 0)), '24-Oct-2026');
-  assert.strictEqual(formatNseDate(Date.UTC(2026, 11, 31, 20, 0)), '01-Jan-2027', '20:00 UTC on 31 Dec is already 1 Jan in IST');
-  assert.strictEqual(formatNseDate(Date.UTC(2027, 1, 5, 0, 0)), '05-Feb-2027');
-  assert.ok(require('../api/middleware/security').isValidExpiry(formatNseDate(Date.now())));
+  assert.strictEqual(nse.formatNseDate(Date.UTC(2026, 9, 24, 6, 0)), '24-Oct-2026');
+  assert.strictEqual(nse.formatNseDate(Date.UTC(2026, 11, 31, 20, 0)), '01-Jan-2027', '20:00 UTC on 31 Dec is already 1 Jan in IST');
+  assert.strictEqual(nse.formatNseDate(Date.UTC(2027, 1, 5, 0, 0)), '05-Feb-2027');
+  assert.ok(require('../api/middleware/security').isValidExpiry(nse.formatNseDate(Date.now())));
+  assert.ok(!/30-Jun-2026/.test(require('fs').readFileSync(require('path').join(__dirname, '../api/services/providers/nse.js'), 'utf8')), 'no hard-coded probe date');
 
   console.log('calendar checks passed');
 })().catch(e => { console.error(e); process.exit(1); });

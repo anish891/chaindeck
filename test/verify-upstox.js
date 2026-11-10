@@ -210,170 +210,79 @@ const sleep = async () => {};
   assert.ok(!integrity.validateRaw(toChainRaw([])).ok, 'an empty chain is rejected before caching');
   assert.throws(() => toChainRaw(null), /not a list/);
 
-  // ── chain built from the live feed ──────────────────────────────────
-  const liveChain = require('../api/services/stream/liveChain');
-  {
-    // The same synthetic chain as feed ticks (IV as a fraction, depth as levels) plus the contract list that names the keys.
-    const ticks = new Map();
-    const contractRows = [];
-    for (const r of upstoxRows) {
-      for (const [type, o] of [['CE', r.call_options], ['PE', r.put_options]]) {
-        const md = o.market_data;
-        ticks.set(o.instrument_key, { key: o.instrument_key, ltp: md.ltp, cp: md.close_price, oi: md.oi, vtt: md.volume, iv: o.option_greeks.iv / 100, depth: [{ bidP: md.bid_price, bidQ: md.bid_qty, askP: md.ask_price, askQ: md.ask_qty }] });
-        contractRows.push({ expiry: EXP_YMD, lot_size: LOT, instrument_type: type, instrument_key: o.instrument_key, strike_price: r.strike_price });
-      }
-    }
-    contractRows.push({ expiry: '2026-11-17', lot_size: LOT, instrument_type: 'CE', instrument_key: 'NSE_FO|far', strike_price: 22700 }, { expiry: '2026-11-03', lot_size: LOT, instrument_type: 'CE', instrument_key: 'NSE_FO|past', strike_price: 22700 }, null);
-    const lastTrade = Date.parse('2026-11-05T09:59:58+05:30');
-    ticks.set('NSE_INDEX|Nifty 50', { key: 'NSE_INDEX|Nifty 50', ltp: SPOT, ltt: lastTrade });
+  // ── chain loader ────────────────────────────────────────────────────
+  const chain = require('../api/services/providers/upstoxChain');
+  chain._clearCache();
+  const log = [];
+  const fakeGet = async (path, q) => {
+    log.push(path);
+    if (path === '/v2/option/contract') return contracts;
+    if (path === '/v2/option/chain') { assert.strictEqual(q.expiry_date, '2026-11-10'); return upstoxRows; }
+    if (path === '/v2/market-quote/quotes') return { 'NSE_INDEX:Nifty 50': { instrument_token: 'NSE_INDEX|Nifty 50', last_price: SPOT, last_trade_time: String(Date.parse('2026-11-05T10:59:58+05:30')) } };
+    throw new Error(`unexpected ${path}`);
+  };
+  const loaded = await chain.loadChain('NIFTY', '10-Nov-2026', { get: fakeGet, nowMs: now });
+  assert.strictEqual(loaded.targetExpiry, '10-Nov-2026');
+  assert.deepStrictEqual(loaded.allExpiries, parsed.expiries);
+  assert.strictEqual(loaded.raw.records.data.length, upstoxRows.length);
+  assert.strictEqual(loaded.raw.records.data[10].CE.openInterest, nativeRows[10].CE.openInterest, 'units converted with the live lot size');
+  assert.deepStrictEqual(log, ['/v2/option/contract', '/v2/option/chain', '/v2/market-quote/quotes']);
+  assert.strictEqual(loaded.raw.records.timestamp, '05-Nov-2026 10:59:58', 'stamped with the index last trade time');
+  assert.strictEqual(loaded.raw.asOfSource, 'last_trade');
 
-    let status = 'connected';
-    const mkFeed = () => ({
-      subs: [], offs: 0,
-      subscribe(keys, mode) { this.subs.push(`${mode}:${[].concat(keys).length}`); return () => { this.offs += 1; }; },
-      get: k => ticks.get(k) || null,
-      on: () => () => {},
-      getState: () => ({ status, stale: status !== 'connected' })
-    });
-    const mkStore = () => { const m = new Map(); return { m, get: async k => m.get(k) || null, set: async (k, v) => { m.set(k, v); } }; };
-    const log = [];
-    const get = async (path, q) => { log.push(path); assert.strictEqual(path, '/v2/option/contract'); assert.strictEqual(q.instrument_key, 'NSE_INDEX|Nifty 50'); return contractRows; };
-    const noTimers = { setTimeout: (fn) => { fn(); return 0; }, clearTimeout() {}, setInterval: () => 0, clearInterval() {} };
-    let clock = now;
-    const feed = mkFeed();
-    const store = mkStore();
-    const lc = liveChain.createLiveChain({ feed, get, store, now: () => clock, timers: noTimers, log: () => {} });
+  // warm cache: one call per refresh
+  log.length = 0;
+  await chain.loadChain('NIFTY', '10-Nov-2026', { get: fakeGet, nowMs: now + 60000 });
+  assert.deepStrictEqual(log, ['/v2/option/chain', '/v2/market-quote/quotes']);
 
-    assert.strictEqual(lc.knownExpiries('NIFTY'), null, 'nothing known before the first lookup');
-    const loaded = await lc.loadChain('NIFTY', EXP);
-    assert.strictEqual(loaded.targetExpiry, EXP);
-    assert.deepStrictEqual(loaded.allExpiries, [EXP, '17-Nov-2026'], 'expiries from the contract list, past ones dropped');
-    assert.deepStrictEqual(feed.subs, [`full:${upstoxRows.length * 2}`, 'full:1'], 'the expiry\'s contracts and the index, all in full mode');
-    assert.strictEqual(loaded.raw.records.timestamp, '05-Nov-2026 09:59:58', 'stamped with the index last trade time');
-    assert.strictEqual(loaded.raw.asOfSource, 'last_trade');
-    assert.strictEqual(loaded.raw.records.underlyingValue, SPOT);
-    // identical to what the REST chain produced, except change in OI (the feed has no previous-day OI and no baseline is saved yet)
-    const viaRest = toChainRaw(upstoxRows, { expiries: loaded.allExpiries, asOfMs: lastTrade, quantityPerContract: LOT });
-    const noChg = raw => raw.records.data.map(r => { const c = JSON.parse(JSON.stringify(r)); delete c.CE.changeinOpenInterest; delete c.PE.changeinOpenInterest; return c; });
-    assert.deepStrictEqual(noChg(loaded.raw), noChg(viaRest));
-    assert.ok(loaded.raw.records.data.every(r => !('changeinOpenInterest' in r.CE)), 'no baseline: change in OI is left out, not guessed');
-    assert.strictEqual(loaded.raw.oiBaseline, null);
-    assert.ok(integrity.validateRaw(loaded.raw).ok, 'still a valid chain without it');
-    assert.strictEqual(loaded.raw.records.data[10].CE.impliedVolatility, 14.2, 'feed IV (a fraction) becomes a percentage');
+  // no quote: falls back to fetch time and says so; an expired token still fails loudly
+  const noQuote = await chain.loadChain('NIFTY', '10-Nov-2026', { get: async (p, q2) => (p === '/v2/market-quote/quotes' ? {} : fakeGet(p, q2)), nowMs: now });
+  assert.strictEqual(noQuote.raw.asOfSource, 'fetch');
+  await assert.rejects(chain.loadChain('NIFTY', '10-Nov-2026', { get: async (p, q2) => { if (p === '/v2/market-quote/quotes') throw Object.assign(new Error('x'), { code: 'UPSTOX_AUTH' }); return fakeGet(p, q2); }, nowMs: now }), e => e.code === 'UPSTOX_AUTH');
+  assert.strictEqual(chain.parseUpstoxTime('1794376198000'), 1794376198000);
+  assert.strictEqual(chain.parseUpstoxTime('2026-11-05T10:59:58+05:30'), Date.parse('2026-11-05T05:29:58Z'));
+  assert.strictEqual(chain.parseUpstoxTime(null), null);
+  log.length = 0;
+  assert.deepStrictEqual(chain.knownExpiries('NIFTY', now), parsed.expiries);
+  assert.strictEqual(chain.lotSizeFor('NIFTY', now), 65);
 
-    // the contract list is the only REST lookup: once per IST day
-    await lc.loadChain('NIFTY', null);
-    assert.deepStrictEqual(log, ['/v2/option/contract']);
-    assert.deepStrictEqual(feed.subs.length, 2, 'already subscribed: nothing new is asked of the feed');
-    assert.deepStrictEqual(lc.knownExpiries('NIFTY'), [EXP, '17-Nov-2026']);
-    assert.strictEqual(lc.lotSizeFor('NIFTY'), 65);
-    assert.strictEqual(lc.lotSizeFor('SENSEX'), 20, 'not looked up yet: the configured size');
+  // an expiry not on the list: the list is re-fetched once, then the request is refused without asking for a chain
+  log.length = 0;
+  await assert.rejects(chain.loadChain('NIFTY', '11-Nov-2026', { get: fakeGet, nowMs: now }), e => e.code === 'BAD_EXPIRY');
+  assert.deepStrictEqual(log, ['/v2/option/contract']);
 
-    // an expiry not on the list is refused; the list is only re-read if it is more than ten minutes old
-    await assert.rejects(lc.loadChain('NIFTY', '11-Nov-2026'), e => e.code === 'BAD_EXPIRY');
-    assert.strictEqual(log.length, 1);
-    clock += 11 * 60 * 1000;
-    await assert.rejects(lc.loadChain('NIFTY', '11-Nov-2026'), e => e.code === 'BAD_EXPIRY');
-    assert.strictEqual(log.length, 2, 'it may have been listed since: one fresh look');
-    clock = now;
+  // SENSEX: BSE instrument key, its own lot size for the unit conversion, its own cached expiry list
+  const sxContracts = [{ expiry: '2026-11-12', lot_size: 20 }, { expiry: '2026-11-19', lot_size: 20 }];
+  const sxRows = upstoxRows.map(r => ({ ...r, expiry: '2026-11-12', underlying_key: 'BSE_INDEX|SENSEX' }));
+  const sxAsked = [];
+  const sxGet = async (path, q2) => {
+    sxAsked.push([path, q2.instrument_key]);
+    if (path === '/v2/option/contract') return sxContracts;
+    if (path === '/v2/option/chain') return sxRows;
+    return {};
+  };
+  const sxLoaded = await chain.loadChain('SENSEX', null, { get: sxGet, nowMs: now });
+  assert.strictEqual(sxLoaded.targetExpiry, '12-Nov-2026');
+  assert.ok(sxAsked.every(([, k]) => k === 'BSE_INDEX|SENSEX'));
+  assert.strictEqual(sxLoaded.raw.records.data[10].CE.openInterest, Math.round(upstoxRows[10].call_options.market_data.oi / 20), 'converted with lot 20');
+  assert.deepStrictEqual(chain.knownExpiries('SENSEX', now), ['12-Nov-2026', '19-Nov-2026']);
+  assert.deepStrictEqual(chain.knownExpiries('NIFTY', now), parsed.expiries, 'NIFTY list untouched');
 
-    // feed down or not running: an error (the cache in front serves its last copy, flagged stale), never a half-built chain
-    status = 'reconnecting';
-    await assert.rejects(lc.loadChain('NIFTY', EXP), e => e.code === 'STREAM_DOWN');
-    status = 'idle';
-    await assert.rejects(lc.loadChain('NIFTY', EXP), e => e.code === 'STREAM_DOWN');
-    status = 'auth_failed';
-    await assert.rejects(lc.loadChain('NIFTY', EXP), e => e.code === 'UPSTOX_AUTH');
-    status = 'connected';
-    const idx = ticks.get('NSE_INDEX|Nifty 50');
-    ticks.delete('NSE_INDEX|Nifty 50');
-    await assert.rejects(lc.loadChain('NIFTY', EXP), e => e.code === 'STREAM_NOT_READY');
-    ticks.set('NSE_INDEX|Nifty 50', idx);
-    const some = [...ticks.keys()].filter(k => k.startsWith('NSE_FO|')).slice(0, 20);
-    const held = some.map(k => [k, ticks.get(k)]);
-    some.forEach(k => ticks.delete(k));
-    await assert.rejects(lc.loadChain('NIFTY', EXP), e => e.code === 'STREAM_NOT_READY', 'a third of the contracts missing: wait, do not serve');
-    held.forEach(([k, v]) => ticks.set(k, v));
+  // the cached list is dropped once its nearest expiry has passed
+  assert.strictEqual(chain.knownExpiries('NIFTY', Date.parse('2026-11-06T09:30:00+05:30')), null);
 
-    // an expiry nobody asks for is unsubscribed after five minutes; a pinned one (the recorder's) never is
-    clock += 6 * 60 * 1000;
-    lc.sweep();
-    assert.strictEqual(feed.offs, 1);
-    assert.deepStrictEqual(lc.subscribed(), []);
-    await lc.loadChain('NIFTY', EXP, { pin: true });
-    clock += 60 * 60 * 1000;
-    lc.sweep();
-    assert.strictEqual(lc.subscribed().length, 1);
-    clock = now;
-    lc.stop();
-
-    // change in OI: measured against the OI noted between sessions
-    const clockAt = liveChain.sessionClock;
-    assert.deepStrictEqual(clockAt(Date.parse('2026-11-05T10:00:00+05:30')), { session: '2026-11-05', capture: null }, 'during the session nothing is captured');
-    assert.deepStrictEqual(clockAt(Date.parse('2026-11-05T08:30:00+05:30')), { session: '2026-11-04', capture: '2026-11-05' }, 'before the open: OI is still yesterday\'s close');
-    assert.deepStrictEqual(clockAt(Date.parse('2026-11-05T16:00:00+05:30')), { session: '2026-11-05', capture: '2026-11-06' }, 'after the close: OI is the baseline for tomorrow');
-    assert.deepStrictEqual(clockAt(Date.parse('2026-11-05T15:35:00+05:30')), { session: '2026-11-05', capture: null }, 'the exchange is still settling OI just after the close');
-    assert.deepStrictEqual(clockAt(Date.parse('2026-11-07T12:00:00+05:30')), { session: '2026-11-06', capture: '2026-11-09' }, 'Saturday');
-    assert.deepStrictEqual(clockAt(Date.parse('2026-11-10T12:00:00+05:30')), { session: '2026-11-09', capture: '2026-11-11' }, 'a holiday');
-
-    // a saved baseline for today's session gives the same change in OI the REST chain did
-    const prev = {};
-    for (const r of upstoxRows) for (const o of [r.call_options, r.put_options]) prev[o.instrument_key] = o.market_data.prev_oi;
-    const store2 = mkStore();
-    store2.m.set('oibase:NIFTY:2026-11-10', JSON.stringify({ sessions: { '2026-11-05': prev, '2026-11-04': {} } }));
-    const lc2 = liveChain.createLiveChain({ feed: mkFeed(), get, store: store2, now: () => clock, timers: noTimers, log: () => {} });
-    const withBase = await lc2.loadChain('NIFTY', EXP);
-    assert.deepStrictEqual(withBase.raw.records.data, viaRest.records.data, 'now identical to the REST chain, change in OI included');
-    assert.strictEqual(withBase.raw.records.data[10].CE.changeinOpenInterest, 500);
-    assert.strictEqual(withBase.raw.oiBaseline, '2026-11-05');
-    lc2.stop();
-
-    // captured before the open, saved once, used once the session starts
-    const store3 = mkStore();
-    let writes = 0;
-    const counted = { get: store3.get, set: async (k, v, ttl) => { writes += 1; assert.ok(ttl > 0); return store3.set(k, v); } };
-    clock = Date.parse('2026-11-05T08:30:00+05:30');
-    const lc3 = liveChain.createLiveChain({ feed: mkFeed(), get, store: counted, now: () => clock, timers: noTimers, log: () => {} });
-    const early = await lc3.loadChain('NIFTY', EXP);
-    assert.strictEqual(early.raw.oiBaseline, null, 'yesterday\'s session has no baseline here');
-    await lc3.loadChain('NIFTY', EXP);
-    assert.strictEqual(writes, 1, 'unchanged OI is not written again');
-    assert.deepStrictEqual(Object.keys(JSON.parse(store3.m.get('oibase:NIFTY:2026-11-10')).sessions), ['2026-11-05']);
-    clock = Date.parse('2026-11-05T09:30:00+05:30');
-    const opened = await lc3.loadChain('NIFTY', EXP);
-    assert.strictEqual(opened.raw.oiBaseline, '2026-11-05');
-    assert.strictEqual(opened.raw.records.data[10].CE.changeinOpenInterest, 0, 'OI has not moved since the baseline');
-    ticks.get(upstoxRows[10].call_options.instrument_key).oi += 10 * LOT;
-    assert.strictEqual((await lc3.loadChain('NIFTY', EXP)).raw.records.data[10].CE.changeinOpenInterest, 10, 'ten contracts added since yesterday\'s close');
-    ticks.get(upstoxRows[10].call_options.instrument_key).oi -= 10 * LOT;
-    assert.strictEqual(writes, 1, 'nothing is captured while the session runs');
-    lc3.stop();
-    clock = now;
-
-    // SENSEX: its own key and lot size
-    const sxRowsC = contractRows.filter(Boolean).filter(r => r.expiry === EXP_YMD).map(r => ({ ...r, expiry: '2026-11-12', lot_size: 20 }));
-    const sxTicks = new Map(ticks);
-    sxTicks.set('BSE_INDEX|SENSEX', { key: 'BSE_INDEX|SENSEX', ltp: 80000, ltt: lastTrade });
-    const sxFeed = { ...mkFeed(), get: k => sxTicks.get(k) || null };
-    const sxAsked = [];
-    const lcSx = liveChain.createLiveChain({ feed: sxFeed, get: async (path, q) => { sxAsked.push(q.instrument_key); return sxRowsC; }, store: mkStore(), now: () => clock, timers: noTimers, log: () => {} });
-    const sxLoaded = await lcSx.loadChain('SENSEX', null);
-    assert.strictEqual(sxLoaded.targetExpiry, '12-Nov-2026');
-    assert.deepStrictEqual(sxAsked, ['BSE_INDEX|SENSEX']);
-    assert.strictEqual(sxLoaded.raw.records.underlyingValue, 80000);
-    assert.strictEqual(sxLoaded.raw.records.data[10].CE.openInterest, Math.round(upstoxRows[10].call_options.market_data.oi / 20), 'converted with lot 20');
-    assert.strictEqual(lcSx.lotSizeFor('SENSEX'), 20);
-    lcSx.stop();
-
-    // the day's list is dropped at midnight IST and once its nearest expiry has passed
-    clock = Date.parse('2026-11-06T09:30:00+05:30');
-    assert.strictEqual(lc.knownExpiries('NIFTY'), null);
-    clock = now;
-  }
-
-  // ── the cache in front of the live chain ────────────────────────────
+  // ── option chain source and cache in front of Upstox ────────────────
   const oc = require('../api/services/market/optionChain');
-  assert.strictEqual(oc.sourceName(), 'upstox', 'one source: the Upstox live feed');
+  assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'nse' }).name, 'nse', 'DATA_SOURCE=nse switches back');
+  assert.strictEqual(oc.pickSource({ DATA_SOURCE: 'UPSTOX' }).name, 'upstox');
+  const saved = process.env.UPSTOX_ACCESS_TOKEN;
+  process.env.UPSTOX_ACCESS_TOKEN = 'x';
+  assert.strictEqual(oc.pickSource({}).name, 'upstox', 'Upstox is the default when a token is set');
+  process.env.UPSTOX_ACCESS_TOKEN = '';
+  const warn = console.warn; console.warn = () => {};
+  assert.strictEqual(oc.pickSource({}).name, 'nse', 'no token: NSE, with a warning');
+  console.warn = warn;
+  if (saved === undefined) delete process.env.UPSTOX_ACCESS_TOKEN; else process.env.UPSTOX_ACCESS_TOKEN = saved;
 
   let loads = 0, failNext = false;
   oc._setSource({
@@ -386,11 +295,11 @@ const sleep = async () => {};
     }
   });
   const [a, b] = await Promise.all([oc.fetchRawOptionChain('NIFTY', null), oc.fetchRawOptionChain('NIFTY', null)]);
-  assert.strictEqual(loads, 1, 'concurrent requests share one build');
+  assert.strictEqual(loads, 1, 'concurrent requests share one Upstox call');
   assert.strictEqual(a, b);
   assert.strictEqual(a.stale, false);
   await oc.fetchRawOptionChain('NIFTY', null);
-  assert.strictEqual(loads, 1, 'served from the one-second cache');
+  assert.strictEqual(loads, 1, 'served from the 5 s cache');
   await assert.rejects(oc.fetchRawOptionChain('NIFTY', '17-Nov-2026'), e => e.code === 'BAD_EXPIRY');
   assert.strictEqual(loads, 1, 'unknown expiry refused without an upstream call');
 
@@ -406,9 +315,9 @@ const sleep = async () => {};
   Date.now = realNow;
   assert.strictEqual(stale.stale, true);
   assert.strictEqual(oc.staleReasonCode(stale.staleReason), 'timeout');
-  assert.strictEqual(oc.staleReasonCode('live feed is reconnecting'), 'feed_down');
-  // unknown symbols are refused before the loader is called
-  oc._setSource({ name: 'upstox', knownExpiries: () => null, load: async () => { throw new Error('should not be called'); } });
+  // SENSEX: only through Upstox; unknown symbols are refused before any upstream call
+  oc._setSource({ name: 'nse', knownExpiries: () => null, load: async () => { throw new Error('should not be called'); } });
+  await assert.rejects(oc.fetchRawOptionChain('SENSEX', null), e => e.code === 'UNSUPPORTED_SYMBOL');
   await assert.rejects(oc.fetchRawOptionChain('BANKNIFTY', null), e => e.code === 'BAD_SYMBOL');
   let sxLoad = null;
   oc._setSource({ name: 'upstox', knownExpiries: () => null, load: async (sym, exp) => { sxLoad = sym; return { raw: toChainRaw(upstoxRows, { expiries: [EXP], asOfMs: Date.now(), quantityPerContract: LOT }), allExpiries: [EXP], targetExpiry: EXP }; } });
@@ -416,58 +325,88 @@ const sleep = async () => {};
   assert.strictEqual(sxLoad, 'SENSEX', 'symbol normalised before it reaches the loader and the cache key');
   oc._setSource(null);
 
-  // ── index snapshot from the live feed ───────────────────────────────
+  // ── index snapshot from Upstox quotes ───────────────────────────────
   const mkt = require('../api/services/market/market');
-  assert.deepStrictEqual(mkt.fromUpstoxQuote(mkt.tickToQuote({ ltp: 22770, cp: 22700, ohlc: { '1d': { open: 22710, high: 22800, low: 22650 } } })),
+  // Shapes as Upstox really sends them (checked live 2026-11-05): v3 LTP carries the previous close as `cp`;
+  // v3 OHLC (interval 1d) has today's live_ohlc but prev_ohlc: null.
+  const ltpQ = (key, last, prev) => ({ instrument_token: key, last_price: last, ltq: 0, volume: 0, cp: prev });
+  const ohlcQ = (key, last, o = {}) => ({ instrument_token: key, last_price: last, prev_ohlc: null, live_ohlc: { open: o.open || last, high: o.high || last, low: o.low || last, close: last, volume: 0, ts: 1 } });
+  assert.deepStrictEqual(mkt.fromUpstoxQuote({ ...ltpQ('NSE_INDEX|Nifty 50', 22770, 22700), live_ohlc: { open: 22710, high: 22800, low: 22650 } }),
     { last: 22770, previousClose: 22700, open: 22710, high: 22800, low: 22650, percentChange: 0.31 });
   assert.strictEqual(mkt.fromUpstoxQuote({ last_price: 0 }), null);
-  assert.strictEqual(mkt.fromUpstoxQuote(mkt.tickToQuote(null)), null);
-  assert.strictEqual(mkt.fromUpstoxQuote(mkt.tickToQuote({ ltp: 10, cp: 0 })).percentChange, null, 'no previous close: no % change, not a fake 0');
-  {
-    const ISIN = n => `INE${String(n).padStart(8, '0')}0`;
-    const lists = { 'NIFTY 50': [ISIN(1), ISIN(2), ISIN(3), ISIN(4)], 'NIFTY BANK': [ISIN(1), ISIN(2)] };
-    const px = {
-      'NSE_INDEX|Nifty 50': { ltp: 22770, cp: 22700, ohlc: { '1d': { open: 22705, high: 22800, low: 22680 } } },
-      'NSE_INDEX|India VIX': { ltp: 13.2, cp: 13.8 }, 'BSE_INDEX|SENSEX': { ltp: 80400, cp: 80000 }, 'NSE_INDEX|Nifty Bank': { ltp: 50100, cp: 50000 },
-      [`NSE_EQ|${ISIN(1)}`]: { ltp: 101, cp: 100 }, [`NSE_EQ|${ISIN(2)}`]: { ltp: 99, cp: 100 }, [`NSE_EQ|${ISIN(3)}`]: { ltp: 100, cp: 100 }, [`NSE_EQ|${ISIN(4)}`]: { ltp: 105, cp: 100 }
-    };
-    let status = 'connected';
-    const subs = [];
-    const feed = { subscribe: (keys, mode) => { subs.push(`${mode}:${keys.length}`); return () => {}; }, get: k => px[k] || null, on: () => () => {}, getState: () => ({ status, stale: status !== 'connected' }) };
-    const snap = await mkt.loadIndicesLive({ feed, lists });
-    assert.deepStrictEqual(subs, ['full:3', `ltpc:${mkt.SECTORS.length + 4}`], 'headline indices in full, sectors and stocks as last price');
-    assert.strictEqual(snap.source, 'upstox');
-    assert.strictEqual(snap.nifty.previousClose, 22700, 'previous close from the tick\'s cp');
-    assert.strictEqual(snap.nifty.percentChange, 0.31);
-    assert.deepStrictEqual([snap.nifty.open, snap.nifty.high, snap.nifty.low], [22705, 22800, 22680], 'day range from the feed\'s day candle');
-    assert.strictEqual(snap.vix.percentChange, -4.35);
-    assert.strictEqual(snap.sensex.percentChange, 0.5);
-    assert.deepStrictEqual(snap.breadth, { advances: 2, declines: 1, unchanged: 1 });
-    assert.strictEqual(snap.sectors.length, 1, 'sectors without a tick are left out');
-    assert.deepStrictEqual(snap.sectors[0], { name: 'Bank', index: 'NIFTY BANK', last: 50100, percentChange: 0.2, advances: 1, declines: 1 });
-    await mkt.loadIndicesLive({ feed, lists });
-    assert.strictEqual(subs.length, 2, 'subscribed once');
+  assert.strictEqual(mkt.fromUpstoxQuote(null), null);
+  assert.strictEqual(mkt.fromUpstoxQuote(ohlcQ('X|Y', 10)).percentChange, null, 'no previous close: no % change, not a fake 0');
 
-    // breadth unknown without constituents; feed down or NIFTY missing is an error (the last snapshot is then served)
-    const noLists = await mkt.loadIndicesLive({ feed, lists: {} });
-    assert.strictEqual(noLists.breadth, null);
-    assert.strictEqual(noLists.sectors[0].advances, null);
-    status = 'reconnecting';
-    await assert.rejects(mkt.loadIndicesLive({ feed, lists }), /live feed is reconnecting/);
-    status = 'idle';
-    await assert.rejects(mkt.loadIndicesLive({ feed, lists }), /not running/);
-    status = 'connected';
-    await assert.rejects(mkt.loadIndicesLive({ feed: { ...feed, get: k => (k === 'NSE_INDEX|Nifty 50' ? { ltp: 0 } : px[k] || null) }, lists }), /NIFTY 50 missing/);
-    assert.strictEqual(mkt.countBreadth([], new Map()), null);
-  }
+  const ISIN = n => `INE${String(n).padStart(8, '0')}0`;
+  const lists = { 'NIFTY 50': [ISIN(1), ISIN(2), ISIN(3), ISIN(4)], 'NIFTY BANK': [ISIN(1), ISIN(2)] };
+  const stockQ = { [ISIN(1)]: [101, 100], [ISIN(2)]: [99, 100], [ISIN(3)]: [100, 100], [ISIN(4)]: [105, 100] };
+  const IDX = { 'NSE_INDEX|Nifty 50': [22770, 22700], 'NSE_INDEX|India VIX': [13.2, 13.8], 'BSE_INDEX|SENSEX': [80400, 80000], 'NSE_INDEX|Nifty Bank': [50100, 50000] };
+  const quoteCalls = [];
+  const quoteGet = async (path, query) => {
+    quoteCalls.push([path, query.instrument_key.length]);
+    const out = {};
+    for (const key of query.instrument_key) {
+      const colon = key.replace('|', ':');
+      const px = IDX[key] || (key.startsWith('NSE_EQ|') && stockQ[key.slice(7)]);
+      if (!px) continue;
+      if (path === '/v3/market-quote/ltp') out[colon] = ltpQ(key, ...px);
+      else if (path === '/v3/market-quote/ohlc') { assert.strictEqual(query.interval, '1d'); out[colon] = ohlcQ(key, px[0], { open: px[1] + 5, high: px[0] + 30, low: px[1] - 20 }); }
+      else throw new Error(`unexpected ${path}`);
+    }
+    return out;
+  };
+  const snap = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => lists });
+  assert.strictEqual(snap.source, 'upstox');
+  assert.strictEqual(snap.nifty.last, 22770);
+  assert.strictEqual(snap.nifty.previousClose, 22700, 'previous close from LTP cp');
+  assert.strictEqual(snap.nifty.percentChange, 0.31);
+  assert.deepStrictEqual([snap.nifty.open, snap.nifty.high, snap.nifty.low], [22705, 22800, 22680], 'day range from OHLC live_ohlc');
+  assert.strictEqual(snap.vix.percentChange, -4.35);
+  assert.strictEqual(snap.sensex.percentChange, 0.5, 'SENSEX day stats in the same calls');
+  assert.deepStrictEqual(snap.breadth, { advances: 2, declines: 1, unchanged: 1 });
+  assert.strictEqual(snap.sectors.length, 1, 'sectors without a quote are left out, as before');
+  assert.deepStrictEqual(snap.sectors[0], { name: 'Bank', index: 'NIFTY BANK', last: 50100, percentChange: 0.2, advances: 1, declines: 1 });
+  assert.deepStrictEqual(quoteCalls.sort(), [['/v3/market-quote/ltp', 3 + mkt.SECTORS.length + 4], ['/v3/market-quote/ohlc', 3]], 'one LTP call for everything, one OHLC call for the three headline indices');
 
-  // ── constituent lists (a file in the repo, no download) ─────────────
+  // OHLC failing only loses the day range, never the price or % change
+  const noOhlc = await mkt.loadIndicesUpstox({ get: async (p, q2) => { if (p.endsWith('/ohlc')) throw new Error('down'); return quoteGet(p, q2); }, getLists: async () => lists });
+  assert.strictEqual(noOhlc.nifty.percentChange, 0.31);
+  assert.strictEqual(noOhlc.nifty.high, null);
+
+  // breadth unknown when constituents are unavailable; NIFTY missing is an error (the old copy is then served)
+  const noLists = await mkt.loadIndicesUpstox({ get: quoteGet, getLists: async () => { throw new Error('down'); } });
+  assert.strictEqual(noLists.breadth, null);
+  assert.strictEqual(noLists.sectors[0].advances, null);
+  await assert.rejects(mkt.loadIndicesUpstox({ get: async () => ({}), getLists: async () => ({}) }), /NIFTY 50 missing/);
+  assert.strictEqual(mkt.countBreadth([], new Map()), null);
+
+  // large constituent sets are split into batches; a failed stock batch only blanks breadth
+  const many = { 'NIFTY 50': Array.from({ length: 450 }, (_, i) => ISIN(i + 10)) };
+  let ltpCalls = 0;
+  const flakyStocks = async (p, query) => { if (p.endsWith('/ltp')) { ltpCalls += 1; if (ltpCalls > 1) throw new Error('boom'); } return quoteGet(p, query); };
+  const big = await mkt.loadIndicesUpstox({ get: flakyStocks, getLists: async () => many });
+  assert.strictEqual(ltpCalls, 3, '469 keys -> 3 LTP calls of at most 200');
+  assert.strictEqual(big.nifty.last, 22770);
+
+  // ── constituent lists ───────────────────────────────────────────────
   const cons = require('../api/services/providers/constituents');
-  const consLists = cons.getConstituents();
-  assert.strictEqual(consLists['NIFTY 50'].length, 50);
-  assert.ok(mkt.SECTORS.every(([, index]) => Array.isArray(consLists[index]) && consLists[index].length >= 10), 'a list for every sector tile');
-  assert.ok(Object.values(consLists).flat().every(isin => /^IN[A-Z0-9]{9}\d$/.test(isin)), 'ISIN codes only');
-  assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(cons.asOf));
+  const csv = 'Company Name,Industry,Symbol,Series,ISIN Code\nA Ltd.,X,AAA,EQ,INE423A01024\nB Ltd.,Y,BBB,EQ,INE742F01042\nbad,row,,,\n';
+  assert.deepStrictEqual(cons.parseConstituentCsv(csv), ['INE423A01024', 'INE742F01042']);
+  assert.strictEqual(cons.parseConstituentCsv('<html>blocked</html>'), null);
+  const memStore = (() => { const m = new Map(); return { get: async k => m.get(k) || null, set: async (k, v) => { m.set(k, v); } }; })();
+  let downloads = 0;
+  const csvFetch = async () => { downloads += 1; return { ok: true, text: async () => csv }; };
+  cons._clear();
+  const got = await cons.getConstituents({ fetchImpl: csvFetch, storeImpl: memStore, nowMs: 1e12 });
+  assert.strictEqual(Object.keys(got).length, Object.keys(cons.FILES).length);
+  assert.strictEqual(downloads, Object.keys(cons.FILES).length);
+  cons._clear();
+  await cons.getConstituents({ fetchImpl: csvFetch, storeImpl: memStore, nowMs: 1e12 + 3600e3 });
+  assert.strictEqual(downloads, Object.keys(cons.FILES).length, 'a stored copy under a day old is reused');
+  cons._clear();
+  const failing = await cons.getConstituents({ fetchImpl: async () => ({ ok: false }), storeImpl: memStore, nowMs: 1e12 + 30 * 3600e3 });
+  assert.deepStrictEqual(failing['NIFTY 50'], ['INE423A01024', 'INE742F01042'], 'failed downloads keep the last good list');
+  cons._clear();
 
   // ── candles from Upstox ─────────────────────────────────────────────
   const uc = require('../api/services/providers/upstoxCandles');
@@ -521,9 +460,10 @@ const sleep = async () => {};
   await assert.rejects(uc.fetchUpstoxCandles('X|Y', '5m', '5d', { get: async () => { throw Object.assign(new Error('expired'), { code: 'UPSTOX_AUTH' }); }, nowMs: nowC }), e => e.code === 'UPSTOX_AUTH');
   await assert.rejects(uc.fetchUpstoxCandles('X|Y', '2h', '5d', { get: histGet }), /Unsupported interval/);
 
-  // the candle module names its series by Upstox instrument key
+  // the candle module maps its Yahoo symbols to Upstox instruments
   const candlesMod = require('../api/services/market/candles');
-  assert.deepStrictEqual(candlesMod.SYMBOLS, { index: 'NSE_INDEX|Nifty 50', etf: 'NSE_EQ|INF204KB14I2', vix: 'NSE_INDEX|India VIX' }, 'NIFTYBEES by ISIN');
+  assert.deepStrictEqual(Object.keys(candlesMod.UPSTOX_KEYS).sort(), Object.keys(candlesMod.SYMBOLS).sort());
+  assert.strictEqual(candlesMod.UPSTOX_KEYS.etf, 'NSE_EQ|INF204KB14I2', 'NIFTYBEES by ISIN');
 
   // ── holidays from Upstox ────────────────────────────────────────────
   const cal = require('../api/services/market/calendar');
@@ -545,12 +485,12 @@ const sleep = async () => {};
   hol._reset();
   let holCalls = 0;
   const holGet = async p => { holCalls += 1; assert.strictEqual(p, '/v2/market/holidays'); return upHolidays; };
-  assert.strictEqual((await hol.refreshHolidays({ get: holGet })).source, 'upstox');
-  await hol.refreshHolidays({ get: holGet });
+  assert.strictEqual((await hol.refreshHolidays({ get: holGet, source: 'upstox' })).source, 'upstox');
+  await hol.refreshHolidays({ get: holGet, source: 'upstox' });
   assert.strictEqual(holCalls, 1, 'once a day');
   cal.setHolidays(cal.FALLBACK_HOLIDAYS);
   const errLog = console.error; console.error = () => {};
-  const kept = await hol.refreshHolidays({ force: true, get: async () => { throw new Error('down'); } });
+  const kept = await hol.refreshHolidays({ force: true, get: async () => { throw new Error('down'); }, source: 'upstox' });
   console.error = errLog;
   assert.ok(kept.holidays.includes('2026-11-10'), 'a failed refresh keeps the list in memory');
   hol._reset();
@@ -587,13 +527,10 @@ const sleep = async () => {};
       assert.ok(!/<b>/.test(JSON.stringify(r.body)), 'input never echoed');
     }
     assert.strictEqual((await getJson('/intraday?expiry=12-Nov-2026&symbol=SENSEX')).status, 200);
-    // feed down with nothing cached for a symbol: a plain 502, no upstream detail
-    oc._setSource({ name: 'upstox', knownExpiries: () => null, load: async () => { throw Object.assign(new Error('live feed is reconnecting'), { code: 'STREAM_DOWN' }); } });
-    const errLog2 = console.error; console.error = () => {};
-    const down = await getJson('/option-chain?symbol=SENSEX');
-    console.error = errLog2;
-    assert.strictEqual(down.status, 502);
-    assert.ok(!/reconnecting|STREAM/.test(JSON.stringify(down.body)));
+    oc._setSource({ name: 'nse', knownExpiries: () => null, load: async () => { throw new Error('unused'); } });
+    const fallback = await getJson('/option-chain?symbol=SENSEX');
+    assert.strictEqual(fallback.status, 503);
+    assert.ok(/Upstox/.test(fallback.body.error));
     oc._setSource(null);
     await new Promise(r => server.close(r));
   }
