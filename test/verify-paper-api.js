@@ -11,7 +11,7 @@ const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 const app = require('../api/index');
 const paperRouter = require('../api/routes/paper');
 const { createService } = require('../api/services/paper/paperAccounts');
-const { formatNseDate } = require('../api/services/providers/nse');
+const { formatNseDate } = require('../api/services/providers/instruments');
 
 const listen = a => new Promise(res => { const s = http.createServer(a).listen(0, () => res(s)); });
 const DAY = 24 * 3600 * 1000;
@@ -121,11 +121,9 @@ function sxFeed(expiry) {
     delete process.env.PAPER_SECRET;
     assert.strictEqual((await call('/api/paper/accounts')).status, 503);
     assert.strictEqual((await (await call('/api/paper/session')).json()).configured, false);
-    process.env.CRON_SECRET = 'cron-secret-for-tests';
-    assert.strictEqual((await call('/api/cron/paper')).status, 401, 'the paper tick needs the cron secret');
-    const tick = await call('/api/cron/paper', { auth: 'Bearer cron-secret-for-tests' });
-    assert.strictEqual(tick.status, 200);
-    assert.strictEqual((await tick.json()).accounts, 0);
+    // the paper tick is the scheduler's job now: no endpoint, and it works without any secret
+    assert.strictEqual((await call('/api/cron/paper')).status, 404, 'nothing outside the server can trigger the tick');
+    assert.strictEqual((await require('../api/services/scheduler').paperTick()).accounts, 0);
 
     // production with PAPER_SECRET: sign in for a cookie
     process.env.PAPER_SECRET = 'paper-secret-for-tests';

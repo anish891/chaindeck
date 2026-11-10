@@ -55,6 +55,9 @@ const nseDateToYmd = calendar.nseDateToYmd;
 
 const istYmd = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
 
+/** Epoch ms -> that IST day as 'DD-Mon-YYYY'. */
+const formatNseDate = ms => ymdToNseDate(istYmd(ms));
+
 /** An Upstox expiry ('2026-11-10', '2026-11-10T...' or epoch ms such as 1794767399000) -> IST 'YYYY-MM-DD', or null. */
 function expiryYmd(v) {
   if (typeof v === 'number' && Number.isFinite(v) && v > 0) return istYmd(v);
@@ -93,4 +96,4 @@ async function fetchContracts(symbol = 'NIFTY', { get = upstox.get, nowMs = Date
   return out;
 }
 
-module.exports = { INDICES, SYMBOLS, isSymbol, getIndex, expiryYmd, ymdToNseDate, nseDateToYmd, parseContracts, fetchContracts, istYmd };
+module.exports = { INDICES, SYMBOLS, isSymbol, getIndex, expiryYmd, ymdToNseDate, nseDateToYmd, parseContracts, fetchContracts, istYmd, formatNseDate };

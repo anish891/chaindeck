@@ -1,8 +1,7 @@
 // NSE trading calendar (equity derivatives): which days the market is closed besides weekends.
 //
-// Pure module with no imports, so nse.js, volatility.js and the routes can all use it without import cycles.
-// The list is refreshed daily from Upstox's market holidays (or NSE's holiday master with DATA_SOURCE=nse; see
-// holidays.js) and falls back to the list below if
+// Pure module with no imports, so volatility.js, the stream and the routes can all use it without import cycles.
+// The list is refreshed daily from Upstox's market holidays (see holidays.js) and falls back to the list below if
 // that cannot be reached. The fallback covers 2026 only: for a year with no data the module has no holidays to apply
 // and behaves like a plain Monday-Friday calendar, which is the previous behaviour.
 //
@@ -30,22 +29,6 @@ function nseDateToYmd(s) {
   const mi = MONTHS.indexOf(m[2].toLowerCase());
   if (mi === -1) return null;
   return `${m[3]}-${String(mi + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-}
-
-/**
- * Replace the holiday list from NSE's holiday-master JSON ({ FO: [{ tradingDate }], CM: [...] }).
- * Returns the number of dates loaded, or 0 (list unchanged) if the payload does not look right.
- */
-function setHolidaysFromNse(json, now = Date.now()) {
-  const rows = json && (Array.isArray(json.FO) && json.FO.length ? json.FO : Array.isArray(json.CM) ? json.CM : null);
-  if (!rows) return 0;
-  const dates = rows.map(r => nseDateToYmd(r && r.tradingDate)).filter(Boolean);
-  // A holiday list always has several entries for a year; an empty or tiny one means the payload is not what we expect.
-  if (dates.length < 5) return 0;
-  holidays = new Set(dates);
-  source = 'nse';
-  updatedAt = now;
-  return dates.length;
 }
 
 /**
@@ -120,7 +103,6 @@ module.exports = {
   OPEN_MIN,
   CLOSE_MIN,
   nseDateToYmd,
-  setHolidaysFromNse,
   setHolidaysFromUpstox,
   setHolidays,
   isHoliday,

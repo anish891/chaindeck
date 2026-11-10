@@ -1,17 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const history = require('../services/storage/history');
-const { getParticipantHistory } = require('../services/market/participants');
 const chartAnalysis = require('../services/analytics/chartAnalysis');
 const forwardLog = require('../services/analytics/forwardlog');
-const { withRetry } = require('../services/util/retry');
-const integrity = require('../services/analytics/integrity');
 const { istNow } = require('../services/market/market');
 const { refreshHolidays } = require('../services/market/holidays');
-const { fetchRawOptionChain, staleReasonCode, sourceName } = require('../services/market/optionChain');
+const { fetchRawOptionChain, sourceName } = require('../services/market/optionChain');
+const { chainView, chartView, CHART_INTERVALS } = require('../services/market/chainView');
 const calendar = require('../services/market/calendar');
 const instruments = require('../services/providers/instruments');
-const premarket = require('../services/market/premarket');
 const paperRoutes = require('./paper');
 const { rateLimit, requireSecret, isValidExpiry, isPlausibleExpiry, isRecentDate, sendError } = require('../middleware/security');
 const {
@@ -35,28 +32,16 @@ function symbolOf(req) {
 const BAD_SYMBOL = { ok: false, error: `symbol must be one of ${instruments.SYMBOLS.join(', ')}.` };
 
 router.get('/option-chain', async (req, res) => {
-  refreshHolidays().catch(() => {}); // cheap: at most one upstream call a day, never blocks or throws
   const { expiry } = req.query;
   const symbol = symbolOf(req);
   if (!symbol) return res.status(400).json(BAD_SYMBOL);
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    const { raw, allExpiries, targetExpiry, fetchedMs, stale, staleReason } = await fetchRawOptionChain(symbol, expiry || null);
-    const data = await processOptionChainData(raw, allExpiries, targetExpiry, { symbol });
+    const data = await chainView(symbol, expiry || null);
     res.set('Cache-Control', READ_CACHE);
-    // Recompute the headline numbers from the raw payload with separate code and compare (see services/analytics/integrity.js).
-    let checks;
-    try {
-      checks = integrity.verifyProcessed(raw, data, targetExpiry);
-    } catch (e) {
-      console.error('integrity verification failed:', e.message);
-      checks = [{ id: 'integrity_engine', group: 'Option chain', label: 'Integrity checks ran', level: 'fail', detail: 'the verification step itself errored' }];
-    }
-    // feed: when we last got this from NSE, whether it is a leftover copy served after a failed refresh, and why
-    res.json({ ok: true, data: { ...data, feed: { fetchedAt: fetchedMs || null, stale: !!stale, reason: stale ? staleReasonCode(staleReason) : null, source: sourceName() }, integrity: { checks } } });
+    res.json({ ok: true, data });
   } catch (err) {
     if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
-    if (err.code === 'UNSUPPORTED_SYMBOL') return res.status(503).json({ ok: false, error: `${symbol} needs the Upstox data source (set UPSTOX_ACCESS_TOKEN).` });
     return sendError(res, 502, 'Error fetching option chain', err);
   }
 });
@@ -74,17 +59,6 @@ router.get('/intraday', async (req, res) => {
     res.json({ ok: true, persistent: history.configured, ...data });
   } catch (err) {
     return sendError(res, 500, 'Error reading intraday history', err);
-  }
-});
-
-// Overnight cues for the pre-market panel (US, US futures, Asia, rupee, crude, gold, US yield). No NSE data involved.
-router.get('/premarket', async (req, res) => {
-  try {
-    const data = await premarket.getPremarket();
-    res.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120');
-    res.json({ ok: true, ...data });
-  } catch (err) {
-    return sendError(res, 502, 'Error reading pre-market cues', err);
   }
 });
 
@@ -112,16 +86,13 @@ router.get('/expiry-replay', async (req, res) => {
 });
 
 // Candles + support/resistance zones + patterns + signals for the price chart. Intervals are whitelisted.
-const CHART_INTERVALS = new Set(['5m', '15m', '1d']);
 router.get('/chart-analysis', async (req, res) => {
   const interval = req.query.interval || '5m';
   const { expiry } = req.query;
   if (!CHART_INTERVALS.has(interval)) return res.status(400).json({ ok: false, error: 'interval must be 5m, 15m or 1d.' });
   if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
   try {
-    // Stored spot history is only read if Yahoo is down (it is a fallback; reading it every time cost a storage round trip).
-    const fallbackPoints = expiry && interval !== '1d' ? async () => (await history.getIntraday(expiry)).points : null;
-    const data = await chartAnalysis.analyze(interval, { d: getCacheData('NIFTY'), fallbackPoints }); // the price chart is NIFTY's
+    const data = await chartView(interval, expiry);
     res.set('Cache-Control', HISTORY_CACHE);
     res.json({ ok: true, ...data });
   } catch (err) {
@@ -129,7 +100,7 @@ router.get('/chart-analysis', async (req, res) => {
   }
 });
 
-// Live track record of the chart's signals and zones (recorded by the cron job, scored against later candles).
+// Live track record of the chart's signals and zones (recorded each minute by the scheduler, scored against later candles).
 router.get('/forward-log', async (req, res) => {
   try {
     if (!forwardLog.configured) return res.json({ ok: true, persistent: false });
@@ -164,8 +135,8 @@ router.get('/calendar', async (req, res) => {
   }
 });
 
-// For an uptime monitor: HTTP 503 when the per-minute recorder has stopped during market hours, so a failing cron job
-// raises an alert instead of waiting to be noticed. Reveals only the age of the last snapshot, nothing else.
+// For an uptime monitor: HTTP 503 when the per-minute recorder has stopped during market hours, so a stuck scheduler
+// or a dead feed raises an alert instead of waiting to be noticed. Reveals only the age of the last snapshot, nothing else.
 router.get('/snapshot-age', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   if (!history.configured) return res.json({ ok: true, persistent: false });
@@ -196,79 +167,16 @@ router.get('/strike-history', async (req, res) => {
   }
 });
 
-// FII / DII / Pro / Client index positions from NSE's end-of-day file (last 10 trading days, newest first).
-router.get('/participants', async (req, res) => {
-  try {
-    const days = await getParticipantHistory(10);
-    res.set('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');
-    res.json({ ok: true, days });
-  } catch (err) {
-    return sendError(res, 502, 'Error reading participant OI', err);
-  }
-});
-
 // Deliberately minimal: no backend names, hostnames or environment variable names.
 router.get('/storage-status', (req, res) => {
   res.json({ ok: true, persistent: history.configured });
 });
 
-// Records a snapshot even when nobody has the page open. Point an external pinger at it during market hours
-// with `Authorization: Bearer <CRON_SECRET>` (the secret is never accepted in the URL).
-async function cronSnapshot(req, res) {
-  await refreshHolidays(); // keep the holiday list current even when nobody has the page open
-  const { expiry } = req.query;
-  const symbol = symbolOf(req);
-  if (!symbol) return res.status(400).json(BAD_SYMBOL);
-  if (expiry !== undefined && !isPlausibleExpiry(expiry)) return res.status(400).json({ ok: false, error: 'expiry must look like 13-Oct-2026.' });
-  try {
-    // The upstream sometimes rejects a cold request (fast 401/403 or a timeout) and answers a moment later, so try a few times.
-    const { raw, allExpiries, targetExpiry, stale: cronStale } = await withRetry(
-      attempt => {
-        if (attempt > 1) console.error(`cron snapshot: retrying ${symbol} fetch (attempt ${attempt})`);
-        return fetchRawOptionChain(symbol, expiry || null);
-      },
-      { attempts: 3, delayMs: 900, budgetMs: 6500, shouldRetry: e => e.code !== 'BAD_EXPIRY' && e.code !== 'UNSUPPORTED_SYMBOL' && e.code !== 'UPSTOX_AUTH' }
-    );
-    const data = await processOptionChainData(raw, allExpiries, targetExpiry, { symbol });
-    // Score the chart's signals and zones against what price did next. Best effort: the snapshot above is already saved.
-    // Never record signals from data that is stale or fails its own consistency checks.
-    let healthy = !cronStale;
-    try { healthy = healthy && !integrity.hasFailure(integrity.verifyProcessed(raw, data, targetExpiry)); } catch (e) { healthy = false; }
-    // The forward log scores NIFTY's price chart signals, so only NIFTY snapshots feed it.
-    const forward = symbol !== 'NIFTY' ? { skipped: 'nifty-only' } : healthy ? await forwardLog.run(data) : { skipped: 'unhealthy-data' };
-    res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, symbol, expiry: data.expiry, dataAsOf: data.dataAsOf, persistent: history.configured, forward });
-  } catch (err) {
-    if (err.code === 'BAD_EXPIRY') return res.status(400).json({ ok: false, error: 'Unknown expiry.' });
-    return sendError(res, 502, 'Cron snapshot failed', err);
-  }
-}
-router.get('/cron/snapshot', strictLimit, requireSecret, cronSnapshot);
-router.post('/cron/snapshot', strictLimit, requireSecret, cronSnapshot);
-
-// Paper trading: fill resting orders, expire day orders, settle expiries, record each day's equity, then run deployed
-// strategies. A separate job from the snapshot so a slow paper tick can never cost a saved snapshot. Same secret, same
-// schedule (every minute, 09-15 IST).
-async function cronPaper(req, res) {
-  await refreshHolidays();
-  try {
-    const result = await paperRoutes.service().tick();
-    // live strategies after the fills: a failure here must not hide the account tick's result
-    let strategies;
-    try { strategies = await paperRoutes.live().tick(); } catch (e) { console.error('live strategies tick failed:', e.message); strategies = { error: true }; }
-    res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, ...result, strategies });
-  } catch (err) {
-    return sendError(res, 502, 'Paper tick failed', err);
-  }
-}
-router.get('/cron/paper', strictLimit, requireSecret, cronPaper);
-router.post('/cron/paper', strictLimit, requireSecret, cronPaper);
-
 // Paper trading API (owner only, see routes/paper.js)
 router.use('/paper', paperRoutes);
 
-// Writes to storage, so it needs the same secret as the cron endpoint (it used to be open to anyone).
+// Writes to storage, so it needs the admin secret (CRON_SECRET; it used to be open to anyone). A manual action:
+// the per-minute recorder saves the session summary by itself after 15:20.
 router.post('/session-summary', strictLimit, requireSecret, async (req, res) => {
   try {
     const { raw, allExpiries, targetExpiry } = await fetchRawOptionChain('NIFTY');

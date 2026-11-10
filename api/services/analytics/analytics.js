@@ -9,7 +9,7 @@ const RISK_FREE_RATE = parseFloat(process.env.RISK_FREE_RATE) || 0.065;
 // Lot size and strike step come per index from instruments.js (the lot size from Upstox's live contract list when known).
 // GEX magnitude scales linearly with the lot size (sign, regime and zero-gamma level do not).
 const lotSizeFor = symbol => {
-  try { return require('../providers/upstoxChain').lotSizeFor(symbol); } catch (e) { return instruments.getIndex(symbol).lotSize; }
+  try { return require('../stream/liveChain').lotSizeFor(symbol); } catch (e) { return instruments.getIndex(symbol).lotSize; }
 };
 const PCR_BULL = 1.2;
 const PCR_BEAR = 0.8;
