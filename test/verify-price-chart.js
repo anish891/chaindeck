@@ -18,34 +18,38 @@ globalThis.document = {
 };
 
 (async () => {
-  // The chart no longer fetches: it asks the stream to push an analysis (watch) and draws what arrives (onChartPush).
+  const requests = [];
+  globalThis.__fetchChart = (interval, expiry) => new Promise(resolve => requests.push({ interval, expiry, resolve }));
+  const apiStub = toUrl('export const fetchChartAnalysis = (...a) => globalThis.__fetchChart(...a);');
   const utilStub = toUrl(fs.readFileSync(path.join(__dirname, '../public/js/ui-utils.js'), 'utf8'));
-  const raw = fs.readFileSync(path.join(__dirname, '../public/js/price-chart.js'), 'utf8');
-  assert(!/\bfetch\(|api-client/.test(raw), 'price-chart.js makes no HTTP request');
-  const src = raw
+  const src = fs.readFileSync(path.join(__dirname, '../public/js/price-chart.js'), 'utf8')
+    .replace("'./api-client.js'", `'${apiStub}'`)
     .replace("'./ui-utils.js'", `'${utilStub}'`)
     .replace("'./conditional-stats.js'", `'${toUrl(fs.readFileSync(path.join(__dirname, '../public/js/conditional-stats.js'), 'utf8'))}'`);
   const chart = await import(toUrl(src));
-  const payload = interval => ({ ok: true, interval, source: 'upstox', volumeSource: 'none', spot: 1, candles: [], zones: [], signals: [], actionZones: [], patterns: [], backtest: null });
-  const push = (interval, extra = {}) => chart.onChartPush({ type: 'chart', interval, payload: { ...payload(interval), ...extra } });
+  const tick = () => new Promise(r => setImmediate(r));
+  const payload = interval => ({ interval, source: 'yahoo', volumeSource: 'none', spot: 1, candles: [], zones: [], signals: [], actionZones: [], patterns: [], backtest: null });
 
-  const watched = [];
-  chart.initPriceChart({ getExpiry: () => '13-Oct-2026', watch: (interval, expiry) => watched.push(`${interval}|${expiry}`) });
-  chart.refreshPriceChart();
-  chart.refreshPriceChart();
-  assert.deepStrictEqual(watched, ['5m|13-Oct-2026'], 'one subscription per timeframe and expiry, however often the page asks');
+  chart.initPriceChart({ getExpiry: () => '13-Oct-2026' });
+  chart.refreshPriceChart(true);
+  assert.strictEqual(requests.length, 1);
+  assert.strictEqual(requests[0].interval, '5m');
 
-  // The user switches to 1d before the 5m analysis arrives: the subscription moves at once, and the late 5m push is ignored.
+  // The user switches to 1d while the 5m request is still loading. The 1d request cannot start yet (one at a time).
   chart.setChartTimeframe('1d');
-  assert.deepStrictEqual(watched, ['5m|13-Oct-2026', '1d|13-Oct-2026']);
-  push('5m');
-  assert.strictEqual(chart.currentChartSignals(), null, 'an answer for the timeframe the user left is not drawn');
-  push('1d');
+  assert.strictEqual(requests.length, 1, 'only one request in flight');
+
+  // The 5m answer arrives and is discarded as stale. Before the fix nothing asked for 1d after that, so the chart sat
+  // on "Loading" until the next dashboard refresh (up to a minute with the market closed).
+  requests[0].resolve(payload('5m'));
+  await tick(); await tick();
+  assert.strictEqual(requests.length, 2, 'the skipped 1d request is made as soon as the stale one finishes');
+  assert.strictEqual(requests[1].interval, '1d');
+
+  requests[1].resolve(payload('1d'));
+  await tick(); await tick();
   assert.strictEqual(chart.currentChartSignals().interval, '1d', 'the 1d data is shown');
-  // a failed build never wipes a chart that is already on screen
-  chart.onChartPush({ type: 'chart', interval: '1d', payload: { ok: false, error: 'Error building chart analysis' } });
-  assert.strictEqual(chart.currentChartSignals().interval, '1d');
-  assert.strictEqual(watched.length, 2, 'and nothing else is requested: the server pushes the next one');
+  assert.strictEqual(requests.length, 2, 'and nothing else is requested');
 
   // The pattern-history line under a signal was escaped twice, so any "&" or apostrophe in it showed as "&amp;".
   {
@@ -55,7 +59,8 @@ globalThis.document = {
       history: { hitRate: 0.6, baseline: 0.5, horizon: 12, n: 40, ci: { low: 0.45, high: 0.73 }, verdict: 'odd & rare' }
     };
     chart.setChartTimeframe('5m');
-    push('5m', { signals: [sig] });
+    requests[requests.length - 1].resolve({ ...payload('5m'), signals: [sig] });
+    await tick(); await tick();
     const html = elements.signalsList.innerHTML;
     assert(html.includes('odd &amp; rare'), 'escaped once');
     assert(!html.includes('&amp;amp;'), 'not escaped twice');

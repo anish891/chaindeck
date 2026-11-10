@@ -1,5 +1,4 @@
-// One-off reads of the server's own saved history. Live data (the option chain, prices, the price chart) never comes
-// through here: it arrives over the WebSocket in stream.js.
+const API = '/api/option-chain';
 
 // Which index the page shows: ?index=sensex in the address wins, then the last choice saved in this browser, then NIFTY.
 export const SYMBOLS = ['NIFTY', 'SENSEX'];
@@ -18,6 +17,17 @@ export function withSymbol(path, symbol = SYMBOL) {
   return `${path}${path.includes('?') ? '&' : '?'}symbol=${encodeURIComponent(symbol)}`;
 }
 
+export async function fetchOptionChainData(selectedExpiry = null) {
+  const url = withSymbol(selectedExpiry
+    ? `${API}?expiry=${encodeURIComponent(selectedExpiry)}`
+    : API);
+
+  const r = await fetch(url);
+  const json = await r.json();
+  if (!json.ok) throw Object.assign(new Error(json.error), { status: r.status });
+  return json.data;
+}
+
 export async function fetchSimilarSessionsData() {
   const r = await fetch(withSymbol('/api/similar-sessions'));
   const json = await r.json();
@@ -32,6 +42,14 @@ export async function fetchIntradayData(expiry) {
   return json;
 }
 
+export async function fetchPremarket() {
+  const r = await fetch('/api/premarket');
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json;
+}
+
+/** Past expiry days still stored ({ days }), or one of them ({ points, frames }) when `expiry` is given. */
 export async function fetchExpiryReplay(expiry) {
   const r = await fetch(withSymbol(expiry ? `/api/expiry-replay?expiry=${encodeURIComponent(expiry)}` : '/api/expiry-replay'));
   const json = await r.json();
@@ -41,6 +59,21 @@ export async function fetchExpiryReplay(expiry) {
 
 export async function fetchStrikeHistory(expiry, strike) {
   const r = await fetch(withSymbol(`/api/strike-history?expiry=${encodeURIComponent(expiry)}&strike=${strike}`));
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json;
+}
+
+export async function fetchParticipantData() {
+  const r = await fetch('/api/participants');
+  const json = await r.json();
+  if (!json.ok) throw new Error(json.error);
+  return json.days || [];
+}
+
+export async function fetchChartAnalysis(interval, expiry) {
+  const q = `interval=${encodeURIComponent(interval)}${expiry ? `&expiry=${encodeURIComponent(expiry)}` : ''}`;
+  const r = await fetch(`/api/chart-analysis?${q}`);
   const json = await r.json();
   if (!json.ok) throw new Error(json.error);
   return json;

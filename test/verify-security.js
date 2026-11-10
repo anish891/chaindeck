@@ -1,5 +1,5 @@
 // Security regression tests. Everything runs against the real Express app on an ephemeral port;
-// no request here reaches Upstox or Redis (validation / auth fail first, by design).
+// no request here reaches NSE, Yahoo or Redis (validation / auth fail first, by design).
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -102,43 +102,37 @@ const url = (s, p) => `http://127.0.0.1:${s.address().port}${p}`;
   ];
   for (const p of bad) assert.strictEqual((await get(p)).status, 400, `${p.slice(0, 70)} must be rejected with 400`);
 
-  // ── 7. the one operational endpoint: fail closed, constant-time, never accept the secret in the URL ──
+  // ── 7. operational endpoints: fail closed, constant-time, never accept the secret in the URL ──
   const prevVercel = process.env.VERCEL;
   const prevSecret = process.env.CRON_SECRET;
-  const summary = (query = '', headers = {}) => fetch(url(server, `/api/session-summary${query}`), { method: 'POST', headers });
-  const quiet = async fn => { const e = console.error; console.error = () => {}; try { return await fn(); } finally { console.error = e; } };
   try {
-    // the cron endpoints are gone: the server runs those jobs itself (services/scheduler.js), nothing outside can trigger them
-    for (const p of ['/api/cron/snapshot', '/api/cron/paper']) {
-      assert.strictEqual((await get(p)).status, 404, `${p} no longer exists`);
-      assert.strictEqual((await fetch(url(server, p), { method: 'POST' })).status, 404);
-    }
-
     process.env.VERCEL = '1';
     delete process.env.CRON_SECRET;
-    assert.strictEqual((await summary()).status, 503, 'production without CRON_SECRET refuses instead of allowing everyone');
+    assert.strictEqual((await get('/api/cron/snapshot')).status, 503, 'production without CRON_SECRET refuses instead of allowing everyone');
+    assert.strictEqual((await fetch(url(server, '/api/session-summary'), { method: 'POST' })).status, 503);
 
     process.env.CRON_SECRET = 's3cret-value-for-tests';
-    assert.strictEqual((await summary()).status, 401, 'no credentials');
-    assert.strictEqual((await summary('', { Authorization: 'Bearer wrong' })).status, 401, 'wrong secret');
-    assert.strictEqual((await summary('', { Authorization: 's3cret-value-for-tests' })).status, 401, 'missing Bearer scheme');
-    assert.strictEqual((await summary('?key=s3cret-value-for-tests')).status, 401, 'the secret in the URL is not accepted');
-    // correct secret passes authentication (the handler then fails because no live feed runs in tests; nothing is contacted)
-    const ok = await quiet(() => summary('', { Authorization: 'Bearer s3cret-value-for-tests' }));
-    assert.strictEqual(ok.status, 500, 'correct secret reaches the handler');
+    assert.strictEqual((await get('/api/cron/snapshot')).status, 401, 'no credentials');
+    assert.strictEqual((await get('/api/cron/snapshot', { headers: { Authorization: 'Bearer wrong' } })).status, 401, 'wrong secret');
+    assert.strictEqual((await get('/api/cron/snapshot', { headers: { Authorization: 's3cret-value-for-tests' } })).status, 401, 'missing Bearer scheme');
+    assert.strictEqual((await get('/api/cron/snapshot?key=s3cret-value-for-tests')).status, 401, 'the secret in the URL is not accepted');
+    assert.strictEqual((await fetch(url(server, '/api/session-summary'), { method: 'POST' })).status, 401, 'session-summary is no longer open');
+    // correct secret passes authentication (we then stop at validation so NSE is never contacted)
+    const ok = await get('/api/cron/snapshot?expiry=bad', { headers: { Authorization: 'Bearer s3cret-value-for-tests' } });
+    assert.strictEqual(ok.status, 400, 'correct secret reaches the handler');
 
     // a secret stored with stray whitespace (trailing newline from a paste) still works with the clean header
     process.env.CRON_SECRET = 's3cret-value-for-tests\n';
-    assert.strictEqual((await quiet(() => summary('', { Authorization: 'Bearer s3cret-value-for-tests' }))).status, 500, 'trailing newline in the env var must not lock the owner out');
-    assert.strictEqual((await summary('', { Authorization: 'Bearer wrong' })).status, 401, 'whitespace tolerance must not weaken matching');
+    assert.strictEqual((await get('/api/cron/snapshot?expiry=bad', { headers: { Authorization: 'Bearer s3cret-value-for-tests' } })).status, 400, 'trailing newline in the env var must not lock the owner out');
+    assert.strictEqual((await get('/api/cron/snapshot', { headers: { Authorization: 'Bearer wrong' } })).status, 401, 'whitespace tolerance must not weaken matching');
     process.env.CRON_SECRET = '   \n';
-    assert.strictEqual((await summary()).status, 503, 'a whitespace-only secret counts as unset (fail closed)');
+    assert.strictEqual((await get('/api/cron/snapshot')).status, 503, 'a whitespace-only secret counts as unset (fail closed)');
     process.env.CRON_SECRET = 's3cret-value-for-tests';
 
     // local development without a secret stays convenient
     process.env.VERCEL = '0';
     delete process.env.CRON_SECRET;
-    assert.strictEqual((await quiet(() => summary())).status, 500, 'dev without CRON_SECRET reaches the handler');
+    assert.strictEqual((await get('/api/cron/snapshot?expiry=bad')).status, 400, 'dev without CRON_SECRET reaches the handler');
   } finally {
     if (prevVercel === undefined) delete process.env.VERCEL; else process.env.VERCEL = prevVercel;
     if (prevSecret === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = prevSecret;
