@@ -3,11 +3,9 @@
 //
 // Data comes from /api/chart-analysis. Lightweight Charts (vendored, public/vendor) draws the chart. Zone bands and the
 // volume profile are series primitives so they stay locked to the price scale when the user pans or zooms.
-import { fetchChartAnalysis } from './api-client.js';
 import { escapeHtml } from './ui-utils.js';
 import { renderConditionalStats } from './conditional-stats.js';
 
-const REFRESH_MS = 15000;
 const IST_OFFSET_S = 19800;
 const LAYER_DEFAULTS = { zones: true, volume: true, vwap: true, profile: true, patterns: true, allPatterns: false };
 const TIMEFRAMES = ['5m', '15m', '1d'];
@@ -17,8 +15,9 @@ let layers = { ...LAYER_DEFAULTS };
 let data = null;
 let fetchedAt = 0;
 let fetchedKey = '';
-let inflight = false;
+let watchedKey = null;
 let getExpiry = () => null;
+let watchChart = () => {}; // (timeframe, expiry) => ask the stream for that analysis; set by initPriceChart
 
 let chart = null;
 let candleSeries = null;
@@ -445,31 +444,32 @@ function renderAll() {
 
 // ── public API ───────────────────────────────────────────────────────────
 
-export async function refreshPriceChart(force = false) {
-  if (inflight || document.hidden) return;
+/**
+ * Ask the server to push this timeframe's analysis (now, then every 15 s). Called again whenever the timeframe or the
+ * expiry changes; a repeat call for the same pair does nothing. Nothing is fetched over HTTP.
+ */
+export function refreshPriceChart(force = false) {
   const expiry = getExpiry();
   const key = `${tf}|${expiry || ''}`;
-  if (!force && key === fetchedKey && Date.now() - fetchedAt < REFRESH_MS) return;
-  inflight = true;
-  const requested = tf;
-  try {
-    const result = await fetchChartAnalysis(tf, expiry);
-    if (requested !== tf) return; // user switched timeframe while loading
-    data = result;
-    fetchedAt = Date.now();
-    fetchedKey = key;
-    if (ensureChart()) draw();
-    renderAll();
-    if (dataListener) dataListener();
-  } catch (e) {
-    console.error('Chart analysis fetch failed:', e);
+  if (!force && key === watchedKey) return;
+  watchedKey = key;
+  watchChart(tf, expiry);
+}
+
+/** A pushed chart analysis ({ type: 'chart', interval, payload }) from the stream. */
+export function onChartPush(msg) {
+  if (!msg || msg.interval !== tf) return; // an answer for a timeframe the user has since left
+  if (!msg.payload || !msg.payload.ok) {
     const el = document.getElementById('chartNote');
     if (el && !data) el.textContent = 'Could not load chart data. Retrying.';
-  } finally {
-    inflight = false;
-    // The timeframe changed while this was loading: that request was skipped (one at a time), so make it now.
-    if (requested !== tf) refreshPriceChart(true);
+    return;
   }
+  data = msg.payload;
+  fetchedAt = Date.now();
+  fetchedKey = watchedKey;
+  if (ensureChart()) draw();
+  renderAll();
+  if (dataListener) dataListener();
 }
 
 export function setChartTimeframe(next) {
@@ -551,6 +551,7 @@ export function currentChartSignals() {
 
 export function initPriceChart(opts = {}) {
   if (typeof opts.getExpiry === 'function') getExpiry = opts.getExpiry;
+  if (typeof opts.watch === 'function') watchChart = opts.watch;
   renderTfButtons();
   renderAll();
 }

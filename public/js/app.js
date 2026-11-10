@@ -1,5 +1,6 @@
 import { initAlerts, processAlerts, toggleAlertsDrawer, alertsEnabled } from './alerts.js';
-import { fetchOptionChainData, fetchSimilarSessionsData, fetchIntradayData, fetchParticipantData, fetchCalendar, fetchPremarket, SYMBOL } from './api-client.js';
+import { fetchSimilarSessionsData, fetchIntradayData, fetchCalendar, SYMBOL } from './api-client.js';
+import { createStream, STATUS_TEXT, tickTime } from './stream.js';
 import { initExplain } from './explain.js';
 import { openStrikePanel, initStrikePanel } from './strike-panel.js';
 import { icon, setIconText, hydrateIcons, regimeIcon, themeIcon } from './icons.js';
@@ -13,47 +14,33 @@ import { renderTrust, toggleTrustDrawer } from './trust-ui.js';
 import { renderFlowPanel, renderGlance } from './flow-panel.js';
 import { computeExpiryDay } from './expiry-day.js';
 import { renderExpiryPanel } from './expiry-panel.js';
-import { inPremarketWindow, renderPremarket } from './premarket-panel.js';
 import { initExpiryReplay, loadReplayDays, replayActive, onReplayDayChange, onReplayTimeChange, replayStep, replayTogglePlay } from './expiry-replay.js';
 import { initExport, exportCSV, exportPDF, takeSnapshot, toggleExportMenu, closeExportMenu } from './export.js';
-import { initPriceChart, refreshPriceChart, setChartTimeframe, toggleChartLayer, toggleLevelsExpanded, restyleChart, currentChartSignals, chartFeedStatus, nearestChartLevels, onChartData, setSignalsPaused } from './price-chart.js';
+import { initPriceChart, refreshPriceChart, onChartPush, setChartTimeframe, toggleChartLayer, toggleLevelsExpanded, restyleChart, currentChartSignals, chartFeedStatus, nearestChartLevels, onChartData, setSignalsPaused } from './price-chart.js';
 import { fmt, fmtK, fmtChg, pct, timeStr, getSmoothedBuildup, renderProbabilityChart, renderTimelineChart, renderOiChart, renderStraddleChart, renderIvRvChart, renderExpiryDecayChart, renderParticipantChart } from './charts.js';
 
 let currentData = null;
 let prevData = null;
-let intervalMs = 3000;
-let timer = null;
-let cdInterval = null;
 let sortCol = null;
 let sortDir = -1;
 let selectedExpiry = null;
-let cdRemaining = 5;
-let fetchInProgress = false;
+let stream = null;          // the page's one WebSocket (stream.js); every live value arrives through it
+let conn = { status: 'connecting', stale: true, lastTickAt: null, reason: null };
+const lastLtp = new Map();  // `${strike}|CE` -> last price shown, to flash a cell green or red when it moves
+let ltpCells = new Map();   // `${strike}|CE` -> the table cell showing that price
+let pendingTicks = null;    // latest ticks message waiting for the next animation frame
 let contentState = null;   // consecutive identical-snapshot tracker (frozen feed detection)
 let trust = { status: 'ok', blocking: false, reasons: [] };
 
 // Server-side intraday history (survives page refresh / cold starts when storage is configured)
 let intraday = null;
-let intradayFetchedAt = 0;
 let intradayExpiry = null;
 let timelineMetric = 'pcr';
 let oiChartMode = 'oi';
 try { oiChartMode = localStorage.getItem('oiChartMode') || 'oi'; } catch (e) { /* storage unavailable */ }
-// The recorder saves one point a minute, so polling faster than that only re-reads the same data (and every poll costs
-// Upstash commands on the free tier). Nothing changes after the close, so it backs off then.
-const INTRADAY_REFRESH_OPEN_MS = 60000;
-const INTRADAY_REFRESH_CLOSED_MS = 10 * 60000;
-
-// NSE participant-wise OI (end of day): fetched on load and every 15 minutes
-let participantDays = null;
-let participantsFetchedAt = 0;
-let participantMode = 'fut';
-try { participantMode = localStorage.getItem('participantMode') === 'opt' ? 'opt' : 'fut'; } catch (e) { /* storage unavailable */ }
-const PARTICIPANT_REFRESH_MS = 15 * 60 * 1000;
-// Similar sessions compares today's vector with stored closes; it moves slowly and the server caches the history for
-// 5 minutes, so re-asking on every 3s render only spends function calls.
-let similarFetchedAt = 0;
-const SIMILAR_REFRESH_MS = 60000;
+// Saved history (the intraday series, similar sessions, the forward log) gains a point when the server's per-minute
+// recorder runs. The server says so over the socket ('minute'); only then is it read again. Nothing is re-read on a timer.
+let similarWanted = true;
 const METRIC_LABELS = {
   pcr: 'PCR', volPcr: 'Volume PCR', straddle: 'ATM Straddle', atmIv: 'ATM IV', ivSkew: 'IV Skew (25Δ RR)',
   vix: 'India VIX', gexCr: 'Net GEX (Cr)', callOI: 'Total Call OI', putOI: 'Total Put OI'
@@ -62,11 +49,7 @@ const METRIC_LABELS = {
 async function refreshIntraday(force = false) {
   const expiry = currentData && currentData.expiry;
   if (!expiry) return;
-  if (!force && document.hidden) return; // a background tab does not need fresh history
-  const maxAge = isMarketOpen() ? INTRADAY_REFRESH_OPEN_MS : INTRADAY_REFRESH_CLOSED_MS;
-  const stale = Date.now() - intradayFetchedAt > maxAge;
-  if (!force && !stale && intradayExpiry === expiry) return;
-  intradayFetchedAt = Date.now();
+  if (!force && intradayExpiry === expiry) return; // already read for this expiry; the next read is on the server's say-so
   intradayExpiry = expiry;
   try {
     intraday = await fetchIntradayData(expiry);
@@ -82,92 +65,11 @@ async function refreshIntraday(force = false) {
   }
 }
 
-async function refreshParticipants() {
-  if (Date.now() - participantsFetchedAt < PARTICIPANT_REFRESH_MS) return;
-  participantsFetchedAt = Date.now();
-  try {
-    participantDays = await fetchParticipantData();
-  } catch (e) {
-    console.error('Participant OI fetch failed:', e);
-    if (!participantDays) participantDays = [];
-  }
-  renderParticipants();
-}
-
-export function onParticipantModeChange() {
-  const sel = document.getElementById('participantMode');
-  participantMode = sel && sel.value === 'opt' ? 'opt' : 'fut';
-  try { localStorage.setItem('participantMode', participantMode); } catch (e) { /* ignore */ }
-  renderParticipants();
-}
-
-const signedK = v => (v === null || v === undefined ? 'n/a' : `${v > 0 ? '+' : ''}${fmtK(v)}`);
-const signClass = v => (v > 0 ? 'bull' : v < 0 ? 'bear' : '');
-
 function cell(tag, text, cls) {
   const el = document.createElement(tag);
   el.textContent = text;
   if (cls) el.className = cls;
   return el;
-}
-
-function renderParticipants() {
-  const head = document.getElementById('participantHead');
-  const body = document.getElementById('participantBody');
-  const note = document.getElementById('participantNote');
-  const sel = document.getElementById('participantMode');
-  if (!head || !body) return;
-  if (sel) sel.value = participantMode;
-
-  const days = participantDays || [];
-  const latest = days[0];
-  const prev = days[1];
-  const cols = participantMode === 'opt'
-    ? ['Participant', 'Calls net', 'Puts net', 'Calls chg', 'Puts chg']
-    : ['Participant', 'Long', 'Short', 'Net', 'Long %', 'Net chg'];
-  head.replaceChildren(...cols.map((c, i) => cell('th', c, i ? 'right' : '')));
-
-  if (!latest) {
-    const td = cell('td', participantDays ? 'NSE participant data is unavailable right now.' : 'Loading NSE participant data…', 'ctx-empty');
-    td.colSpan = cols.length;
-    body.replaceChildren(document.createElement('tr'));
-    body.firstChild.append(td);
-    return;
-  }
-
-  const LABELS = { FII: 'FII', DII: 'DII', Pro: 'Pro', Client: 'Client' };
-  body.replaceChildren(...Object.keys(LABELS).map(who => {
-    const r = latest[who];
-    const p = prev ? prev[who] : null;
-    const tr = document.createElement('tr');
-    tr.append(cell('td', LABELS[who], 'ctx-who'));
-    if (participantMode === 'opt') {
-      const callChg = p ? r.optIdxCallNet - p.optIdxCallNet : null;
-      const putChg = p ? r.optIdxPutNet - p.optIdxPutNet : null;
-      tr.append(
-        cell('td', signedK(r.optIdxCallNet), `right ${signClass(r.optIdxCallNet)}`),
-        cell('td', signedK(r.optIdxPutNet), `right ${signClass(r.optIdxPutNet)}`),
-        cell('td', signedK(callChg), 'right'),
-        cell('td', signedK(putChg), 'right')
-      );
-    } else {
-      const netChg = p ? r.futIdxNet - p.futIdxNet : null;
-      tr.append(
-        cell('td', fmtK(r.futIdxLong), 'right'),
-        cell('td', fmtK(r.futIdxShort), 'right'),
-        cell('td', signedK(r.futIdxNet), `right ${signClass(r.futIdxNet)}`),
-        cell('td', r.futIdxLongPct === null ? 'n/a' : `${r.futIdxLongPct}%`, 'right'),
-        cell('td', signedK(netChg), 'right')
-      );
-    }
-    return tr;
-  }));
-
-  renderParticipantChart('participantChart', days, participantMode);
-  if (note) {
-    const asOf = new Date(latest.date + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
-    note.textContent = `As of ${asOf} (NSE end-of-day file, published each evening). Contracts; changes are vs the previous trading day.`;
-  }
 }
 
 // The index quotes sometimes time out for one refresh; keep the last good sectors on screen meanwhile.
@@ -452,35 +354,127 @@ function serverSnapshot(name) {
   return { pcr: b.pcr, spot: b.spot, totalCallOI: b.callOI, totalPutOI: b.putOI, strikes, timestamp: b.t };
 }
 
-export async function fetchNow() {
-  if (fetchInProgress) return;
-
-  fetchInProgress = true;
-  try {
-    const data = await fetchOptionChainData(selectedExpiry);
-    const unchanged = currentData && data.fetchedAt === currentData.fetchedAt;
-    if (!unchanged) {
-      prevData = currentData;
-      currentData = data;
-      contentState = trackContent(contentState, data);
-      renderAll();
-    }
-    hideOverlay();
-    setLive(true);
-    refreshIntraday();
-    refreshParticipants();
-    if (SYMBOL === 'NIFTY') { // built from NIFTY candles; their panels are hidden on other indices
-      refreshPriceChart();
-      refreshForwardLog();
-      refreshLevelScorecard();
-    }
-  } catch (e) {
-    setLive(false);
-    console.error('Fetch failed:', e);
-    if (!currentData && e && e.status === 503) showSetupProblem(e.message);
-  } finally {
-    fetchInProgress = false;
+/** A full option chain pushed by the server (about every 5 s while the feed is live). */
+function onChain(msg) {
+  if (msg.symbol !== SYMBOL || (msg.expiry || null) !== (selectedExpiry || null)) return; // an answer for a view the user has left
+  const p = msg.payload;
+  if (!p || !p.ok) {
+    console.error('Option chain not available:', p && p.error);
+    if (!currentData) showSetupProblem(p && p.code === 'AUTH' ? 'Upstox rejected the server\'s access token. Set a new UPSTOX_ACCESS_TOKEN and restart the server.' : null);
+    renderConnection();
+    return;
   }
+  const data = p.data;
+  const first = !currentData;
+  const unchanged = currentData && data.fetchedAt === currentData.fetchedAt;
+  if (!unchanged) {
+    prevData = currentData;
+    currentData = data;
+    contentState = trackContent(contentState, data);
+    renderAll();
+  }
+  hideOverlay();
+  renderConnection();
+  if (SYMBOL === 'NIFTY') refreshPriceChart(); // built from NIFTY candles; its panels are hidden on other indices
+  if (first) onMinute({ firstPaint: true }); // read the saved history once
+  else refreshIntraday(); // only does anything when the expiry on screen changed
+}
+
+/** The server's per-minute recorder ran (or this is the first paint): saved history has changed, read it again. */
+function onMinute({ firstPaint = false } = {}) {
+  if (!currentData) return;
+  refreshIntraday(true);
+  if (!firstPaint) { // on first paint renderAll has just asked for them
+    similarWanted = true;
+    fetchSimilarSessions();
+  }
+  if (SYMBOL === 'NIFTY') {
+    refreshForwardLog(true);
+    refreshLevelScorecard(); // history-based: its own module re-reads it at most every 30 minutes
+  }
+}
+
+/** Changed prices pushed by the server, at most every 250 ms. Applied on the next animation frame: only the cells that moved are touched. */
+function onTicks(msg) {
+  if (msg.symbol !== SYMBOL || (msg.expiry || null) !== (selectedExpiry || null)) return;
+  if (pendingTicks) {
+    // a frame has not been drawn since the last message (hidden tab): keep the newest price per contract
+    const merged = new Map(pendingTicks.legs.map(l => [`${l[0]}|${l[1]}`, l]));
+    for (const l of msg.legs) merged.set(`${l[0]}|${l[1]}`, l);
+    pendingTicks = { ...msg, legs: [...merged.values()] };
+    return;
+  }
+  pendingTicks = msg;
+  requestAnimationFrame(applyTicks);
+}
+
+function flash(el, dir) {
+  if (!el || !dir) return;
+  el.classList.remove('tick-up', 'tick-down');
+  void el.offsetWidth; // restart the animation when the same cell moves twice in a row
+  el.classList.add(dir > 0 ? 'tick-up' : 'tick-down');
+}
+
+function applyTicks() {
+  const msg = pendingTicks;
+  pendingTicks = null;
+  if (!msg) return;
+  for (const [strike, side, ltp] of msg.legs) {
+    const key = `${strike}|${side}`;
+    const before = lastLtp.get(key);
+    lastLtp.set(key, ltp);
+    const td = ltpCells.get(key);
+    if (!td || !(ltp > 0)) continue;
+    td.textContent = ltp.toFixed(2);
+    if (before !== undefined && ltp !== before) flash(td, ltp - before);
+  }
+  if (Number.isFinite(msg.spot) && msg.spot > 0) {
+    const el = document.getElementById('ksSpot');
+    const before = lastLtp.get('SPOT');
+    lastLtp.set('SPOT', msg.spot);
+    if (el) {
+      el.textContent = fmt(msg.spot);
+      if (before !== undefined && msg.spot !== before) flash(el, msg.spot - before);
+    }
+  }
+}
+
+/** After the table is rebuilt: find the price cells again, and flash the ones whose price changed since the last build. */
+function indexLtpCells() {
+  ltpCells = new Map();
+  document.querySelectorAll('#chainBody td[data-ltp]').forEach(td => {
+    const key = td.dataset.ltp;
+    ltpCells.set(key, td);
+    const now = Number(td.dataset.px);
+    const before = lastLtp.get(key);
+    if (now > 0) {
+      lastLtp.set(key, now);
+      if (before !== undefined && before !== now) flash(td, now - before);
+    }
+  });
+}
+
+/** (Re)subscribe to the chain on screen. Also what "Refresh now" does: the server answers with a fresh build at once. */
+function watchChain() {
+  if (stream) stream.watch({ type: 'chain', symbol: SYMBOL, expiry: selectedExpiry || null });
+}
+
+export function fetchNow() {
+  if (!stream) return;
+  stream.retryNow(); // no-op while connected
+  watchChain();
+}
+
+function startStream() {
+  stream = createStream();
+  conn = stream.getState();
+  stream.subscribe(state => { conn = state; renderConnection(); });
+  stream.on('chain', onChain);
+  stream.on('ticks', onTicks);
+  stream.on('chart', onChartPush);
+  stream.on('minute', () => onMinute());
+  watchChain();
+  renderConnection();
 }
 
 /** First load refused for a setup reason (e.g. SENSEX without an Upstox token): say so instead of spinning forever. */
@@ -500,11 +494,37 @@ function showSetupProblem(message) {
   }
 }
 
-export function setLive(ok) {
+/**
+ * The connection indicator: connected / reconnecting / offline, the time of the last tick, and the stale mark on every
+ * value while the stream is down (the numbers stay; they are just no longer live). No HTTP fallback is attempted.
+ */
+export function renderConnection() {
   const dot = document.getElementById('liveDot');
   const st = document.getElementById('statusText');
-  if (dot) dot.classList.toggle('error', !ok);
-  if (st) st.textContent = ok ? (isMarketOpen() ? 'Live · auto-refresh every ' + (intervalMs / 1000) + 's' : 'Market closed · refreshing every 60s') : 'Disconnected / Retrying…';
+  const tick = document.getElementById('lastTick');
+  const banner = document.getElementById('connBanner');
+  const status = conn.status;
+  if (dot) dot.className = `live-dot conn-${status}`;
+  if (st) {
+    st.textContent = status === 'connected' && !isMarketOpen() ? 'Connected · market closed' : STATUS_TEXT[status] || status;
+    st.dataset.status = status;
+  }
+  if (tick) {
+    const t = tickTime(conn.lastTickAt);
+    tick.textContent = t ? `Last tick ${t}` : '';
+    tick.hidden = !t;
+  }
+  const stale = conn.stale && !!currentData;
+  document.body.classList.toggle('is-stale', stale);
+  if (banner) {
+    const text = status === 'auth'
+      ? 'Upstox rejected the server\'s access token, so live data has stopped. Generate a new token in Upstox, set it as UPSTOX_ACCESS_TOKEN and restart the server. The values below are the last ones received.'
+      : status === 'offline' ? 'You are offline. The values below are the last ones received and are not updating.'
+        : status === 'reconnecting' && currentData ? 'Connection lost. Reconnecting… the values below are the last ones received.' : '';
+    banner.textContent = text;
+    banner.hidden = !text;
+    banner.dataset.status = status;
+  }
 }
 
 export function hideOverlay() {
@@ -566,9 +586,9 @@ function refreshTrust() {
 }
 
 const FEED_HELP = {
-  chain: 'Option chain from Upstox, timed by the index\'s last trade. Amber after 90 seconds, red after 3 minutes or when the server is showing a leftover copy because Upstox failed.',
-  candles: 'Price candles from Yahoo Finance (delayed by design). Shows how far the latest candle is behind the clock. Red when the server is showing a leftover copy or this page could not load them.',
-  saved: 'Saved per-minute snapshots (the cron job). Amber after 3 minutes without a new point, red after 6.'
+  chain: 'Option chain from the Upstox live feed, timed by the index\'s last trade. Amber after 90 seconds, red after 3 minutes or when the server is showing a leftover copy because the feed is down.',
+  candles: 'Price candles: history from Upstox, today\'s candles from the live feed. Shows how far the latest candle is behind the clock. Red when the server is showing a leftover copy or this page could not load them.',
+  saved: 'Saved per-minute snapshots (the server\'s recorder). Amber after 3 minutes without a new point, red after 6.'
 };
 
 function setChip(id, name, kind, result) {
@@ -590,7 +610,7 @@ function renderFreshness() {
   const open = isMarketOpen();
 
   const chainAge = currentData ? (now - new Date(currentData.dataAsOf || currentData.fetchedAt).getTime()) / 1000 : NaN;
-  setChip('freshChain', currentData && currentData.feed && currentData.feed.source === 'nse' ? 'NSE' : 'Upstox', 'chain', freshness('chain', chainAge, { open, hasData: !!currentData, stale: !!(currentData && currentData.feed && currentData.feed.stale) }));
+  setChip('freshChain', 'Upstox', 'chain', freshness('chain', chainAge, { open, hasData: !!currentData, stale: !!(currentData && currentData.feed && currentData.feed.stale) }));
 
   const cs = chartFeedStatus();
   if (!cs) {
@@ -1101,8 +1121,8 @@ function renderGlanceCards() {
 }
 
 export async function fetchSimilarSessions() {
-  if (Date.now() - similarFetchedAt < SIMILAR_REFRESH_MS) return;
-  similarFetchedAt = Date.now();
+  if (!similarWanted) return;
+  similarWanted = false;
   try {
     const { topMatches, reason } = await fetchSimilarSessionsData();
     const container = document.getElementById('similarSessionsList');
@@ -1230,7 +1250,7 @@ export function renderTable() {
     </div>
   </td>
   <td class="right muted" title="${cGreeksTitle}">${cIV ? cIV.toFixed(1) + '%' : '—'}</td>
-  <td class="right" title="${cGreeksTitle}">${cLTP ? cLTP.toFixed(2) : '—'}</td>
+  <td class="right px-cell" data-ltp="${r.strike}|CE" data-px="${cLTP || 0}" title="${cGreeksTitle}">${cLTP ? cLTP.toFixed(2) : '—'}</td>
   <td class="right muted" style="font-size:11px;">${cBid ? cBid.toFixed(1) + ' / ' + cAsk.toFixed(1) : '—'}</td>
 
   <td class="strike-cell ${isATM ? 'atm-row' : ''}" title="Click for this strike's history">
@@ -1238,7 +1258,7 @@ export function renderTable() {
   </td>
 
   <td class="right muted" style="font-size:11px;">${pBid ? pBid.toFixed(1) + ' / ' + pAsk.toFixed(1) : '—'}</td>
-  <td class="right" title="${pGreeksTitle}">${pLTP ? pLTP.toFixed(2) : '—'}</td>
+  <td class="right px-cell" data-ltp="${r.strike}|PE" data-px="${pLTP || 0}" title="${pGreeksTitle}">${pLTP ? pLTP.toFixed(2) : '—'}</td>
   <td class="right muted" title="${pGreeksTitle}">${pIV ? pIV.toFixed(1) + '%' : '—'}</td>
   <td class="right">
     <div class="oi-bar-row left">
@@ -1261,6 +1281,7 @@ export function renderTable() {
   });
 
   reconcileRows(tbody, rows.map(r => r.strike), htmls);
+  indexLtpCells();
 }
 
 // Only touch rows whose markup changed; keep unchanged <tr> nodes in place.
@@ -1367,81 +1388,12 @@ function isMarketOpen() {
   return day >= 1 && day <= 5 && !nseHolidays.has(ymd) && mins >= 9 * 60 + 10 && mins <= 15 * 60 + 40;
 }
 
-// Before the Open: overnight cues, fetched only inside the 07:15-09:15 IST window (the panel is hidden otherwise)
-const PREMARKET_REFRESH_MS = 60000;
-let premarketData = null;
-let premarketFetchedAt = 0;
-
-async function refreshPremarket() {
-  const section = document.getElementById('premarketSection');
-  const body = document.getElementById('premarketBody');
-  if (!section || !body) return;
-  const now = Date.now();
-  const show = inPremarketWindow(now, nseHolidays);
-  section.hidden = !show;
-  if (!show) { premarketData = null; return; }
-  if (now - premarketFetchedAt < PREMARKET_REFRESH_MS) { renderPremarket(body, premarketData); return; } // keeps "open in" current
-  premarketFetchedAt = now;
-  if (!premarketData) renderPremarket(body, null);
-  let failed = false;
-  try {
-    premarketData = await fetchPremarket();
-  } catch (e) {
-    console.error('Pre-market cues fetch failed:', e);
-    failed = true;
-  }
-  renderPremarket(body, premarketData, { error: failed });
-}
-setInterval(refreshPremarket, 30000);
-
 async function loadCalendar() {
   try {
     nseHolidays = new Set(await fetchCalendar());
   } catch (e) {
     console.error('Holiday calendar fetch failed (weekends only until it loads):', e);
   }
-  refreshPremarket(); // the window depends on holidays, so decide once they are known
-}
-
-function scheduleNext() {
-  clearTimeout(timer);
-  // Closed market: data is static, poll slowly. Hidden tab: stop polling unless alerts need it.
-  if (document.hidden && !alertsEnabled()) return;
-  let delay = isMarketOpen() ? intervalMs : Math.max(intervalMs, 60000);
-  if (document.hidden) delay = Math.max(delay, 30000);
-  cdRemaining = Math.round(delay / 1000);
-  timer = setTimeout(async () => {
-    await fetchNow();
-    scheduleNext();
-  }, delay);
-}
-
-export function startAutoRefresh() {
-  clearTimeout(timer);
-  clearInterval(cdInterval);
-
-  cdInterval = setInterval(() => {
-    cdRemaining = Math.max(0, cdRemaining - 1);
-    const cdEl = document.getElementById('cdTimer');
-    if (cdEl) cdEl.textContent = cdRemaining;
-  }, 1000);
-
-  scheduleNext();
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (!alertsEnabled()) clearTimeout(timer);
-  } else {
-    fetchNow().then(scheduleNext); // catch up immediately on return
-  }
-});
-
-export function onIntervalChange() {
-  const sel = document.getElementById('intervalSelect');
-  intervalMs = sel ? parseInt(sel.value, 10) : 3000;
-  setLive(true);
-  startAutoRefresh();
 }
 
 /**
@@ -1477,7 +1429,8 @@ export function onExpiryChange() {
   const sel = document.getElementById('expirySelect');
   selectedExpiry = sel ? sel.value : null;
   intraday = null;
-  fetchNow();
+  intradayExpiry = null;
+  watchChain(); // the server answers with the new expiry's chain at once
 }
 
 export function applyTheme(theme) {
@@ -1491,7 +1444,6 @@ export function applyTheme(theme) {
     renderVolPanels();
     renderOiChart_();
   }
-  if (participantDays) renderParticipants();
   restyleChart();
 }
 
@@ -1668,11 +1620,9 @@ const ACTIONS = {
   onThemeSelectChange,
   onExpiryChange,
   onIndexChange,
-  onIntervalChange,
   onOiChartModeChange,
   onTimelineMetricChange,
   toggleGreeksView,
-  onParticipantModeChange,
   setChartTimeframe,
   toggleChartLayer,
   toggleLevelsExpanded,
@@ -1718,7 +1668,12 @@ document.addEventListener('DOMContentLoaded', () => {
     strikeStep: () => (currentData && currentData.strikeStep) || 50,
     onExit: () => renderVolPanels()
   });
-  if (SYMBOL === 'NIFTY') initPriceChart({ getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null });
+  if (SYMBOL === 'NIFTY') {
+    initPriceChart({
+      getExpiry: () => (currentData && currentData.expiry) || selectedExpiry || null,
+      watch: (interval, expiry) => { if (stream) stream.watch({ type: 'chart', interval, expiry: expiry || null }); }
+    });
+  }
   window.addEventListener('strike-click', e => openStrike(e.detail));
   document.getElementById('chainBody')?.addEventListener('click', e => {
     const cell = e.target.closest('.strike-cell');
@@ -1739,6 +1694,5 @@ document.addEventListener('DOMContentLoaded', () => {
       try { localStorage.setItem('advOpen', adv.open ? '1' : '0'); } catch (e) { /* ignore */ }
     });
   }
-  fetchNow();
-  startAutoRefresh();
+  startStream();
 });

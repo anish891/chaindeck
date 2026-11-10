@@ -2612,3 +2612,37 @@ button.nav-link { font: inherit; font-size: 12px; cursor: pointer; }
 .pm-asof { font-size: 10px; color: var(--muted); }
 .pm-price, .pm-chg { font-family: var(--mono); text-align: right; }
 .pm-chg { min-width: 64px; }
+
+/* ═════════ Live connection: status, last tick, stale values, price flashes ═════════ */
+.conn { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.live-dot.conn-connected { background: var(--bull); }
+.live-dot.conn-connecting, .live-dot.conn-reconnecting { background: var(--warn); animation: pulse 0.9s infinite; }
+.live-dot.conn-offline, .live-dot.conn-auth { background: var(--bear); animation: none; }
+.status-text[data-status="reconnecting"] { color: var(--warn); }
+.status-text[data-status="offline"], .status-text[data-status="auth"] { color: var(--bear); font-weight: 600; }
+.last-tick { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.last-tick[hidden] { display: none; }
+
+.conn-banner { margin: 0; padding: 8px 20px; background: var(--warn-soft); color: var(--text); font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--warn); overflow-wrap: anywhere; }
+.conn-banner[data-status="auth"], .conn-banner[data-status="offline"] { background: var(--bear-soft); border-bottom-color: var(--bear); }
+.conn-banner[hidden] { display: none; }
+
+/* While the stream is down the last values stay on screen, visibly marked as not live. */
+body.is-stale .keystrip, body.is-stale #metricsRow, body.is-stale .glance-grid, body.is-stale #chainBody { opacity: 0.6; }
+body.is-stale .keystrip { position: relative; }
+body.is-stale .keystrip::after { content: 'STALE'; position: absolute; top: 4px; right: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: var(--warn); }
+
+/* A price that just moved: a brief green (up) or red (down) wash, then back. */
+.px-cell { font-variant-numeric: tabular-nums; }
+@keyframes tick-up { from { background: rgba(16, 185, 129, 0.38); } to { background: transparent; } }
+@keyframes tick-down { from { background: rgba(239, 68, 68, 0.38); } to { background: transparent; } }
+.tick-up { animation: tick-up 0.7s ease-out; }
+.tick-down { animation: tick-down 0.7s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .tick-up { animation: none !important; box-shadow: inset 2px 0 0 var(--bull); }
+  .tick-down { animation: none !important; box-shadow: inset 2px 0 0 var(--bear); }
+}
+@media (max-width: 640px) {
+  .conn { flex-wrap: wrap; row-gap: 2px; }
+  .conn-banner { padding: 8px 12px; }
+}
