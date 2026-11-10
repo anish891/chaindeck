@@ -107,10 +107,6 @@ const EXPLAIN = {
     en: ['Rolling ATM Straddle', 'The ATM call plus put premium at every snapshot, always using whichever strike is at the money at that moment. A steadily falling line means premium is decaying, which suits option sellers; a rising line means the market is pricing in more movement. The dashed lines show the day\'s first value and the running average.'],
     hi: ['रोलिंग ATM स्ट्रैडल', 'हर स्नैपशॉट पर ATM कॉल + पुट प्रीमियम, उस समय जो भी स्ट्राइक एट-द-मनी हो। लगातार गिरती लाइन मतलब प्रीमियम घट रहा है, जो ऑप्शन बेचने वालों के पक्ष में है; बढ़ती लाइन मतलब बाज़ार ज़्यादा हलचल की कीमत लगा रहा है। डैश वाली लाइनें दिन की पहली वैल्यू और चलता औसत दिखाती हैं।']
   },
-  premarket: {
-    en: ['Before the Open', 'Shown for the 120 minutes before NSE opens (07:15 to 09:15 IST). It lists how markets moved overnight: the US close, US index futures and Asian markets that are trading now, and the rupee, crude, gold and the US 10-year yield. The lean averages the US futures and Asian moves; beyond 0.3% either way it leans positive or negative. A weaker rupee, dearer crude and higher US yields are shown in red because they usually weigh on Indian stocks. GIFT Nifty has no free source, so this is not an estimate of where NIFTY will open.'],
-    hi: ['खुलने से पहले', 'NSE खुलने से पहले के 120 मिनट (सुबह 07:15 से 09:15 IST) दिखता है। इसमें रात भर बाज़ारों की चाल है: अमेरिका का क्लोज़, अभी चल रहे अमेरिकी इंडेक्स फ़्यूचर्स और एशियाई बाज़ार, और रुपया, कच्चा तेल, सोना और अमेरिका की 10 साल की यील्ड। झुकाव अमेरिकी फ़्यूचर्स और एशिया की चाल का औसत है; किसी भी तरफ़ 0.3% से ज़्यादा हो तो सकारात्मक या नकारात्मक माना जाता है। कमज़ोर रुपया, महँगा कच्चा तेल और बढ़ती अमेरिकी यील्ड लाल में दिखते हैं क्योंकि ये आम तौर पर भारतीय शेयरों पर दबाव डालते हैं। GIFT Nifty का कोई मुफ़्त स्रोत नहीं है, इसलिए यह NIFTY के खुलने का अनुमान नहीं है।']
-  },
   expiryDay: {
     en: ['Expiry Day', 'Readings for the selected expiry that matter most on the day it expires (Tuesday for NIFTY weeklies). Straddle decay is only tracked on expiry day itself; pin risk and gamma are shown for any expiry, but they change fastest in its last hours. Everything here describes current prices and positioning; none of it is a forecast or advice.'],
     hi: ['एक्सपायरी डे', 'चुनी गई एक्सपायरी के वे आँकड़े जो उसी दिन सबसे ज़्यादा मायने रखते हैं जिस दिन वह एक्सपायर होती है (NIFTY वीकली के लिए मंगलवार)। स्ट्रैडल डीके सिर्फ़ एक्सपायरी वाले दिन ट्रैक होता है; पिन रिस्क और गामा किसी भी एक्सपायरी के लिए दिखते हैं, पर आख़िरी घंटों में सबसे तेज़ी से बदलते हैं। यहाँ सब कुछ मौजूदा कीमतों और पोज़ीशन का विवरण है, भविष्यवाणी या सलाह नहीं।']
@@ -151,10 +147,6 @@ const EXPLAIN = {
     en: ['Market Breadth', 'How many of the 50 NIFTY stocks are up versus down today. A rise led by only a few heavyweights with most stocks falling is weaker than a broad rise.'],
     hi: ['मार्केट ब्रेड्थ', 'आज NIFTY के 50 शेयरों में से कितने ऊपर और कितने नीचे हैं। अगर सिर्फ़ कुछ बड़े शेयरों के दम पर तेज़ी हो और ज़्यादातर शेयर गिर रहे हों, तो वह चौड़ी तेज़ी से कमज़ोर मानी जाती है।']
   },
-  participants: {
-    en: ['FII / DII Positions', 'NSE publishes, every evening, how many index futures and options contracts each type of trader holds: FIIs (foreign institutions), DIIs (domestic institutions such as mutual funds), Pro (brokers trading their own money) and Client (mostly retail). Long % in index futures is the share of their futures that are long; FIIs below about 30% are heavily short, above about 70% heavily long. Net change is versus the previous trading day.'],
-    hi: ['FII / DII पोज़ीशन', 'NSE हर शाम बताता है कि हर तरह के ट्रेडर के पास कितने इंडेक्स फ़्यूचर्स और ऑप्शन कॉन्ट्रैक्ट हैं: FII (विदेशी संस्थान), DII (घरेलू संस्थान जैसे म्यूचुअल फ़ंड), Pro (अपने पैसे से ट्रेड करने वाले ब्रोकर) और Client (ज़्यादातर रिटेल)। इंडेक्स फ़्यूचर्स में Long % बताता है कि उनके फ़्यूचर्स का कितना हिस्सा लॉन्ग है; FII का लगभग 30% से नीचे होना भारी शॉर्ट और 70% से ऊपर भारी लॉन्ग माना जाता है। Net change पिछले ट्रेडिंग दिन के मुकाबले है।']
-  }
 };
 
 let lang = 'en';

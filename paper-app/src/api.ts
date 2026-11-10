@@ -1,4 +1,5 @@
-// The only network code in the app: every call goes to /api/paper on this origin with the session cookie.
+// The app's request code: every call goes to /api/paper on this origin with the session cookie. These are actions
+// (sign in, place an order, save a strategy) and one-off reads. Live data never comes through here: see live.ts.
 // A 401 SIGNED_OUT answer tells the page to show the sign-in form again.
 
 import type { ApiError, ApiResult } from './types';
@@ -8,6 +9,10 @@ type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 let onSignedOut: (() => void) | null = null;
 export function setSignedOutHandler(fn: (() => void) | null): void {
   onSignedOut = fn;
+}
+/** The stream was told the session has ended: show the sign-in form, as a 401 would. */
+export function signedOut(): void {
+  if (onSignedOut) onSignedOut();
 }
 
 export async function api<T = Record<string, never>>(path: string, opts: { method?: Method; body?: unknown } = {}): Promise<ApiResult<T>> {

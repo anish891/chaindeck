@@ -162,7 +162,7 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   const fl = read('public/js/forward-log.js');
   assert(/id="forwardLog"/.test(html) && html.includes('data-explain="forwardLog"'), 'forward log panel missing');
   assert(!/innerHTML/.test(fl), 'forward-log.js builds DOM with textContent only (its data comes from storage)');
-  assert(/refreshForwardLog\(\)/.test(app), 'the page must refresh the forward log');
+  assert(/refreshForwardLog\(true\)/.test(app), 'the page must refresh the forward log');
   assert(/\n  forwardLog: \{\n    en:/.test(read('public/js/explain.js')), 'explain text for forwardLog missing');
 }
 
@@ -219,9 +219,10 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
   assert(/if \(!trust\.blocking(?: && [^)]*)?\) processAlerts\(/.test(app), 'alerts must pause while data is blocking');
   assert(/setSignalsPaused\(trust\.blocking\)/.test(app), 'signals must pause while data is blocking');
   assert(/signalsPaused/.test(read('public/js/price-chart.js')), 'the signals panel must show the paused state');
-  const routes = read('api/routes/index.js');
+  const routes = read('api/services/market/chainView.js'); // one builder for the pushed chain and GET /api/option-chain
   assert(/integrity\.verifyProcessed\(/.test(routes) && /integrity: \{ checks \}/.test(routes), 'the option-chain response must carry the integrity checks');
-  assert(/forwardLog\.run\(data\)/.test(routes) && /healthy/.test(routes), 'the forward log must only record from healthy data');
+  const sched = read('api/services/scheduler.js'); // the per-minute recorder (it used to be a cron endpoint in the routes)
+  assert(/healthy \? await forwardLog\.run\(data\)/.test(sched), 'the forward log must only record from healthy data');
   assert(/validateRaw\(/.test(read('api/services/market/optionChain.js')), 'option chain payloads must be validated before they are cached');
 }
 
@@ -242,9 +243,20 @@ for (const f of ['public/css/styles.css', ...fs.readdirSync(path.join(root, 'pub
 
 // ── 15. Upstash budget: history polling is no faster than the recorder ──
 {
-  assert(/INTRADAY_REFRESH_OPEN_MS = 60000/.test(app) && /INTRADAY_REFRESH_CLOSED_MS/.test(app), 'intraday history polls at most once a minute while open and backs off when closed');
-  assert(/document\.hidden\) return/.test(app.slice(app.indexOf('async function refreshIntraday'), app.indexOf('async function refreshIntraday') + 700)), 'hidden tabs do not poll history');
-  assert(!/INTRADAY_REFRESH_MS\b/.test(app), 'no leftover 30 second constant');
+  // No polling anywhere on the page: live data arrives over the socket, and saved history is re-read only when the
+  // server says its per-minute recorder ran.
+  assert(!/setTimeout\(async|scheduleNext|startAutoRefresh|intervalSelect|REFRESH_OPEN_MS|refetchInterval/.test(app), 'no refresh loop left in app.js');
+  assert(!/\bfetch\(/.test(app.replace(/fetch\('\/api\/paper\/session'[^)]*\)/, '')), 'app.js makes no data requests of its own (only the owner-session check)');
+  assert(/stream\.on\('minute', \(\) => onMinute\(\)\)/.test(app) && /function onMinute\([^)]*\) \{\n  if \(!currentData\) return;\n  refreshIntraday\(true\)/.test(app), 'saved history is re-read on the server\'s minute event');
+  assert(!/setInterval\((?!updateAge|sweepToasts)/.test(app), 'the only timer left in app.js is the one-second "x seconds ago" label');
+  assert(!/\/api\/option-chain|\/api\/premarket|\/api\/participants|\/api\/chart-analysis/.test(read('public/js/api-client.js')), 'the live endpoints are no longer fetched by the browser');
+  {
+    const st = read('public/js/stream.js');
+    assert(/new WebSocketImpl\(/.test(st) && !/\bfetch\(/.test(st), 'stream.js is a WebSocket client with no HTTP fallback');
+    assert(!/WebSocket\(/.test(app), 'components never open their own socket');
+    assert(/id="liveDot"/.test(html) && /id="lastTick"/.test(html) && /id="connBanner"/.test(html), 'connection indicator, last tick and banner are on the page');
+    assert(/data-ltp="\$\{r\.strike\}\|CE"/.test(app) && /tick-up/.test(read('public/css/styles.css')), 'price cells are addressable and flash');
+  }
 }
 
 // ── 16. alerts about price and levels only run while the market is open ──

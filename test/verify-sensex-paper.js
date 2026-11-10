@@ -339,32 +339,25 @@ function fakeStore() {
 
   // ── candles: SENSEX series ──
   {
-    const realSource = optionChain.sourceName();
-    optionChain._setSource(optionChain.SOURCES.nse); // NSE as the chain source means Yahoo candles
     C.clearCache();
-    const urls = [];
-    const mk = n => ({ chart: { result: [{ timestamp: Array.from({ length: n }, (_, i) => (at(2, 9, 15) + i * 300e3) / 1000), indicators: { quote: [{ open: Array(n).fill(82000), high: Array(n).fill(82100), low: Array(n).fill(81900), close: Array(n).fill(82050), volume: Array(n).fill(0) }] } }] } });
-    const fetchImpl = async url => { urls.push(decodeURIComponent(url)); return { json: async () => mk(60) }; };
-    const data = await C.getBacktestData('5m', { symbol: 'SENSEX', fetchImpl });
+    const feed = { subscribe: () => () => {}, on: () => () => {}, getState: () => ({ status: 'connected' }) };
+    const keys = [];
+    const load = async key => { keys.push(key); return Array.from({ length: 60 }, (_, i) => ({ t: at(2, 9, 15) + i * 300e3, o: 82000, h: 82100, l: 81900, c: 82050, v: null })); };
+    const data = await C.getBacktestData('5m', { symbol: 'SENSEX', load });
     assert.strictEqual(data.candles.length, 60);
-    assert(urls.some(u => u.includes('^BSESN')), 'SENSEX index from Yahoo');
-    assert(urls.some(u => u.includes('^INDIAVIX')), 'India VIX for volatility');
-    assert(!urls.some(u => u.includes('^NSEI') || u.includes('NIFTYBEES')), 'no NIFTY series');
-    urls.length = 0;
-    await C.getBacktestData('5m', { fetchImpl });
-    assert(urls.some(u => u.includes('^NSEI')), 'NIFTY has its own cache entry');
+    assert(keys.includes('BSE_INDEX|SENSEX'), 'SENSEX index');
+    assert(keys.includes('NSE_INDEX|India VIX'), 'India VIX for volatility');
+    assert(!keys.some(k => k === 'NSE_INDEX|Nifty 50' || k.startsWith('NSE_EQ|')), 'no NIFTY series, no volume proxy');
+    keys.length = 0;
+    await C.getBacktestData('5m', { load });
+    assert(keys.includes('NSE_INDEX|Nifty 50'), 'NIFTY has its own cache entry');
     assert.throws(() => C.seriesFor('BANKNIFTY'), e => e.code === 'BAD_SYMBOL');
 
-    // on Upstox, SENSEX candles come from BSE_INDEX|SENSEX
-    const realFetch = upstoxCandles.fetchUpstoxCandles;
-    const keys = [];
-    upstoxCandles.fetchUpstoxCandles = async key => { keys.push(key); return [{ t: at(2, 9, 15), o: 1, h: 1, l: 1, c: 1, v: null }]; };
-    optionChain._setSource({ name: 'upstox', load: async () => { throw new Error('unused'); }, knownExpiries: () => [] });
+    keys.length = 0;
     C.clearCache();
-    await C.getCandles('1d', { symbol: 'SENSEX' });
+    await C.getCandles('1d', { symbol: 'SENSEX', load, feed });
     assert.deepStrictEqual(keys, ['BSE_INDEX|SENSEX']);
-    upstoxCandles.fetchUpstoxCandles = realFetch;
-    optionChain._setSource(realSource === 'upstox' ? optionChain.SOURCES.upstox : optionChain.SOURCES.nse);
+    C.stopLive();
     C.clearCache();
   }
 

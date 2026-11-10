@@ -1,10 +1,14 @@
 import { Icon, themeIcon } from './Icons';
 import type { AccountListItem } from '../types';
 import type { Theme } from '../theme';
+import type { StreamState } from '../../../public/js/stream.js';
+import { tickTime } from '../../../public/js/stream.js';
 
 interface Props {
   statusText: string;
   statusOk: boolean;
+  /** The live connection, once signed in. Absent on the sign-in screen. */
+  conn?: StreamState;
   accounts: AccountListItem[];
   accountId: string | null;
   onAccount: (id: string) => void;
@@ -18,12 +22,18 @@ interface Props {
 }
 
 export function TopBar(p: Props) {
+  // connected: green when trading is open, red when it is paused or closed; otherwise the connection's own colour
+  const dot = !p.conn ? (p.statusOk ? 'conn-connected' : 'error') : p.conn.status === 'connected' ? (p.statusOk ? 'conn-connected' : 'error') : `conn-${p.conn.status}`;
+  const tick = p.conn ? tickTime(p.conn.lastTickAt) : '';
   return (
     <div className="topbar">
       <a href="/" className="logo">Chain<span>Deck</span></a>
       <span className="pt-badge">Paper trading</span>
-      <div className={`live-dot${p.statusOk ? '' : ' error'}`} />
-      <div className="status-text" role="status">{p.statusText}</div>
+      <div className="conn" role="status" aria-live="polite">
+        <div className={`live-dot ${dot}`} aria-hidden="true" />
+        <div className="status-text" data-status={p.conn ? p.conn.status : undefined}>{p.statusText}</div>
+        {tick && <div className="last-tick">Last tick {tick}</div>}
+      </div>
 
       <div className="topbar-right">
         {p.signedIn && (

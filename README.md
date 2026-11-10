@@ -14,8 +14,9 @@ ChainDeck is for information and education only. It does not give investment adv
   implied future, market regime and the age of the data.
 - **Index picker:** NIFTY 50 or SENSEX (also `?index=sensex` in the address; the choice is remembered in this browser).
 - **Expiry selector** for every open weekly and monthly expiry.
-- **Auto-refresh** every 3, 5, 10 or 30 seconds while the market is open (every 60 seconds once it closes),
-  plus a manual refresh button.
+- **Live over a WebSocket:** prices tick as they change (cells flash green or red), the full analytics refresh about
+  every 5 seconds, and nothing on the page polls. A status light shows connected, reconnecting or offline, with the time
+  of the last tick; while the connection is down the last values stay on screen, marked stale.
 - **Light, dark or system theme.**
 
 ---
@@ -82,13 +83,6 @@ Today's percentage move for 16 NSE sector indices (Bank, Private Bank, PSU Bank,
 FMCG, Pharma, Healthcare, Metal, Energy, Oil & Gas, Realty, Media, Consumer Durables and Infrastructure), sorted
 from strongest to weakest, with how many stocks in each are up and down. NIFTY 50 breadth (stocks up against down)
 sits above the tiles. It updates live while the page is open.
-
-### FII / DII Positions
-Participant-wise open interest from NSE's end-of-day file for FIIs, DIIs, Pro traders and Clients:
-- **Index futures view:** long, short and net contracts, long percentage, and the change in net position against
-  the previous trading day.
-- **Index options view:** net calls and net puts, and their change against the previous trading day.
-- A chart of the last 10 trading days (FII, DII, Pro and Client long percentage, or FII and Client net options).
 
 ### Price, Levels and Patterns
 A candlestick chart of NIFTY (5 minute, 15 minute or daily) with the following layers, each switchable:
@@ -174,7 +168,7 @@ the data provider itself is right; it shows the numbers are fresh, agree with a 
 | Option chain current | Age of the snapshot (the index's last trade time on Upstox): amber after 90 seconds, red after 3 minutes (while the market is open) |
 | Leftover copy | Red while trading if Upstox did not answer and the last good copy is being shown, with the reason; a warning only after the close |
 | Snapshots changing | Warns if 3 consecutive new option chain snapshots carry identical contents, fails at 5 (a feed that is "refreshing" but frozen) |
-| Candles current, saved snapshots current | Latest candle lag and the per-minute cron job, as in the Feeds chips |
+| Candles current, saved snapshots current | Latest candle lag and the per-minute recorder, as in the Feeds chips |
 | Saved history complete | Minutes saved today against minutes since the open (a warning at most; skipped without storage) |
 | Chain spot vs candles | The option chain's spot and the latest candle (a separate feed) agree within 0.15 percent (warn) or 0.4 percent (fail) |
 | Totals, PCR, max pain, ATM | Recomputed straight from the raw option chain payload with separate code and compared with what the page shows |
@@ -293,7 +287,7 @@ It is a React + TypeScript app built with Vite. Source is in `paper-app/`, the b
 - **Honest verdict:** "looks like an edge" needs 30 trades, a positive average trade with 95% confidence, and beating
   95% of runs that use the same legs and exits from random entry times. Most strategies show "not enough trades" or
   "no clear edge", and the page says so.
-- **Live:** deploy a saved strategy to an account of the same index (one strategy per account). Each minute the paper cron job checks
+- **Live:** deploy a saved strategy to an account of the same index (one strategy per account). Each minute the server's scheduler checks
   it against the latest closed candle and trades through the same engine at real prices. Each live fill also records
   what the backtest model would have priced it at, so you can see how far backtests are from reality.
 
@@ -317,15 +311,17 @@ spreadsheet would treat as formulas are neutralised).
 ## Operations
 
 - **Requirements:** Node 22 or newer. `npm test` runs the paper app's type check and then every `test/verify-*.js` (no network or storage needed); CI runs it on every push (`.github/workflows/ci.yml`). A new test file is picked up automatically.
-- **Live data check:** `node scripts/check-upstox-live.js [NIFTY|SENSEX]` compares Upstox with NSE for the nearest expiry (needs `UPSTOX_ACCESS_TOKEN` and network).
+- **Live data check:** `node scripts/check-upstox-stream.js [NIFTY|SENSEX]` authorizes, opens the live feed, subscribes to the index, India VIX and one option, and prints what arrives (needs `UPSTOX_ACCESS_TOKEN` and network).
 - **Project layout:**
 
   ```
-  api/index.js            Express app (Vercel builds this file)
+  api/index.js            Express app; `npm start` also starts the Upstox stream, the browser socket and the scheduler
   api/middleware/         security headers, rate limits, secret and owner checks, input validators
   api/routes/             dashboard API, paper trading API, agent API
-  api/services/providers/ Upstox and NSE clients, index config, constituent lists
-  api/services/market/    option chain cache, index quotes, candles, calendar, holidays, FII/DII, pre-market cues
+  api/services/providers/ Upstox REST client (authorize, contract list, candle history, holidays), index config, constituent lists
+  api/services/stream/    upstoxStream (the only code that opens Upstox sockets), live option chain, browser gateway
+  api/services/scheduler.js  per-minute recorder and paper engine tick (what an outside cron job used to trigger)
+  api/services/market/    option chain cache, index quotes, candles, calendar, holidays
   api/services/analytics/ chain analytics, integrity checks, volatility, levels, patterns, signals, backtests
   api/services/paper/     paper trading engine, accounts, costs, strategies (backtest and live)
   api/services/storage/   Upstash / in-memory store, intraday history
@@ -335,22 +331,20 @@ spreadsheet would treat as formulas are neutralised).
   test/                   test files and helpers; test/run.js runs them all
   scripts/                developer tools (not deployed)
   ```
-- **Per-minute recorder:** point cron-job.org (or similar) at `/api/cron/snapshot` with `Authorization: Bearer <CRON_SECRET>` during market hours. To keep SENSEX history too, add a second job for `/api/cron/snapshot?symbol=SENSEX` (it roughly doubles the recorder's storage commands).
-- **Is the recorder alive?** `GET /api/snapshot-age` returns HTTP 503 when the last saved snapshot is more than 5 minutes old during market hours, and 200 otherwise. Point an uptime monitor at it to be alerted when the cron job stops. It reveals only that age.
+- **Per-minute recorder:** runs inside the server (`api/services/scheduler.js`): every minute from 09:00 to 15:59 IST on trading days it saves a snapshot of NIFTY's and SENSEX's nearest expiry. There is no cron job to set up and no endpoint to call; the server just has to be running.
+- **Is the recorder alive?** `GET /api/snapshot-age` returns HTTP 503 when the last saved snapshot is more than 5 minutes old during market hours, and 200 otherwise. Point an uptime monitor at it to be alerted when the server or its feed has stopped. It reveals only that age.
 - **Trading holidays:** the list comes from Upstox's market holidays, counting days the F&O segment is shut (refreshed at most daily, falling back to a built-in 2026 list), so holidays are treated as closed everywhere: the market-hours checks, time to expiry and the trust light.
 - **Storage:** with Upstash configured, history uses roughly 5 to 7 commands a minute from the recorder, plus about 6 per open dashboard per minute. The free plan allows 500K commands a month, so check usage in the Upstash dashboard if you leave several tabs open all day.
-- **Paper trading setup:** set `PAPER_SECRET` (a long random value, e.g. `openssl rand -hex 32`) in the Vercel
-  environment; without it the paper pages and agent API answer 503 in production. Add a second cron-job.org job for
-  `/api/cron/paper` on the same schedule and with the same `Authorization: Bearer <CRON_SECRET>` header: it fills waiting
-  orders, cancels day orders at the close, settles expiries, records each day's closing equity and runs deployed
-  strategies. If it stops, an open paper page takes over working orders after 90 seconds, but live strategies only run
-  from the cron job.
-- **Paper trading storage:** each cron minute costs about 3 Upstash commands with nothing active, plus about 6 for each
+- **Paper trading setup:** set `PAPER_SECRET` (a long random value, e.g. `openssl rand -hex 32`) and `NODE_ENV=production`
+  in the server's environment; without the secret the paper pages and agent API answer 503 in production. The same
+  scheduler runs the paper engine each minute: it fills waiting orders, cancels day orders at the close, settles
+  expiries, records each day's closing equity and runs deployed strategies.
+- **Paper trading storage:** each scheduler minute costs about 3 Upstash commands with nothing active, plus about 6 for each
   account with waiting orders and 4 for each running strategy (a typical setup of two accounts and one strategy is about
   100K commands a month). A paper page left open adds about 5 a minute. Accounts that only hold positions are not
   rewritten during the session.
-- **Upstox token:** create a read-only Analytics Token (Upstox Developer Apps, Analytics tab, Generate Token; valid one year, no daily login) and set it as `UPSTOX_ACCESS_TOKEN` in `.env.local` and in the Vercel environment. See `.env.example`. `GET /api/health` reports which source is in use. `DATA_SOURCE=nse` switches back to the old NSE scraper and Yahoo candles; without a token that fallback is used automatically and a warning is logged.
-- **Data sources and use:** option chain, quotes, candles and holidays come from the Upstox API under your own account; FII/DII positions from NSE's public end-of-day file; index constituents (for breadth) from the index provider's public lists; overnight cues from Yahoo Finance. All are subject to the providers' terms; this project is for personal analysis, is not investment advice, and should not be offered as a paid or public service without licensed data and the appropriate registrations.
+- **Upstox token:** create a read-only Analytics Token (Upstox Developer Apps, Analytics tab, Generate Token; valid one year, no daily login) and set it as `UPSTOX_ACCESS_TOKEN` in `.env.local` and in the server's environment. See `.env.example` and "Live data over WebSockets" below.
+- **Data sources and use:** option chain, quotes, candles and holidays come from Upstox under your own account; index constituents (for breadth) from the index provider's public lists, kept as a file in the repo. All are subject to the providers' terms; this project is for personal analysis, is not investment advice, and should not be offered as a paid or public service without licensed data and the appropriate registrations.
 
 ---
 
@@ -363,9 +357,94 @@ with its own strike step (100 points), lot size (20, or Upstox's live value) and
   from NIFTY candles, so they are hidden on the SENSEX view. Alerts run on the NIFTY view only.
 - Breadth is counted for NIFTY 50 only; the sector heatmap shows NSE sector indices on both views.
 - India VIX is NSE's volatility index; it is shown on the SENSEX view as general market context.
-- FII / DII positions are NSE's market-wide participant data and are the same on both views.
 - Paper trading and the strategy lab support SENSEX through SENSEX accounts and strategies (see Paper trading above).
-- SENSEX needs the Upstox source: with `DATA_SOURCE=nse` (or no token) the SENSEX view says so.
+
+---
+
+## Live data over WebSockets
+
+All live data reaches the server, and then the browser, over WebSockets. Nothing polls, there is no HTTP fallback, and
+no outside cron job or webhook is involved.
+
+```
+Upstox Market Data Feed (wss, protobuf)
+        |   one connection, owned by api/services/stream/upstoxStream.js
+        v
+  ChainDeck server  -- latest tick per instrument in memory; option chain, quotes and candles are built from it
+        |   one WebSocket per page (/ws, same origin), api/services/stream/gateway.js
+        v
+  Browser  -- public/js/stream.js (dashboard and paper app share it)
+```
+
+### Environment variables
+
+| Name | Needed | What it is |
+|---|---|---|
+| `UPSTOX_ACCESS_TOKEN` | Yes | Upstox Analytics Token (read-only, valid one year). Server only: it is never sent to the browser. |
+| `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | For history | Without them history lives in memory and is lost on restart. |
+| `PAPER_SECRET` | In production | Owner sign-in for paper trading. |
+| `NODE_ENV=production` | In production | Makes the secrets mandatory. |
+| `CRON_SECRET` | Optional | Only guards the manual `POST /api/session-summary`. |
+| `UPSTOX_PORTFOLIO_STREAM=true` | Optional | Also opens Upstox's Portfolio Stream (order, position and holding updates). Off by default: ChainDeck's paper trading is simulated and reads no real orders. Upstox requires a whitelisted static IP for portfolio access. |
+| `PORT` | Optional | Port to listen on (default 3000). |
+
+Secrets live in environment variables only (`.env.local` locally, never committed).
+
+### How auth and the connection work
+
+1. The server calls Upstox's authorize endpoint (`GET /v3/feed/market-data-feed/authorize`) with the token. This is an
+   HTTP call because Upstox issues the socket address that way; the reply is a single-use `wss://` URL.
+2. It opens that URL and subscribes by instrument key: option contracts and the headline indices in `full` mode (price,
+   OI, IV, depth, candles), sector indices and constituent stocks in `ltpc` (last price and previous close). Upstox
+   allows 1500 `full` and 2000 `ltpc` keys on one connection when modes are mixed; the module refuses to go over.
+   Only the expiries someone is looking at, plus the recorder's nearest expiries, are subscribed.
+3. If the socket drops it waits (exponential backoff with jitter, 1 to 30 seconds), authorizes again for a new URL,
+   reconnects and resubscribes everything. A connection that goes quiet is pinged after 20 seconds and dropped after 45.
+4. If Upstox rejects the token the feed goes to `auth_failed`: both pages show a banner asking for a new token, and the
+   server retries every 5 minutes. The Analytics Token lasts a year, so there is no daily login; to renew, generate a
+   new token, set `UPSTOX_ACCESS_TOKEN` and restart the server.
+5. Each page opens one WebSocket to the server (`/ws`; `/api/paper/ws` for the paper app, where its session cookie is
+   sent). The server pushes the option chain about every 5 seconds, changed prices at most every 250 ms, the price
+   chart every 15 seconds, and the paper market and account. The page reconnects by itself and asks again for what it
+   was watching.
+6. While either link is down, pages show "Reconnecting" (or "Offline"), keep the last values and mark them stale.
+
+### Hosting
+
+The server must be a process that stays running (`npm start`): it holds the Upstox socket and runs the per-minute
+recorder. A serverless platform that starts a function per request cannot do that. The `vercel.json` in the repo is
+from the earlier REST version and will serve pages without live data.
+
+### Testing locally
+
+```
+npm install
+cp .env.example .env.local      # then set UPSTOX_ACCESS_TOKEN
+node scripts/check-upstox-stream.js   # authorize, connect, decode a few messages
+npm start                       # http://localhost:3000 and http://localhost:3000/paper
+npm test                        # every test/verify-*.js; no network needed
+```
+
+Outside market hours the feed still connects and sends the last session's values once, so the pages fill in but do not
+tick. To see the reconnecting state, stop the server with the page open.
+
+### Data with no WebSocket source
+
+Upstox has no stream for these, so each is one REST lookup, never a polling loop:
+
+| Data | What is done |
+|---|---|
+| Option contract list (expiries, strikes, instrument keys, lot size) | Looked up once per day. Nothing can be subscribed without it. |
+| Candle history | Looked up once per series per day; today's candles are built from the feed. |
+| Trading holidays | Looked up once per day; a built-in 2026 list is the fallback. Open/closed right now comes from the feed. |
+| Previous-day open interest | Not in the feed. Derived: OI is noted between sessions and saved, and change in OI is measured against it. |
+| Index constituents | A file in the repo (`api/services/providers/constituents.json`); refresh it with `node scripts/refresh-constituents.js` when an index is rebalanced. |
+| Overnight cues (US, Asia, commodities) and FII/DII positions | Not Upstox data. Both panels were removed. |
+| Funds, profile, real orders | Not used: paper trading is simulated. |
+
+The browser still makes a few one-off requests to its own server: saved history (intraday series, strike history,
+expiry replay), and actions such as signing in or placing a paper order. Saved history is re-read only when the server
+says its recorder has saved a new point.
 
 ---
 
@@ -375,12 +454,13 @@ with its own strike step (100 points), lot size (20, or Upstox's live value) and
 
 | Data | Source | Freshness |
 |---|---|---|
-| Option chain | Upstox option chain API | Live; served from a 5 second cache |
-| India VIX, sector indices, NIFTY 50 breadth | Upstox market quotes (breadth counted from each index's constituent stocks) | Live while the page is open, reused for up to 15 seconds; if Upstox is slow (over 2.5 seconds) or fails, the last good values are kept for up to 10 minutes |
-| Previous session high, low and close for CPR | Upstox daily NIFTY candles | Once per session |
-| FII / DII / Pro / Client positions | NSE end-of-day participant-wise OI file | Published each evening after the close |
-| NIFTY candles and ETF volume | Upstox historical and intraday candles | 20 seconds while the market is open; only if Upstox fails are candles built from saved spot values |
-| Overnight cues (pre-market panel) | Yahoo Finance (unofficial, delayed) | Every 2 minutes from 07:15 to 09:15 IST |
+| Option chain (price, OI, IV, volume, bid/ask) | Upstox Market Data Feed (WebSocket), `full` mode | Live; analytics rebuilt about every 5 seconds, prices pushed as they change |
+| Change in OI | The feed's OI against the OI noted between sessions (the feed carries no previous-day OI) | Blank until the first session after the server has run overnight |
+| India VIX, sector indices, NIFTY 50 breadth | Upstox Market Data Feed (breadth counted from each index's constituent stocks) | Live; if the feed is down the last values are kept for up to 10 minutes |
+| Previous session high, low and close for CPR | Upstox daily candles (REST) | Twice a day at most |
+| NIFTY candles and ETF volume | History: Upstox candle API (REST), once per day. Today: the feed's one-minute candles | Chart pushed every 15 seconds; only if the history lookup fails are candles built from saved spot values |
+| Expiries, strikes, lot size | Upstox option contract list (REST) | Once per day |
+| Trading holidays | Upstox market holidays (REST) | Once per day |
 
 Outside market hours the dashboard shows the last session's values.
 
