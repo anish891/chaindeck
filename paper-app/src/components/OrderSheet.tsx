@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { INDEX_INFO, inr, instLabel, instSymbol, px } from '../format';
-import { buildOrder, emptyForm, quoteFor } from '../ticket';
+import { buildOrder, emptyForm, quoteFor, MAX_SETUP } from '../ticket';
 import type { Selection, TicketForm } from '../ticket';
 import type { Market, OrderType, PlaceResult, PreviewResult, Side } from '../types';
 
@@ -9,6 +9,8 @@ interface Props {
   accountId: string | null;
   market: Market | null;
   selection: Selection;
+  /** setups already used on this account, offered as suggestions so the same setup is always spelled the same way */
+  setups?: string[];
   onSide: (side: Side) => void;
   onClose: () => void;
   /** called with a one-line summary after an order is accepted */
@@ -19,7 +21,7 @@ const PREVIEW_DELAY_MS = 350;
 const MAX_LOTS = 20;
 
 /** The buy / sell sheet that opens when a price in the chain is tapped: lots, market or limit, one button. */
-export function OrderSheet({ accountId, market, selection, onSide, onClose, onPlaced }: Props) {
+export function OrderSheet({ accountId, market, selection, setups = [], onSide, onClose, onPlaced }: Props) {
   const [form, setForm] = useState<TicketForm>(emptyForm);
   const [more, setMore] = useState(false);
   const [preview, setPreview] = useState<{ text: string; warn: boolean }>({ text: '', warn: false });
@@ -123,6 +125,12 @@ export function OrderSheet({ accountId, market, selection, onSide, onClose, onPl
           </div>
         </div>
         {needsLimit && <label className="pt-field"><span className="pt-label">{form.type === 'SL' ? 'Limit price' : 'Price'}</span><input type="number" min={0.05} step={0.05} value={form.limit} onChange={e => set('limit', e.target.value)} /></label>}
+
+        <label className="pt-field"><span className="pt-label">Setup <span className="pt-muted">(optional)</span></span>
+          <input type="text" list="ptSetups" maxLength={MAX_SETUP} placeholder="e.g. Breakout" autoComplete="off" value={form.setup} onChange={e => set('setup', e.target.value)} aria-describedby="ptSetupHint" />
+          <datalist id="ptSetups">{setups.map(s => <option key={s} value={s} />)}</datalist>
+        </label>
+        <div className="pt-hint" id="ptSetupHint">Name why you are taking this trade. Performance then shows each setup's win rate and expectancy. Only the entry needs it: exits are credited to the setup that opened the position.</div>
 
         <button type="button" className="pt-more" aria-expanded={more} onClick={() => setMore(m => !m)}>{more ? 'Fewer options' : 'More options'}</button>
         {more && (

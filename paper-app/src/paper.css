@@ -239,3 +239,12 @@ textarea { resize: vertical; width: 100%; }
 }
 .pt-tip-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
 main { display: block; }
+
+/* expectancy by setup */
+.pt-hint { font-size: 11px; color: var(--muted); margin: -2px 0 8px; line-height: 1.4; }
+.pt-setups td, .pt-setups th { white-space: nowrap; }
+.pt-thin td { opacity: 0.72; }
+.pt-thin td:last-child, .pt-thin td:first-child { opacity: 1; }
+.pt-sample { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border2); color: var(--muted); }
+.pt-sample-few { border-color: var(--warn); color: var(--warn); }
+.pt-sample-ok { border-color: var(--bull); color: var(--bull); }

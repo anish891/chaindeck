@@ -162,6 +162,8 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
     return () => clearTimeout(id);
   }, [notice]);
   const held = new Set(account ? account.summary.positions.map(p => p.instrument) : []);
+  // setups already used on this account (your own tags, not strategy names), most recent first, for the ticket's suggestions
+  const setups = account ? [...new Set(account.orders.filter(o => o.tag && o.source !== 'strategy').map(o => o.tag as string))].slice(0, 20) : [];
 
   return (
     <>
@@ -207,7 +209,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
               {payoff && <PayoffPanel account={account} market={market} />}
             </div>
           )}
-          <OrderSheet accountId={accountId} market={market} selection={selection} onSide={side => setSelection(s => ({ ...s, side }))} onClose={closeSheet} onPlaced={placed} />
+          <OrderSheet accountId={accountId} market={market} selection={selection} setups={setups} onSide={side => setSelection(s => ({ ...s, side }))} onClose={closeSheet} onPlaced={placed} />
         </div>
 
         {visited.lab && <div hidden={view !== 'lab'}><Lab accounts={accounts} accountId={accountId} marketOpen={!!(market && market.marketOpen)} active={view === 'lab'} /></div>}

@@ -19,9 +19,13 @@ export interface TicketForm {
   target: string;
   stop: string;
   note: string;
+  /** the setup this trade is an example of, e.g. "Breakout" */
+  setup: string;
 }
 
-export const emptyForm = (): TicketForm => ({ lots: '1', type: 'MARKET', limit: '', trigger: '', bracket: false, target: '', stop: '', note: '' });
+export const MAX_SETUP = 40;
+
+export const emptyForm = (): TicketForm => ({ lots: '1', type: 'MARKET', limit: '', trigger: '', bracket: false, target: '', stop: '', note: '', setup: '' });
 
 /** The live quote for an instrument key, or null when it is not in the loaded chain. */
 export function quoteFor(market: Market | null, key: string | null): Quote | null {
@@ -49,5 +53,7 @@ export function buildOrder(form: TicketForm, sel: { instrument: string; side: Si
   }
   const note = form.note.trim();
   if (note) order.reason = note;
+  const setup = form.setup.trim().replace(/\s+/g, ' ').slice(0, MAX_SETUP);
+  if (setup) order.tag = setup;
   return order;
 }

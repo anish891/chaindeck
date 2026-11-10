@@ -15,7 +15,7 @@ export { Blotter } from './components/Blotter';
 export { Strip } from './components/Strip';
 export { PayoffPanel, EquityPanel } from './components/ChartPanels';
 export { AccountsPanel } from './components/AccountsPanel';
-export { Perf } from './components/Perf';
+export { Perf, SetupTable } from './components/Perf';
 export { Report } from './lab/Report';
 export { Deployments } from './lab/Deployments';
 export { StrategyEditor } from './lab/StrategyEditor';
