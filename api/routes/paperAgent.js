@@ -109,7 +109,8 @@ function docs(agent, symbol = 'NIFTY') {
       'Every order needs a reason (up to 500 characters). It is shown to the owner in the journal.',
       `At most ${AGENT.ordersPerMinute} order requests a minute and ${AGENT.ordersPerDay} a day per key; ${READS_PER_MINUTE} requests a minute overall.`,
       'Send an Idempotency-Key header (1 to 64 of A-Z a-z 0-9 _ . : -) with POST /orders so a retry never places a second order. A placed order replays for 24 hours; a refused one does not, so it can be retried.',
-      'The owner can pause agent trading or revoke your key at any time. AGENTS_PAUSED means stop trading.'
+      'The owner can pause agent trading or revoke your key at any time. AGENTS_PAUSED means stop trading.',
+      'The owner may set a daily loss limit on the account (dailyLossLimit in /account). Once the day\'s loss reaches it, orders that open or add to a position are refused with DAILY_LOSS_LIMIT until the next session; orders that reduce a position still go through.'
     ],
     endpoints: {
       'GET /api/paper/v1': 'this document',
@@ -151,7 +152,7 @@ function docs(agent, symbol = 'NIFTY') {
       reason: 'required: why you are placing this order',
       tag: 'optional label, up to 40 characters (e.g. a strategy name)'
     },
-    errors: 'JSON { ok: false, code, error }. 401 bad key, 403 read-only key, 422 order refused (code says why: MARKET_CLOSED, DATA_STALE, DATA_OLD, INSUFFICIENT_FUNDS, NO_QUOTE, EXPIRY_NOT_ALLOWED, TRIGGER_CROSSED, WRONG_INDEX, BAD_*, AGENTS_PAUSED), 429 slow down.'
+    errors: 'JSON { ok: false, code, error }. 401 bad key, 403 read-only key, 422 order refused (code says why: MARKET_CLOSED, DATA_STALE, DATA_OLD, INSUFFICIENT_FUNDS, NO_QUOTE, EXPIRY_NOT_ALLOWED, TRIGGER_CROSSED, WRONG_INDEX, BAD_*, AGENTS_PAUSED, DAILY_LOSS_LIMIT), 429 slow down.'
   };
 }
 
@@ -192,8 +193,8 @@ module.exports = function agentRouter(svc, strategies) {
 
   router.get('/account', async (req, res) => {
     try {
-      const { summary, state } = await svc().getSummary(id(req));
-      res.json({ ok: true, account: { ...summary, agentsPaused: !!state.agentsPaused, limits: { ordersPerMinute: AGENT.ordersPerMinute, ordersPerDay: AGENT.ordersPerDay } } });
+      const { summary, state, risk } = await svc().getSummary(id(req));
+      res.json({ ok: true, account: { ...summary, agentsPaused: !!state.agentsPaused, dailyLossLimit: risk || null, limits: { ordersPerMinute: AGENT.ordersPerMinute, ordersPerDay: AGENT.ordersPerDay } } });
     } catch (err) {
       return fail(res, err, 'Agent: error reading account');
     }

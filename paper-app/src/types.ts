@@ -129,8 +129,16 @@ export interface EquityPoint {
   equity: number;
 }
 
+/** The account's daily loss limit and where today stands against it (absent or null: no limit). */
+export interface RiskStatus {
+  maxDailyLoss: number;
+  dayPnl: number;
+  breached: boolean;
+}
+
 export interface AccountDetail {
   agentsPaused: boolean;
+  risk?: RiskStatus | null;
   summary: Summary;
   orders: Order[];
   trades: Trade[];

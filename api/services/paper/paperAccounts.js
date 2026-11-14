@@ -3,6 +3,10 @@
 //   pt:index          hash    id -> { id, name, kind, symbol, createdAt, active } (active = has positions or live orders)
 //   pt:acct:{id}      string  the whole account state as JSON (small: capped order and trade history)
 //   pt:lock:{id}      string  short-lived lock so a page request and the cron tick never write over each other
+//
+// An account may carry an optional daily loss limit (state.risk.maxDailyLoss, rupees). Once the day's loss reaches it,
+// orders that open or add to a position are refused (DAILY_LOSS_LIMIT) until the next session; orders that only reduce a
+// position always go through. Accounts without one behave exactly as before.
 //   pt:settle:{expiry} string NIFTY settlement price used for that expiry (so every account settles at the same price)
 //   pt:settle:SENSEX:{expiry}  the same for SENSEX
 //
@@ -27,6 +31,7 @@ const AGENT = { ordersPerMinute: 10, ordersPerDay: 300, keysPerAccount: 5, backt
 const KEY_RE = /^cdp_([0-9a-f]{8})_([0-9a-f]{48})$/;
 const IDEM_RE = /^[A-Za-z0-9_.:-]{1,64}$/;
 const SCOPES = new Set(['read', 'trade']);
+const RISK = { minDailyLoss: 100, maxDailyLoss: 1e8 };
 const sha256hex = s => crypto.createHash('sha256').update(String(s)).digest('hex');
 const IST_OFFSET_MS = 330 * 60 * 1000;
 const istYmd = ms => new Date(ms + IST_OFFSET_MS).toISOString().slice(0, 10);
@@ -80,8 +85,8 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     await store.hset('pt:index', state.id, JSON.stringify({ id: state.id, name: state.name, kind: state.kind, symbol: symbolOf(state), createdAt: state.createdAt, active }));
   }
 
-  /** Run `fn(state)` under the account lock; save whatever state it returns (or nothing when it returns null). */
-  async function withAccount(id, fn) {
+  /** Run `fn()` while holding the lock of account `id` (which need not exist yet). */
+  async function locked(id, fn) {
     const token = crypto.randomBytes(8).toString('hex');
     let got = false;
     for (let i = 0; i < LOCK_TRIES && !got; i++) {
@@ -90,13 +95,20 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     }
     if (!got) throw codedError('BUSY', 'The account is busy. Try again.');
     try {
+      return await fn();
+    } finally {
+      if ((await store.get(lockKey(id))) === token) await store.del(lockKey(id));
+    }
+  }
+
+  /** Run `fn(state)` under the account lock; save whatever state it returns (or nothing when it returns null). */
+  async function withAccount(id, fn) {
+    return locked(id, async () => {
       const state = await load(id);
       const out = await fn(state);
       if (out && out.state && out.state !== state) await save(out.state);
       return out;
-    } finally {
-      if ((await store.get(lockKey(id))) === token) await store.del(lockKey(id));
-    }
+    });
   }
 
   // ── market data ──
@@ -123,17 +135,24 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     if (!ID_RE.test(String(id || ''))) throw codedError('BAD_ID', 'Account id: lowercase letters, digits and dashes, up to 24 characters.');
     if (!Number.isFinite(startingCapital) || startingCapital < 10000 || startingCapital > 1e8) throw codedError('BAD_CAPITAL', 'Starting capital must be between 10,000 and 10,00,00,000.');
     if (name !== undefined && (typeof name !== 'string' || name.length > 40)) throw codedError('BAD_NAME', 'Name must be at most 40 characters.');
-    const existing = await listAccounts();
-    if (existing.some(a => a.id === id)) throw codedError('EXISTS', 'That account id is taken.');
-    if (existing.length >= MAX_ACCOUNTS) throw codedError('TOO_MANY_ACCOUNTS', `At most ${MAX_ACCOUNTS} paper accounts.`);
-    const state = engine.newAccount({ id, name, nowMs: now(), startingCapital: Math.round(startingCapital), kind, symbol: sym });
-    await save(state);
-    return state;
+    // under the id's lock, so two requests creating the same id at once cannot both pass the "is it taken" check
+    return locked(id, async () => {
+      const existing = await listAccounts();
+      if (existing.some(a => a.id === id)) throw codedError('EXISTS', 'That account id is taken.');
+      if (existing.length >= MAX_ACCOUNTS) throw codedError('TOO_MANY_ACCOUNTS', `At most ${MAX_ACCOUNTS} paper accounts.`);
+      const state = engine.newAccount({ id, name, nowMs: now(), startingCapital: Math.round(startingCapital), kind, symbol: sym });
+      await save(state);
+      return state;
+    });
   }
 
   async function resetAccount(id) {
     const out = await withAccount(id, state => ({
-      state: { ...engine.newAccount({ id: state.id, name: state.name, nowMs: now(), startingCapital: state.startingCapital, kind: state.kind, symbol: symbolOf(state) }), agentsPaused: !!state.agentsPaused }
+      state: {
+        ...engine.newAccount({ id: state.id, name: state.name, nowMs: now(), startingCapital: state.startingCapital, kind: state.kind, symbol: symbolOf(state) }),
+        agentsPaused: !!state.agentsPaused,
+        ...(state.risk && { risk: state.risk })
+      }
     }));
     return out.state;
   }
@@ -151,12 +170,59 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     const sym = symbolOf(state);
     let book = null;
     try { book = (await loadBook(heldExpiries(state), sym)).book; } catch (e) { book = null; }
-    return { summary: engine.summarize(state, book, cfgFor(sym)), state };
+    return { summary: engine.summarize(state, book, cfgFor(sym)), state, risk: riskStatus(state, book, cfgFor(sym), now()) };
   }
 
   /** Which index an account trades. */
   async function accountSymbol(id) {
     return symbolOf(await load(id));
+  }
+
+  // ── daily loss limit ──
+
+  /** Equity the day started with: the last recorded close before today, or the starting capital on a new account. */
+  function dayStartEquity(state, t) {
+    const today = istYmd(t);
+    const prior = (state.curve || []).filter(p => p.ymd < today);
+    return prior.length ? prior[prior.length - 1].equity : state.startingCapital;
+  }
+
+  /** Where the account stands against its daily loss limit, or null when it has none. */
+  function riskStatus(state, book, acfg, t) {
+    const limit = state.risk && state.risk.maxDailyLoss;
+    if (!(limit > 0)) return null;
+    const dayPnl = Math.round((engine.summarize(state, book, acfg).equity - dayStartEquity(state, t)) * 100) / 100;
+    return { maxDailyLoss: limit, dayPnl, breached: dayPnl <= -limit };
+  }
+
+  /** Does this order only shrink the position that was open before it (never open, add or flip)? */
+  function onlyReduces(before, order) {
+    const pos = before.positions[order.instrument];
+    return !!pos && Math.sign(pos.qty) === (order.side === 'BUY' ? -1 : 1) && order.qty <= Math.abs(pos.qty);
+  }
+
+  /** The refusal for an order the daily loss limit stops, or null when it may go ahead. */
+  function lossLimitRefusal(before, order, book, acfg, t) {
+    const risk = riskStatus(before, book, acfg, t);
+    if (!risk || !risk.breached || onlyReduces(before, order)) return null;
+    return {
+      code: 'DAILY_LOSS_LIMIT',
+      message: `Daily loss limit reached: this account is down ${Math.abs(risk.dayPnl).toFixed(2)} today against a limit of ${risk.maxDailyLoss}. Orders that reduce a position still go through; new ones are accepted again next session.`
+    };
+  }
+
+  /** Set (a number of rupees) or clear (null) the account's daily loss limit. */
+  async function setRiskLimits(id, { maxDailyLoss } = {}) {
+    const clear = maxDailyLoss === null || maxDailyLoss === undefined || maxDailyLoss === 0;
+    if (!clear && !(Number.isFinite(maxDailyLoss) && maxDailyLoss >= RISK.minDailyLoss && maxDailyLoss <= RISK.maxDailyLoss)) {
+      throw codedError('BAD_LIMIT', `The daily loss limit must be between ${RISK.minDailyLoss} and ${RISK.maxDailyLoss} rupees, or empty for none.`);
+    }
+    const out = await withAccount(id, state => {
+      const next = { ...state };
+      if (clear) delete next.risk; else next.risk = { maxDailyLoss: Math.round(maxDailyLoss) };
+      return { state: next };
+    });
+    return out.state.risk || null;
   }
 
   /**
@@ -170,8 +236,11 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     return withAccount(id, state => {
       if (agent && state.agentsPaused) return { ok: false, error: { code: 'AGENTS_PAUSED', message: 'The owner has paused agent trading on this account.' }, state };
       const t = now();
-      const out = engine.placeOrder({ ...input, source: agent ? 'agent' : input && input.source }, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg: cfgFor(symbolOf(state)) });
+      const acfg = cfgFor(symbolOf(state));
+      const out = engine.placeOrder({ ...input, source: agent ? 'agent' : input && input.source }, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg: acfg });
       if (!out.ok) return out;
+      const stopped = lossLimitRefusal(state, out.order, book, acfg, t);
+      if (stopped) return { ok: false, error: stopped, state };
       const next = engine.recordMarks(out.state, book);
       if (agent) {
         // the order and any bracket exits it spawned remember which key placed them
@@ -295,6 +364,8 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
     const before = engine.summarize(state, book, acfg);
     const out = engine.placeOrder(input, state, { book, nowMs: t, marketOpen: isMarketOpen(t), allowedExpiries: allowed, cfg: acfg });
     if (!out.ok) return { ok: false, error: out.error, availableBefore: before.available };
+    const stopped = lossLimitRefusal(state, out.order, book, acfg, t);
+    if (stopped) return { ok: false, error: stopped, availableBefore: before.available };
     const after = engine.summarize(out.state, book, acfg);
     return {
       ok: true,
@@ -435,7 +506,7 @@ function createService({ store, loadRaw, loadSettle, now = Date.now, isMarketOpe
 
   return {
     lastTickAt, listAccounts, createAccount, resetAccount, deleteAccount, getSummary, accountSymbol, placeOrder, previewOrder, cancelOrder, market, tick, loadBook, settlementPrice,
-    setAgentsPaused, listKeys, createKey, revokeKey, authenticate, consumeOrderQuota, consumeBacktestQuota, idempotent
+    setAgentsPaused, setRiskLimits, listKeys, createKey, revokeKey, authenticate, consumeOrderQuota, consumeBacktestQuota, idempotent
   };
 }
 
@@ -454,4 +525,4 @@ function defaultService() {
   return createService({ store, loadRaw: (e, symbol = 'NIFTY') => fetchRawOptionChain(symbol, e), loadSettle, lotSizeFor: sym => lotSizeFor(sym) });
 }
 
-module.exports = { createService, defaultService, ID_RE, AGENT };
+module.exports = { createService, defaultService, ID_RE, AGENT, RISK };

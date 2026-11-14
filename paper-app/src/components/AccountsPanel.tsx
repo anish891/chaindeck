@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { INDEX_INFO, INDEX_SYMBOLS, dayTime } from '../format';
+import { INDEX_INFO, INDEX_SYMBOLS, dayTime, inr } from '../format';
 import { useConfirm } from '../hooks';
 import { ConfirmButton } from './ConfirmButton';
 import type { AccountDetail, AccountListItem, AgentKey, IndexSymbol } from '../types';
@@ -24,9 +24,35 @@ interface Props {
   account: AccountDetail | null;
   onAccountsChanged: (selectId?: string) => void;
   onAccountChanged: () => void;
+  /** ends every session on every device; resolves to an error message, or null once signed out. Absent when there is no sign-in. */
+  onSignOutEverywhere?: () => Promise<string | null>;
 }
 
-export function AccountsPanel({ accounts, accountId, account, onAccountsChanged, onAccountChanged }: Props) {
+export function AccountsPanel({ accounts, accountId, account, onAccountsChanged, onAccountChanged, onSignOutEverywhere }: Props) {
+  const risk = account && account.risk ? account.risk : null;
+  const [limit, setLimit] = useState('');
+  const [riskError, setRiskError] = useState('');
+  const [sessionError, setSessionError] = useState('');
+  // show the saved limit when the account (or its limit) changes, not on every push
+  useEffect(() => { setLimit(risk ? String(risk.maxDailyLoss) : ''); setRiskError(''); }, [accountId, risk ? risk.maxDailyLoss : null]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function saveLimit(value: number | null) {
+    if (!accountId) return;
+    setRiskError('');
+    if (value !== null && !(value > 0)) { setRiskError('Enter the most this account may lose in a day, in rupees.'); return; }
+    const r = await api(`/accounts/${encodeURIComponent(accountId)}/risk`, { method: 'POST', body: { maxDailyLoss: value } });
+    if (!r.ok) { setRiskError(r.error || 'Could not save the limit.'); return; }
+    if (value === null) setLimit('');
+    onAccountChanged();
+  }
+
+  async function signOutEverywhere() {
+    if (!onSignOutEverywhere) return;
+    if (!confirm.isArmed('signout-all')) { confirm.arm('signout-all'); return; }
+    confirm.clear();
+    setSessionError((await onSignOutEverywhere()) || '');
+  }
+
   const confirm = useConfirm();
   const [newId, setNewId] = useState('');
   const [newName, setNewName] = useState('');
@@ -139,6 +165,18 @@ export function AccountsPanel({ accounts, accountId, account, onAccountsChanged,
         <div className="pt-error" role="alert">{manageError}</div>
 
         <div className="panel-head subhead">
+          <div className="panel-title">Daily loss limit on <span>{current ? current.name : 'this account'}</span></div>
+          <span className="panel-note">{risk ? `Today ${inr(risk.dayPnl, true)} against a limit of ${inr(risk.maxDailyLoss)}${risk.breached ? ': reached' : ''}` : 'No limit set'}</span>
+        </div>
+        <p className="pt-muted pt-gap">Once the account is down this much on the day, orders that open or add to a position are refused until the next session, whether they come from you, an AI agent or a live strategy. Orders that reduce a position always go through.</p>
+        <div className="pt-form-row">
+          <input type="number" min={100} step={500} inputMode="numeric" placeholder="Rupees, e.g. 5000" aria-label="Daily loss limit in rupees" value={limit} onChange={e => setLimit(e.target.value)} />
+          <button type="button" onClick={() => saveLimit(Number(limit))}>Save limit</button>
+          {risk && <button type="button" onClick={() => saveLimit(null)}>Remove limit</button>}
+        </div>
+        <div className="pt-error" role="alert">{riskError}</div>
+
+        <div className="panel-head subhead">
           <div className="panel-title">AI agents on <span>{current ? current.name : 'this account'}</span></div>
           <button type="button" className={paused ? 'pt-paused' : ''} onClick={togglePause}>{paused ? 'Agent trading: paused' : 'Agent trading: on'}</button>
         </div>
@@ -172,6 +210,17 @@ export function AccountsPanel({ accounts, accountId, account, onAccountsChanged,
               <button type="button" onClick={() => setFresh(null)}>Done</button>
             </div>
           </div>
+        )}
+
+        {onSignOutEverywhere && (
+          <>
+            <div className="panel-head subhead">
+              <div className="panel-title">Sessions</div>
+              <ConfirmButton armed={confirm.isArmed('signout-all')} label="Sign out everywhere" confirmLabel="Confirm: sign out every device" onClick={signOutEverywhere} />
+            </div>
+            <p className="pt-muted pt-gap">Signing in keeps a browser signed in for 30 days. This ends every session on every device, including this one, for example after using a shared computer. Agent keys are not affected: revoke those above.</p>
+            <div className="pt-error" role="alert">{sessionError}</div>
+          </>
         )}
       </div>
     </div>

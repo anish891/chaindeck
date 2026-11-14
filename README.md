@@ -277,6 +277,18 @@ It is a React + TypeScript app built with Vite. Source is in `paper-app/`, the b
   the expiry close.
 - **Paused trading:** orders are refused outside 09:15 to 15:30 IST, when the server is showing a leftover copy, or when the
   latest snapshot is more than 3 minutes old.
+- **Risk before you click:** the order ticket shows what the trade can lose (the gap to your stop, or the premium paid
+  when there is no stop; a sold option with no stop is flagged as not capped), the gain at the target, and how many lots
+  fit a rupee risk you type in. These are before charges; the preview line under it has the charges.
+- **Daily loss limit (optional, per account):** set it under Accounts. Once the account is down that much on the day,
+  orders that open or add to a position are refused (`DAILY_LOSS_LIMIT`) until the next session, whether they come from
+  you, an AI agent or a live strategy. Orders that only reduce a position always go through.
+- **Option chain:** tap a price to trade. "OI and IV" adds open interest and implied volatility columns; hovering a
+  price shows its bid and ask.
+- **Keyboard:** `1` `2` `3` switch Trade, Strategy lab and Performance, `A` opens Accounts, `B` / `S` pick buy or sell
+  on an open ticket, `Esc` closes it, `?` lists the shortcuts.
+- **Sessions:** signing in lasts 30 days in that browser. "Sign out everywhere" (under Accounts) ends every session on
+  every device at once.
 - **Views:** positions, open orders, order history (with who placed each order and why), trades, a payoff chart (at
   expiry and today) and the equity curve.
 
@@ -345,6 +357,7 @@ spreadsheet would treat as formulas are neutralised).
   orders, cancels day orders at the close, settles expiries, records each day's closing equity and runs deployed
   strategies. If it stops, an open paper page takes over working orders after 90 seconds, but live strategies only run
   from the cron job.
+- **Behind a reverse proxy (not Vercel):** set `TRUST_PROXY` to the number of proxies in front of the server (usually `1`), so rate limits count each visitor by the address the proxy reports instead of treating everyone as the proxy. Vercel already supplies the real address. Leave it unset when the server is reached directly, because the header it relies on can then be forged.
 - **Paper trading storage:** each cron minute costs about 3 Upstash commands with nothing active, plus about 6 for each
   account with waiting orders and 4 for each running strategy (a typical setup of two accounts and one strategy is about
   100K commands a month). A paper page left open adds about 5 a minute. Accounts that only hold positions are not
