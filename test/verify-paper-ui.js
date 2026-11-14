@@ -51,6 +51,19 @@ const walk = d => fs.readdirSync(path.join(root, d), { withFileTypes: true }).fl
   assert.strictEqual(sl.limitPrice, 99); assert.strictEqual(sl.triggerPrice, 100); assert.strictEqual(sl.side, 'SELL');
   assert.strictEqual(U.buildOrder(form({ type: 'SL-M', trigger: '100', limit: '5' }), sel).limitPrice, undefined, 'SL-M ignores the limit field');
   assert.deepStrictEqual(U.buildOrder(form({ bracket: true, target: '150', stop: '' }), sel).bracket, { target: 150 });
+  // the setup (why the trade was taken) travels as the order's tag: trimmed, single-spaced, at most 40 characters
+  assert.strictEqual(U.buildOrder(form({ setup: '  Range   fade ' }), sel).tag, 'Range fade');
+  assert.strictEqual(U.buildOrder(form({ setup: 'x'.repeat(60) }), sel).tag.length, 40);
+  assert.ok(!('tag' in U.buildOrder(form({ setup: '   ' }), sel)), 'an empty setup sends no tag');
+  {
+    const setupRow = (over = {}) => ({ label: 'Breakout', trades: 4, open: 1, wins: 3, losses: 1, winRate: 0.75, winRateLow: 0.3, winRateHigh: 0.95, avgWin: 900, avgLoss: -400, expectancy: 575, net: 2300, sample: 'few', ...over });
+    const t = html(U.SetupTable, { rows: [setupRow(), setupRow({ label: 'ORB', trades: 120, open: 0, sample: 'ok' }), setupRow({ label: 'New idea', trades: 0, open: 2, winRate: null, winRateLow: null, winRateHigh: null, avgWin: null, avgLoss: null, expectancy: null, net: 0 })] });
+    assert(t.includes('75%') && t.includes('(30% to 95%)'), 'the win rate is never shown without its range');
+    assert(t.includes('Too few to judge') && t.includes('pt-thin') && t.includes('Reasonable sample'), 'a small sample is labelled and dimmed');
+    assert(t.includes('1 open') && t.includes('Nothing closed yet'), 'open trades are counted apart from results');
+    assert(t.includes('+₹575.00'), 'expectancy per trade');
+    assert(html(U.SetupTable, { rows: [] }).includes('Fill in &quot;Setup&quot; on the order ticket'), 'the empty state says how to start');
+  }
   assert.strictEqual(U.buildOrder(form({ bracket: true, target: '', stop: '' }), sel).bracket, undefined, 'an empty bracket is not sent');
   assert.strictEqual(U.buildOrder(form({ bracket: false, target: '150' }), sel).bracket, undefined);
   const market = {

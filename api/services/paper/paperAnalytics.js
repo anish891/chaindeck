@@ -43,6 +43,120 @@ function drawdown(startingCapital, curve, equityNow) {
   return { maxDrawdown: r2(maxDd), maxDrawdownPct: r2(maxDdPct * 100) };
 }
 
+// ── expectancy by setup ──
+//
+// A setup is why a trade was taken: the tag on the order that OPENED the position (a live strategy's orders carry the
+// strategy's name). The exit does not need a tag: whatever closes a position, including expiry settlement, is credited to
+// the setup that opened it.
+//
+// One trade = the opening fills of one setup in the same minute (so both legs of a spread are one result, not a win and a
+// loss), followed until every lot it opened is closed. Untagged orders are each their own trade. Its result is what it
+// booked minus the charges on its entry and exit fills, so every figure here is net of costs.
+//
+// Fills are matched first in, first out per instrument. The engine books profit at the average cost, so each unit a
+// fill closes carries the same profit; splitting a closing fill across the lots it consumes by quantity is exact.
+
+const UNTAGGED = 'Untagged';
+const UNKNOWN = 'Opened before the kept history';
+const FEW = 30;    // below this many closed trades the numbers say very little
+const ENOUGH = 100;
+
+function setupOf(order) {
+  if (!order) return { key: 'unknown', label: UNKNOWN, group: null };
+  if (order.source === 'strategy') {
+    const name = (order.strategy && order.strategy.name) || order.tag || 'strategy';
+    return { key: `strategy:${name}`, label: name, group: (order.strategy && order.strategy.deploymentId) || name };
+  }
+  if (order.tag) return { key: `tag:${order.tag.toLowerCase()}`, label: order.tag, group: order.tag.toLowerCase() };
+  return { key: 'untagged', label: UNTAGGED, group: null };
+}
+
+/** 95% Wilson interval for a win rate: honest about small samples, unlike the bare percentage. */
+function wilson(wins, n) {
+  if (!n) return { low: null, high: null };
+  const z = 1.96, p = wins / n, d = 1 + (z * z) / n;
+  const mid = (p + (z * z) / (2 * n)) / d;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  return { low: r2(Math.max(0, mid - half)), high: r2(Math.min(1, mid + half)) };
+}
+
+function setupStats(state) {
+  const orders = new Map(state.orders.map(o => [o.id, o]));
+  const lots = new Map();    // instrument -> [{ qty (signed, remaining), entry }] oldest first
+  const entries = new Map(); // entry id -> { setup, open (units still open), pnl, closedAt }
+  const sign = t => (t.side === 'BUY' ? 1 : -1);
+
+  for (const t of [...state.trades].sort((a, b) => a.at - b.at)) {
+    const queue = lots.get(t.instrument) || [];
+    lots.set(t.instrument, queue);
+    const dir = sign(t);
+    let left = t.qty;
+    const perUnitCharges = t.qty ? t.charges / t.qty : 0;
+    const closable = queue.filter(l => Math.sign(l.qty) === -dir).reduce((a, l) => a + Math.abs(l.qty), 0);
+    const closing = Math.min(left, closable);
+    const perUnitRealized = closing ? t.realized / closing : 0;
+
+    // 1. this fill closes older lots, oldest first
+    while (left > 0 && queue.length && Math.sign(queue[0].qty) === -dir) {
+      const lot = queue[0];
+      const take = Math.min(left, Math.abs(lot.qty));
+      lot.qty += dir * take;
+      left -= take;
+      const e = lot.entry;
+      e.pnl += take * (perUnitRealized - perUnitCharges);
+      e.open -= take;
+      if (e.open <= 0) e.closedAt = t.at;
+      if (lot.qty === 0) queue.shift();
+    }
+    // A closing fill with nothing to match: its opening fill has aged out of the kept history.
+    if (left > 0 && t.realized && !closing) {
+      const id = `unknown|${t.id}`;
+      entries.set(id, { setup: setupOf(null), open: 0, pnl: t.realized - t.charges, closedAt: t.at });
+      left = 0;
+    }
+    // 2. whatever is left opens a new lot under this order's setup
+    if (left > 0) {
+      const setup = t.kind === 'settlement' ? setupOf(null) : setupOf(orders.get(t.orderId));
+      const id = setup.group ? `${setup.key}|${setup.group}|${Math.floor(t.at / 60000)}` : `${setup.key}|${t.orderId || t.id}`;
+      if (!entries.has(id)) entries.set(id, { setup, open: 0, pnl: 0, closedAt: null });
+      const e = entries.get(id);
+      e.open += left;
+      e.closedAt = null;
+      e.pnl -= left * perUnitCharges;
+      queue.push({ qty: dir * left, entry: e });
+    }
+  }
+
+  const by = new Map();
+  for (const e of entries.values()) {
+    if (!by.has(e.setup.key)) by.set(e.setup.key, { label: e.setup.label, results: [], open: 0 });
+    const b = by.get(e.setup.key);
+    if (e.open > 0) b.open += 1; else b.results.push(e.pnl);
+  }
+  return [...by.values()].map(b => {
+    const n = b.results.length;
+    const wins = b.results.filter(x => x > 0);
+    const losses = b.results.filter(x => x <= 0); // a trade that only paid charges is a loss
+    const net = b.results.reduce((a, x) => a + x, 0);
+    const ci = wilson(wins.length, n);
+    return {
+      label: b.label,
+      trades: n,
+      open: b.open,
+      wins: wins.length,
+      losses: losses.length,
+      winRate: n ? r2(wins.length / n) : null,
+      winRateLow: ci.low,
+      winRateHigh: ci.high,
+      avgWin: wins.length ? r2(wins.reduce((a, x) => a + x, 0) / wins.length) : null,
+      avgLoss: losses.length ? r2(losses.reduce((a, x) => a + x, 0) / losses.length) : null,
+      expectancy: n ? r2(net / n) : null, // average net result per closed trade = win rate x avg win + loss rate x avg loss
+      net: r2(net),
+      sample: n < FEW ? 'few' : n < ENOUGH ? 'early' : 'ok'
+    };
+  }).sort((a, b) => b.trades - a.trades || b.open - a.open || a.label.localeCompare(b.label));
+}
+
 /** Analytics for one account. summary: paperEngine.summarize output (equity at current marks). */
 function accountAnalytics(state, summary) {
   const orders = new Map(state.orders.map(o => [o.id, o]));
@@ -87,6 +201,7 @@ function accountAnalytics(state, summary) {
     worstDay: days.length ? days.reduce((a, b) => (b.change < a.change ? b : a)) : null,
     byWho: [...byWho.values()].sort((a, b) => b.fills - a.fills),
     byTag: [...byTag.values()].sort((a, b) => b.fills - a.fills),
+    bySetup: setupStats(state),
     totals: all,
     historyNote: state.trades.length >= 2000 ? 'Only the most recent 2000 fills are kept.' : null
   };
@@ -151,4 +266,4 @@ function ordersCsv(state) {
   ], state.orders);
 }
 
-module.exports = { whoOf, accountAnalytics, drawdown, cell, toCsv, tradesCsv, ordersCsv };
+module.exports = { whoOf, setupStats, wilson, accountAnalytics, drawdown, cell, toCsv, tradesCsv, ordersCsv };

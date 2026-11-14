@@ -14,6 +14,16 @@ export const px = (x: number | null | undefined): string => (x ? Number(x).toFix
 
 export const pnlClass = (x: number | null | undefined): string => (x && x > 0 ? 'pt-pos' : x && x < 0 ? 'pt-neg' : '');
 
+/** A large count in Indian units, short enough for a table cell: 1,25,000 -> '1.25L', 2,40,00,000 -> '2.4Cr'. */
+export function compact(x: number | null | undefined): string {
+  if (x === null || x === undefined || !Number.isFinite(x) || x <= 0) return 'n/a';
+  const short = (v: number) => String(Math.round(v * 100) / 100);
+  if (x >= 1e7) return `${short(x / 1e7)}Cr`;
+  if (x >= 1e5) return `${short(x / 1e5)}L`;
+  if (x >= 1e3) return `${short(x / 1e3)}K`;
+  return String(Math.round(x));
+}
+
 export const pct = (x: number): string => `${(x * 100).toFixed(0)}%`;
 
 export const pctText = (x: number | null | undefined): string => (x === null || x === undefined ? 'n/a' : `${Math.round(x * 100)}%`);

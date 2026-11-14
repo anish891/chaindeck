@@ -5,6 +5,8 @@ import type { Theme } from '../theme';
 interface Props {
   statusText: string;
   statusOk: boolean;
+  /** the market is simply shut (evening, weekend, holiday): nothing is wrong, so the light is grey, not red */
+  closed?: boolean;
   accounts: AccountListItem[];
   accountId: string | null;
   onAccount: (id: string) => void;
@@ -22,7 +24,7 @@ export function TopBar(p: Props) {
     <div className="topbar">
       <a href="/" className="logo">Chain<span>Deck</span></a>
       <span className="pt-badge">Paper trading</span>
-      <div className={`live-dot${p.statusOk ? '' : ' error'}`} />
+      <div className={`live-dot${p.statusOk ? '' : p.closed ? ' closed' : ' error'}`} />
       <div className="status-text" role="status">{p.statusText}</div>
 
       <div className="topbar-right">

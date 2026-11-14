@@ -129,8 +129,16 @@ export interface EquityPoint {
   equity: number;
 }
 
+/** The account's daily loss limit and where today stands against it (absent or null: no limit). */
+export interface RiskStatus {
+  maxDailyLoss: number;
+  dayPnl: number;
+  breached: boolean;
+}
+
 export interface AccountDetail {
   agentsPaused: boolean;
+  risk?: RiskStatus | null;
   summary: Summary;
   orders: Order[];
   trades: Trade[];
@@ -156,6 +164,8 @@ export interface OrderRequest {
   triggerPrice?: number;
   bracket?: { target?: number; stop?: number };
   reason?: string;
+  /** the setup this trade is an example of (see Performance: expectancy by setup) */
+  tag?: string;
 }
 
 export interface PreviewResult {
@@ -297,6 +307,24 @@ export interface Bucket {
   net: number;
 }
 
+/** One setup's closed trades, net of charges. A trade is credited to the setup that opened it. */
+export interface SetupRow {
+  label: string;
+  trades: number;
+  open: number;
+  wins: number;
+  losses: number;
+  winRate: number | null;
+  winRateLow: number | null;
+  winRateHigh: number | null;
+  avgWin: number | null;
+  avgLoss: number | null;
+  expectancy: number | null;
+  net: number;
+  /** how much the numbers can be trusted: under 30 closed trades, 30 to 99, 100 or more */
+  sample: 'few' | 'early' | 'ok';
+}
+
 export interface CompareRow {
   id: string;
   name: string;
@@ -332,5 +360,6 @@ export interface Analytics {
   realized: number;
   byWho: Bucket[];
   byTag: Bucket[];
+  bySetup: SetupRow[];
   historyNote?: string;
 }
