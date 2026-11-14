@@ -33,14 +33,21 @@ const PAPER_MS = 5000;
 const ACCOUNT_MS = 15000;  // an account read costs storage commands; orders only change on the minute or on the user's action
 const STATUS_MS = 5000;
 const PING_MS = 30000;
-const MAX_CLIENTS = 16;
+// Room for every page the owner has open, with a per-address share so one visitor cannot take every slot and lock the
+// others out. Behind a reverse proxy all visitors arrive from one address unless TRUST_PROXY is set (see clientIp).
+const MAX_CLIENTS = 48;
+const MAX_PER_IP = 12;
+// A page sends a message when the user changes what is on screen: a handful a minute. Past this, messages are dropped.
+const MSG_LIMIT = 40;
+const MSG_WINDOW_MS = 10000;
 const OPEN = 1;
 // The paper app connects under /api/paper because its session cookie is scoped to that path.
 const PATHS = new Set(['/ws', '/api/paper/ws']);
 
 function createGateway({
   feed, chainView, chartView = null, chartIntervals = new Set(['5m', '15m', '1d']), paperViews, legIndex, isOwner, accountIdRe,
-  timers = { setInterval, clearInterval }, now = Date.now, log = console.error
+  timers = { setInterval, clearInterval }, now = Date.now, log = console.error,
+  clientIp = req => (req.socket && req.socket.remoteAddress) || 'unknown', maxClients = MAX_CLIENTS, maxPerIp = MAX_PER_IP
 }) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
   const clients = new Set();
@@ -49,6 +56,10 @@ function createGateway({
   const handles = [];
   let offTicks = null;
   let offStatus = null;
+
+  /** Pushes run on timers and are not awaited: whatever one throws is logged here, never left as an unhandled rejection. */
+  const run = (promise, what) => { Promise.resolve(promise).catch(err => log(`gateway: ${what} failed: ${err && err.message}`)); };
+  const countFrom = ip => { let n = 0; for (const c of clients) if (c.ip === ip) n += 1; return n; };
 
   const send = (client, msg) => {
     if (client.ws.readyState !== OPEN) return;
@@ -137,6 +148,17 @@ function createGateway({
     }
   }
 
+  /**
+   * The owner check is made again on every push, not only when the page subscribes: a session that has expired, or been
+   * ended by "sign out everywhere", stops receiving the account on a socket it opened earlier.
+   */
+  function stillOwner(client, channel) {
+    if (isOwner(client.req)) return true;
+    if (channel === 'paper') client.paper = null; else client.deployments = false;
+    send(client, { type: 'error', channel, code: 'SIGNED_OUT', error: 'Sign in to use paper trading.' });
+    return false;
+  }
+
   const failure = (err, fallback) => (err && err.code && err.message && /^[A-Z_]+$/.test(err.code) && !/^(UPSTOX|STREAM)/.test(err.code)
     ? { ok: false, code: err.code, error: err.message }
     : (log(`gateway: ${fallback}: ${err && err.message}`), { ok: false, error: fallback }));
@@ -144,6 +166,7 @@ function createGateway({
   async function pushPaper(client, { account = false } = {}) {
     const p = client.paper;
     if (!p) return;
+    if (!stillOwner(client, 'paper')) return;
     const msg = { type: 'paper', accountId: p.accountId, symbol: p.symbol, expiry: p.expiry };
     try { msg.market = await paperViews.market(p.expiry, p.symbol); } catch (err) { msg.market = failure(err, 'Error loading paper market'); }
     if (account || now() - p.accountAt >= ACCOUNT_MS) {
@@ -153,25 +176,41 @@ function createGateway({
     if (client.paper === p) send(client, msg);
   }
 
+  // One chart build per client at a time: asking again while one is running does not start another. If the page moved
+  // to another interval meanwhile, that one is built next.
   async function pushChart(client) {
-    const c = client.chart;
-    if (!c || !chartView) return;
-    let payload;
-    try { payload = { ok: true, ...(await chartView(c.interval, c.expiry)) }; } catch (err) { log(`gateway: chart build failed: ${err && err.message}`); payload = { ok: false, error: 'Error building chart analysis' }; }
-    if (client.chart === c) send(client, { type: 'chart', interval: c.interval, payload });
+    if (!client.chart || !chartView || client.chartBuilding) return;
+    client.chartBuilding = true;
+    try {
+      for (let c = client.chart; c; c = client.chart !== c ? client.chart : null) {
+        let payload;
+        try { payload = { ok: true, ...(await chartView(c.interval, c.expiry)) }; } catch (err) { log(`gateway: chart build failed: ${err && err.message}`); payload = { ok: false, error: 'Error building chart analysis' }; }
+        if (client.chart === c) send(client, { type: 'chart', interval: c.interval, payload });
+      }
+    } finally {
+      client.chartBuilding = false;
+    }
   }
 
   async function pushDeployments(client) {
     if (!client.deployments) return;
+    if (!stillOwner(client, 'deployments')) return;
     let payload;
     try { payload = await paperViews.deployments(); } catch (err) { payload = failure(err, 'Error listing deployments'); }
     send(client, { type: 'deployments', payload });
   }
 
   function onMessage(client, text) {
+    const t = now();
+    if (t - client.msgFrom >= MSG_WINDOW_MS) { client.msgFrom = t; client.msgCount = 0; client.msgWarned = false; }
+    client.msgCount += 1;
+    if (client.msgCount > MSG_LIMIT) {
+      if (!client.msgWarned) { client.msgWarned = true; send(client, { type: 'error', channel: null, code: 'RATE_LIMITED', error: 'Too many messages. Slow down.' }); }
+      return undefined;
+    }
     let m;
-    try { m = JSON.parse(text); } catch (e) { return; }
-    if (!m || typeof m !== 'object') return;
+    try { m = JSON.parse(text); } catch (e) { return undefined; }
+    if (!m || typeof m !== 'object') return undefined;
     const owner = () => {
       if (isOwner(client.req)) return true;
       send(client, { type: 'error', channel: m.type, code: 'SIGNED_OUT', error: 'Sign in to use paper trading.' });
@@ -188,7 +227,7 @@ function createGateway({
       if (!groups.has(id)) groups.set(id, newGroup(symbol, expiry));
       dropUnwatchedGroups();
       rebuildRoutes();
-      pushChain(groups.get(id));
+      run(pushChain(groups.get(id)), 'chain push');
     } else if (m.type === 'ticks') {
       if (badTarget || expiry === null) return send(client, { type: 'error', channel: 'ticks', code: 'BAD_REQUEST', error: 'Unknown index or expiry.' });
       const id = groupId(symbol, expiry);
@@ -199,19 +238,19 @@ function createGateway({
     } else if (m.type === 'chart') {
       if (!chartIntervals.has(m.interval) || (expiry !== null && !isPlausibleExpiry(expiry))) return send(client, { type: 'error', channel: 'chart', code: 'BAD_REQUEST', error: 'Unknown interval or expiry.' });
       client.chart = { interval: m.interval, expiry };
-      pushChart(client);
+      run(pushChart(client), 'chart push');
     } else if (m.type === 'paper') {
       if (!owner()) return undefined;
       if (badTarget || !accountIdRe.test(String(m.accountId || ''))) return send(client, { type: 'error', channel: 'paper', code: 'BAD_REQUEST', error: 'Unknown account, index or expiry.' });
       client.paper = { accountId: m.accountId, symbol, expiry, accountAt: 0 };
-      pushPaper(client, { account: true });
+      run(pushPaper(client, { account: true }), 'paper push');
     } else if (m.type === 'deployments') {
       if (!owner()) return undefined;
       client.deployments = m.on !== false;
-      pushDeployments(client);
+      run(pushDeployments(client), 'deployments push');
     } else if (m.type === 'refresh') {
-      if (client.paper && owner()) pushPaper(client, { account: true });
-      if (client.deployments) pushDeployments(client);
+      if (client.paper && owner()) run(pushPaper(client, { account: true }), 'paper push');
+      if (client.deployments) run(pushDeployments(client), 'deployments push');
     } else if (m.type === 'stop') {
       if (m.channel === 'chain') { client.chain = null; dropUnwatchedGroups(); }
       else if (m.channel === 'ticks') { client.ticks = null; dropUnwatchedGroups(); }
@@ -223,7 +262,7 @@ function createGateway({
   }
 
   wss.on('connection', (ws, req) => {
-    const client = { ws, req, chain: null, ticks: null, chart: null, paper: null, deployments: false, alive: true };
+    const client = { ws, req, ip: clientIp(req), chain: null, ticks: null, chart: null, paper: null, deployments: false, alive: true, chartBuilding: false, msgFrom: now(), msgCount: 0, msgWarned: false };
     clients.add(client);
     send(client, statusMessage());
     ws.on('message', (data, isBinary) => { if (!isBinary) onMessage(client, data.toString()); });
@@ -246,8 +285,13 @@ function createGateway({
         const origin = req.headers.origin;
         let sameOrigin = true;
         if (origin) { try { sameOrigin = new URL(origin).host === req.headers.host; } catch (e) { sameOrigin = false; } }
-        if (!PATHS.has(path) || !sameOrigin || clients.size >= MAX_CLIENTS) {
+        if (!PATHS.has(path) || !sameOrigin) {
           socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        if (clients.size >= maxClients || countFrom(clientIp(req)) >= maxPerIp) {
+          socket.write('HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nConnection: close\r\n\r\n');
           socket.destroy();
           return;
         }
@@ -256,10 +300,10 @@ function createGateway({
       offTicks = feed.on('ticks', onTicks);
       offStatus = feed.on('status', broadcastStatus);
       every(TICK_MS, flushTicks);
-      every(CHAIN_MS, () => { for (const g of groups.values()) pushChain(g); });
-      every(CHART_MS, () => { for (const c of clients) pushChart(c); });
-      every(PAPER_MS, () => { for (const c of clients) pushPaper(c); });
-      every(ACCOUNT_MS, () => { for (const c of clients) pushDeployments(c); });
+      every(CHAIN_MS, () => { for (const g of groups.values()) run(pushChain(g), 'chain push'); });
+      every(CHART_MS, () => { for (const c of clients) run(pushChart(c), 'chart push'); });
+      every(PAPER_MS, () => { for (const c of clients) run(pushPaper(c), 'paper push'); });
+      every(ACCOUNT_MS, () => { for (const c of clients) run(pushDeployments(c), 'deployments push'); });
       every(STATUS_MS, broadcastStatus);
       every(PING_MS, () => {
         for (const c of clients) {
@@ -276,7 +320,7 @@ function createGateway({
     },
     /** The paper engine just ran: accounts and deployments may have changed. */
     paperTicked() {
-      for (const c of clients) { pushPaper(c, { account: true }); pushDeployments(c); }
+      for (const c of clients) { run(pushPaper(c, { account: true }), 'paper push'); run(pushDeployments(c), 'deployments push'); }
     },
     clientCount: () => clients.size,
     _internals: { onMessage, onTicks, flushTicks, pushChain, groups, clients, wss },
@@ -292,4 +336,4 @@ function createGateway({
   };
 }
 
-module.exports = { createGateway, CHAIN_MS, TICK_MS };
+module.exports = { createGateway, CHAIN_MS, TICK_MS, MAX_CLIENTS, MAX_PER_IP, MSG_LIMIT };

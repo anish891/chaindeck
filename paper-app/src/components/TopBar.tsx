@@ -7,6 +7,8 @@ import { tickTime } from '../../../public/js/stream.js';
 interface Props {
   statusText: string;
   statusOk: boolean;
+  /** the market is simply shut (evening, weekend, holiday): nothing is wrong, so the light is grey, not red */
+  closed?: boolean;
   /** The live connection, once signed in. Absent on the sign-in screen. */
   conn?: StreamState;
   accounts: AccountListItem[];
@@ -23,7 +25,8 @@ interface Props {
 
 export function TopBar(p: Props) {
   // connected: green when trading is open, red when it is paused or closed; otherwise the connection's own colour
-  const dot = !p.conn ? (p.statusOk ? 'conn-connected' : 'error') : p.conn.status === 'connected' ? (p.statusOk ? 'conn-connected' : 'error') : `conn-${p.conn.status}`;
+  const idle = p.statusOk ? 'conn-connected' : p.closed ? 'closed' : 'error';
+  const dot = !p.conn ? idle : p.conn.status === 'connected' ? idle : `conn-${p.conn.status}`;
   const tick = p.conn ? tickTime(p.conn.lastTickAt) : '';
   return (
     <div className="topbar">

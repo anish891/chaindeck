@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, setSignedOutHandler, signedOut } from './api';
 import { live, closeLive, useConnection, watchTicks } from './live';
 import { STATUS_TEXT } from '../../public/js/stream.js';
-import { INDEX_INFO, MARKET_REASONS, instrumentKey } from './format';
+import { INDEX_INFO, MARKET_REASONS, inr, instrumentKey } from './format';
 import { readPref, writePref, applyTheme, loadTheme, saveTheme } from './theme';
 import type { Theme } from './theme';
 import { Login } from './components/Login';
@@ -25,6 +25,15 @@ type View = 'trade' | 'lab' | 'perf';
 const savedView = (): View => { const v = readPref('paper_view'); return v === 'lab' || v === 'perf' ? v : 'trade'; };
 const savedTab = (): BlotterTab => { const v = readPref('paper_tab'); return BLOTTER_TABS.some(([id]) => id === v) ? (v as BlotterTab) : 'positions'; };
 const NOTICE_MS = 6000;
+const VIEW_KEYS: Record<string, View> = { '1': 'trade', '2': 'lab', '3': 'perf' };
+const SHORTCUTS: [string, string][] = [
+  ['1  2  3', 'Trade, Strategy lab, Performance'],
+  ['A', 'Open or close Accounts'],
+  ['B  S', 'Buy or Sell, while an order ticket is open'],
+  ['Esc', 'Close the order ticket'],
+  ['?', 'Show or hide this list']
+];
+const typing = (el: EventTarget | null) => el instanceof HTMLElement && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
 
 export function App() {
   const [boot, setBoot] = useState<Boot>('loading');
@@ -53,7 +62,16 @@ export function App() {
     setBoot('signedOut');
   }
 
-  if (boot === 'ready') return <Workspace theme={theme} onTheme={changeTheme} canSignOut={needsSecret} onSignOut={signOut} />;
+  // Ends every session issued so far, on every device, this one included (a cookie copied elsewhere stops working too).
+  async function signOutEverywhere(): Promise<string | null> {
+    const r = await api('/session/revoke-all', { method: 'POST' });
+    if (!r.ok) return r.error || 'Could not sign out everywhere.';
+    closeLive();
+    setBoot('signedOut');
+    return null;
+  }
+
+  if (boot === 'ready') return <Workspace theme={theme} onTheme={changeTheme} canSignOut={needsSecret} onSignOut={signOut} onSignOutEverywhere={signOutEverywhere} />;
 
   const status = boot === 'loading' ? 'Connecting…' : boot === 'unreachable' ? 'Cannot reach the server' : boot === 'unconfigured' ? 'Paper trading is not configured on this server' : 'Signed out';
   return (
@@ -69,9 +87,11 @@ interface WorkspaceProps {
   onTheme: (t: Theme) => void;
   canSignOut: boolean;
   onSignOut: () => void;
+  onSignOutEverywhere: () => Promise<string | null>;
 }
 
-function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
+function Workspace({ theme, onTheme, canSignOut, onSignOut, onSignOutEverywhere }: WorkspaceProps) {
+  const [keysOpen, setKeysOpen] = useState(false);
   const [accounts, setAccounts] = useState<AccountListItem[]>([]);
   const [accountId, setAccountId] = useState<string | null>(() => readPref('paper_account'));
   const [account, setAccount] = useState<AccountDetail | null>(null);
@@ -141,6 +161,23 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
     writePref('paper_view', v);
   };
   const chooseTab = (t: BlotterTab) => { setTab(t); writePref('paper_tab', t); };
+
+  // Keyboard shortcuts. Never while typing in a field, never with a modifier (so browser shortcuts keep working), and
+  // the view keys stay out of the way while an order ticket is open.
+  const ticketOpen = !!selection.instrument;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
+      if (e.key === '?') { setKeysOpen(o => !o); return; }
+      if (e.key === 'Escape') { setKeysOpen(false); return; }
+      if (ticketOpen) return;
+      const v = VIEW_KEYS[e.key];
+      if (v) { setView(v); setVisited(x => ({ ...x, [v]: true })); writePref('paper_view', v); }
+      else if (e.key.toLowerCase() === 'a') setManage(m => !m);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [ticketOpen]);
   const chooseAccount = (id: string) => {
     writePref('paper_account', id);
     setAccount(null);
@@ -162,6 +199,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
       : conn.status === 'reconnecting' && marketLoaded ? 'Connection lost. Reconnecting… prices below are the last ones received.' : '';
   const showBanner = !!h && !h.ok && h.reason !== 'MARKET_CLOSED';
   const closeSheet = useCallback(() => setSelection(s => ({ ...s, instrument: null })), []);
+  const chooseSide = useCallback((side: Side) => setSelection(s => ({ ...s, side })), []);
   const placed = (text: string) => { closeSheet(); setNotice(text); bump(); };
   useEffect(() => {
     if (!notice) return undefined;
@@ -177,6 +215,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
       <TopBar
         statusText={statusText}
         statusOk={!!h && h.ok}
+        closed={!!h && h.reason === 'MARKET_CLOSED'}
         conn={conn}
         accounts={accounts}
         accountId={accountId}
@@ -194,14 +233,26 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
         <Strip account={account} market={market} />
         {showBanner && <div className="pt-banner" role="status">{MARKET_REASONS[h!.reason || ''] || 'Trading is paused.'}</div>}
 
-        {manage && <AccountsPanel accounts={accounts} accountId={accountId} account={account} onAccountsChanged={id => void loadAccounts(id)} onAccountChanged={bump} />}
+        {account && account.risk && account.risk.breached && (
+          <div className="pt-banner" role="status" data-kind="loss-limit">
+            Daily loss limit reached: this account is down {inr(Math.abs(account.risk.dayPnl))} today against a limit of {inr(account.risk.maxDailyLoss)}. New positions are refused until the next session; you can still exit what you hold.
+          </div>
+        )}
+
+        {manage && <AccountsPanel accounts={accounts} accountId={accountId} account={account} onAccountsChanged={id => void loadAccounts(id)} onAccountChanged={bump} onSignOutEverywhere={canSignOut ? onSignOutEverywhere : undefined} />}
 
         <div className="section pt-views">
           <div className="seg" role="group" aria-label="View">
-            <button type="button" className={`seg-btn${view === 'trade' ? ' active' : ''}`} onClick={() => chooseView('trade')}>Trade</button>
-            <button type="button" className={`seg-btn${view === 'lab' ? ' active' : ''}`} onClick={() => chooseView('lab')}>Strategy lab</button>
-            <button type="button" className={`seg-btn${view === 'perf' ? ' active' : ''}`} onClick={() => chooseView('perf')}>Performance</button>
+            <button type="button" className={`seg-btn${view === 'trade' ? ' active' : ''}`} aria-pressed={view === 'trade'} onClick={() => chooseView('trade')}>Trade</button>
+            <button type="button" className={`seg-btn${view === 'lab' ? ' active' : ''}`} aria-pressed={view === 'lab'} onClick={() => chooseView('lab')}>Strategy lab</button>
+            <button type="button" className={`seg-btn${view === 'perf' ? ' active' : ''}`} aria-pressed={view === 'perf'} onClick={() => chooseView('perf')}>Performance</button>
           </div>
+          <button type="button" className="pt-small pt-keys-btn" aria-expanded={keysOpen} aria-controls="ptKeys" onClick={() => setKeysOpen(o => !o)} title="Keyboard shortcuts (?)">Shortcuts</button>
+          {keysOpen && (
+            <dl className="pt-keys" id="ptKeys">
+              {SHORTCUTS.map(([k, what]) => <div key={k}><dt><kbd>{k}</kbd></dt><dd>{what}</dd></div>)}
+            </dl>
+          )}
         </div>
 
         <div hidden={view !== 'trade'}>
@@ -218,7 +269,7 @@ function Workspace({ theme, onTheme, canSignOut, onSignOut }: WorkspaceProps) {
               {payoff && <PayoffPanel account={account} market={market} />}
             </div>
           )}
-          <OrderSheet accountId={accountId} market={market} selection={selection} setups={setups} onSide={side => setSelection(s => ({ ...s, side }))} onClose={closeSheet} onPlaced={placed} />
+          <OrderSheet accountId={accountId} market={market} selection={selection} setups={setups} equity={account ? account.summary.equity : null} onSide={chooseSide} onClose={closeSheet} onPlaced={placed} />
         </div>
 
         {visited.lab && <div hidden={view !== 'lab'}><Lab accounts={accounts} accountId={accountId} active={view === 'lab'} /></div>}

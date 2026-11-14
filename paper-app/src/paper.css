@@ -51,6 +51,8 @@ input, textarea {
   min-width: 0;
 }
 input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+/* a keyboard user needs more than a border colour to find the field they are in */
+input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 textarea { resize: vertical; width: 100%; }
 
 .pt-primary {
@@ -248,3 +250,28 @@ main { display: block; }
 .pt-sample { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border2); color: var(--muted); }
 .pt-sample-few { border-color: var(--warn); color: var(--warn); }
 .pt-sample-ok { border-color: var(--bull); color: var(--bull); }
+
+/* the market is shut: nothing is wrong, so the light is neutral rather than the red of a fault */
+.live-dot.closed { background: var(--muted); animation: none; }
+
+/* option chain: optional open interest and IV columns */
+.pt-chain-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pt-toggle.on { border-color: var(--accent); color: var(--accent); background: var(--atm-bg); }
+.pt-chain .pt-detail { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pt-atm-tag { font-family: var(--font); font-size: 9px; font-weight: 600; letter-spacing: 0.06em; color: var(--accent); }
+
+/* order ticket: what the trade risks, and lots that fit a risk budget */
+.pt-risk { font-size: 12px; line-height: 1.5; padding: 8px 10px; border: 1px solid var(--border2); border-radius: 6px; background: var(--surface2); display: flex; flex-direction: column; gap: 8px; }
+.pt-risk[data-basis="uncapped"] { border-color: var(--warn); }
+.pt-risk-size { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); }
+.pt-risk-size input { width: 96px; background: var(--surface); }
+
+/* keyboard shortcuts */
+.pt-views { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pt-keys-btn { margin-left: auto; }
+.pt-keys { flex: 1 0 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 16px; padding: 10px 12px; border: 1px solid var(--border2); border-radius: 6px; background: var(--surface); font-size: 12px; }
+.pt-keys > div { display: flex; gap: 10px; align-items: baseline; }
+.pt-keys dt { flex: 0 0 64px; }
+.pt-keys dd { color: var(--muted); }
+.pt-keys kbd { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border: 1px solid var(--border2); border-radius: 4px; background: var(--surface2); white-space: pre; }
+@media (hover: none) { .pt-keys-btn { display: none; } }

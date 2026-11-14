@@ -35,18 +35,40 @@ const SECURITY_HEADERS = {
   'Cross-Origin-Resource-Policy': 'same-origin'
 };
 
+// Sent in production only, and kept out of SECURITY_HEADERS: browsers ignore it over plain HTTP (local development), and
+// a host that terminates TLS itself (Vercel) already adds its own. One year, this host only (no includeSubDomains: other
+// sites on the same domain are not ours to decide for).
+const HSTS = 'max-age=31536000';
+
 function securityHeaders(req, res, next) {
   Object.entries(SECURITY_HEADERS).forEach(([k, v]) => res.setHeader(k, v));
+  if (isProduction()) res.setHeader('Strict-Transport-Security', HSTS);
   next();
 }
 
 // ── Rate limiting ────────────────────────────────────────────────────────
 
+/** How many reverse proxies sit in front of the server (TRUST_PROXY=1 for one load balancer). 0, the default, trusts none. */
+function trustedProxies() {
+  const n = parseInt(process.env.TRUST_PROXY, 10);
+  return Number.isInteger(n) && n > 0 ? Math.min(n, 5) : 0;
+}
+
 function clientIp(req) {
-  // Vercel overwrites x-forwarded-for with the real client address, so it can be trusted there only.
+  const xff = req.headers && req.headers['x-forwarded-for'];
+  // Vercel overwrites x-forwarded-for with the real client address, so it can be trusted there.
   if (process.env.VERCEL === '1') {
-    const xff = req.headers['x-forwarded-for'];
     if (xff) return String(xff).split(',')[0].trim();
+  }
+  // Behind a reverse proxy every request arrives from the proxy's address, so all visitors would share one rate-limit
+  // bucket (and one person could use up the sign-in attempts for everyone). Each proxy appends the address it saw, so with
+  // N trusted proxies the client is the Nth entry from the right; anything further left is whatever the client typed.
+  // Opt-in: without TRUST_PROXY the header is ignored, because a directly reachable server must not believe it.
+  const hops = trustedProxies();
+  if (hops && xff) {
+    const parts = String(xff).split(',').map(x => x.trim()).filter(Boolean);
+    const ip = parts[parts.length - hops];
+    if (ip) return ip;
   }
   return (req.socket && req.socket.remoteAddress) || 'unknown';
 }
@@ -118,6 +140,13 @@ const paperSecret = () => (process.env.PAPER_SECRET || '').trim();
 const safeEqual = (a, b) => crypto.timingSafeEqual(sha256(a), sha256(b));
 const signSession = (secret, exp) => crypto.createHmac('sha256', secret).update(`paper-session|${exp}`).digest('hex');
 
+// "Sign out everywhere": the cookie is stateless, so signing out in one browser cannot reach a copy of it elsewhere.
+// Sessions issued before this moment are refused. routes/paper.js keeps the value in storage and loads it at start-up;
+// 0 (the default) refuses nothing, so cookies issued before this feature existed keep working.
+let sessionsNotBefore = 0;
+const setSessionsNotBefore = ms => { sessionsNotBefore = Number(ms) > 0 ? Number(ms) : 0; };
+const getSessionsNotBefore = () => sessionsNotBefore;
+
 function readCookie(req, name) {
   for (const part of String(req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
@@ -134,6 +163,7 @@ function isPaperOwner(req, now = Date.now()) {
   if (bearer) return safeEqual(bearer[1].trim(), secret);
   const m = /^(\d{13})\.([0-9a-f]{64})$/.exec(readCookie(req, PAPER_COOKIE));
   if (!m || Number(m[1]) < now) return false;
+  if (Number(m[1]) - PAPER_SESSION_MS < sessionsNotBefore) return false; // issued before "sign out everywhere"
   return safeEqual(m[2], signSession(secret, m[1]));
 }
 
@@ -229,9 +259,14 @@ module.exports = {
   isPaperOwner,
   paperSignIn,
   paperSignOutCookie,
+  setSessionsNotBefore,
+  getSessionsNotBefore,
   requirePaperOwner,
   paperSecret,
   clientIp,
+  trustedProxies,
+  HSTS,
+  PUBLIC_ERRORS,
   isProduction,
   isValidExpiry,
   isValidDate,

@@ -3,6 +3,7 @@
 //   GET    /session                      { configured, signedIn }
 //   POST   /session                      { secret } -> sets the session cookie
 //   DELETE /session                      signs out
+//   POST   /session/revoke-all           signs out every browser (ends all sessions issued so far)
 //   GET    /market?expiry=&symbol=       option chain for the order ticket (nearest four expiries; NIFTY or SENSEX)
 //   GET    /accounts                     list (creates the default account on first use)
 //   POST   /accounts                     { id, name, startingCapital, symbol } (symbol NIFTY by default, or SENSEX)
@@ -16,6 +17,7 @@
 //   POST   /accounts/:id/keys            { label, scope } -> the new key, shown once
 //   DELETE /accounts/:id/keys/:keyId     revoke
 //   POST   /accounts/:id/agents          { paused } pause or resume agent trading on the account
+//   POST   /accounts/:id/risk            { maxDailyLoss } rupees, or null for none: the account's daily loss limit
 //   GET    /strategies                   saved strategies and the presets
 //   POST   /strategies                   { strategy } save a new one
 //   PUT    /strategies/:sid              { strategy } replace a saved one
@@ -31,7 +33,10 @@
 //   /v1/...                              the agent API (routes/paperAgent.js), authenticated by agent key instead
 
 const express = require('express');
-const { rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError } = require('../middleware/security');
+const {
+  rateLimit, requirePaperOwner, isPaperOwner, paperSignIn, paperSignOutCookie, paperSecret, isProduction, isPlausibleExpiry, sendError,
+  setSessionsNotBefore, getSessionsNotBefore
+} = require('../middleware/security');
 const { defaultService, ID_RE } = require('../services/paper/paperAccounts');
 const { defaultStrategyService } = require('../services/paper/paperStrategies');
 const { createLiveService } = require('../services/paper/strategyLive');
@@ -69,7 +74,7 @@ const STATUS = {
   NOT_FOUND: 404, BUSY: 409, EXISTS: 409, TOO_MANY_ACCOUNTS: 409, TOO_MANY_KEYS: 409,
   BAD_ID: 400, BAD_CAPITAL: 400, BAD_NAME: 400, BAD_LABEL: 400, BAD_SCOPE: 400, BAD_STRATEGY: 400, TOO_MANY_STRATEGIES: 409,
   TOO_MANY_DEPLOYMENTS: 409, ACCOUNT_IN_USE: 409, BAD_STATUS: 400, STOPPED: 409, NOT_STOPPED: 409,
-  BAD_SYMBOL: 400, WRONG_INDEX: 409
+  BAD_SYMBOL: 400, WRONG_INDEX: 409, BAD_LIMIT: 400
 };
 
 /** Known, user-facing errors keep their message; anything else is logged and hidden. */
@@ -81,6 +86,29 @@ function fail(res, err, context) {
 const validId = (req, res, next) => (ID_RE.test(req.params.id) ? next() : res.status(400).json({ ok: false, error: 'Bad account id.' }));
 
 // ── session ──
+
+// "Sign out everywhere" is one timestamp in storage: sessions issued before it are refused (middleware/security.js).
+// It is read once per process, before the first request that needs it and at start-up for the browser socket. If storage
+// cannot be read the value stays unknown and is asked for again on the next request; meanwhile nothing is refused.
+const SESSION_EPOCH_KEY = 'pt:sessions:notbefore';
+let epochStore = null;
+const sessionStore = () => epochStore || require('../services/storage/storage');
+let epochLoaded = false;
+let epochLoading = null;
+function loadSessionEpoch() {
+  if (epochLoaded) return Promise.resolve();
+  if (!epochLoading) {
+    epochLoading = sessionStore().get(SESSION_EPOCH_KEY)
+      .then(v => { setSessionsNotBefore(Math.max(getSessionsNotBefore(), Number(v) || 0)); epochLoaded = true; })
+      .catch(err => console.error('paper sessions: could not read the sign-out marker:', err.message))
+      .finally(() => { epochLoading = null; });
+  }
+  return epochLoading;
+}
+router.loadSessionEpoch = loadSessionEpoch;
+/** Test hook: use this store for the marker and forget what was loaded. */
+router.setSessionStore = s => { epochStore = s; epochLoaded = false; epochLoading = null; setSessionsNotBefore(0); };
+router.use((req, res, next) => { loadSessionEpoch().then(() => next(), () => next()); });
 
 router.get('/session', (req, res) => {
   res.json({ ok: true, configured: !!paperSecret() || !isProduction(), signedIn: isPaperOwner(req), needsSecret: !!paperSecret() });
@@ -103,6 +131,20 @@ router.delete('/session', (req, res) => {
   res.json({ ok: true, signedIn: false });
 });
 
+// Ends every session issued so far, on every device (a copied or forgotten cookie included), and this one with them.
+// `Authorization: Bearer <PAPER_SECRET>` is not a session and keeps working: change the secret to cut that off.
+router.post('/session/revoke-all', requirePaperOwner, async (req, res) => {
+  const at = Date.now();
+  try {
+    await sessionStore().set(SESSION_EPOCH_KEY, String(at));
+  } catch (err) {
+    return sendError(res, 502, 'Error saving the sign-out marker', err); // not saved: say so rather than pretend
+  }
+  setSessionsNotBefore(at);
+  res.set('Set-Cookie', paperSignOutCookie());
+  res.json({ ok: true, signedIn: false, revokedAt: at });
+});
+
 // the agent API authenticates with its own keys, so it sits before the owner gate
 router.use('/v1', require('./paperAgent')(svc, strategies));
 
@@ -120,10 +162,11 @@ const views = {
       const last = await svc().lastTickAt().catch(() => 0);
       if (Date.now() - last > CRON_GRACE_MS) await svc().tick().catch(e => console.error('paper tick from page failed:', e.message));
     }
-    const { summary, state } = await svc().getSummary(id);
+    const { summary, state, risk } = await svc().getSummary(id);
     return {
       ok: true,
       agentsPaused: !!state.agentsPaused,
+      risk: risk || null,
       summary,
       orders: state.orders.slice(-150).reverse(),
       trades: state.trades.slice(-150).reverse(),
@@ -266,6 +309,16 @@ router.post('/accounts/:id/agents', validId, async (req, res) => {
     res.json({ ok: true, paused: req.body.paused });
   } catch (err) {
     return fail(res, err, 'Error updating agent switch');
+  }
+});
+
+router.post('/accounts/:id/risk', validId, async (req, res) => {
+  const v = (req.body || {}).maxDailyLoss;
+  if (v !== null && typeof v !== 'number') return res.status(400).json({ ok: false, code: 'BAD_LIMIT', error: 'maxDailyLoss must be a number of rupees, or null for no limit.' });
+  try {
+    res.json({ ok: true, risk: await svc().setRiskLimits(req.params.id, { maxDailyLoss: v }) });
+  } catch (err) {
+    return fail(res, err, 'Error saving the daily loss limit');
   }
 });
 
